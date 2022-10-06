@@ -109,6 +109,14 @@ pipeline {
                 """
             }
         }
+        
+        state('IntegrationTests') {
+            steps {
+                sh """
+                pytest tests/integration --firmware <firmware.bin to test>
+                """
+            }
+        }
     }
 
     post {
