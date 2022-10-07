@@ -111,7 +111,7 @@ pipeline {
             }
         }
         
-        state('IntegrationTests') {
+        stage('IntegrationTests') {
             steps {
                 sh """
                 python3 -m pip tests/integration/requirements.txt
