@@ -7,5 +7,7 @@ RUN pip3 install pre-commit ecdsa littlefs-python
 WORKDIR /work
 ADD utils/bootstrap.py utils/bootstrap.py
 ADD utils/debug utils/debug
+ADD utils/simulator utils/simulator
+ADD tests/integration tests/integration
 RUN gcc --version
 RUN python3 utils/bootstrap.py && rm -rf utils

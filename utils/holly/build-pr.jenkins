@@ -44,6 +44,7 @@ pipeline {
                     // required configurations
                     def configurations = [
                         [preset: "mini", build_type: "release", bootloader: "yes"],
+                        [preset: "mini", build_type: "release", bootloader: "no"],
                     ]
 
                     // prepare version suffix
@@ -113,7 +114,8 @@ pipeline {
         state('IntegrationTests') {
             steps {
                 sh """
-                pytest tests/integration --firmware <firmware.bin to test>
+                python3 -m pip tests/integration/requirements.txt
+                pytest tests/integration --firmware build/mini_release_noboot/firmware.bin
                 """
             }
         }
