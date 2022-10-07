@@ -114,7 +114,7 @@ pipeline {
         stage('IntegrationTests') {
             steps {
                 sh """
-                python3 -m pip tests/integration/requirements.txt
+                pip install -r tests/integration/requirements.txt
                 pytest tests/integration --firmware build/mini_release_noboot/firmware.bin
                 """
             }
