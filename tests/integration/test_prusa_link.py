@@ -28,7 +28,7 @@ async def wui_client(printer):
 def valid_headers():
     return {'X-Api-Key': '0123456789'}
 
-@pytest.mark.skip()
+
 async def test_web_interface_is_accessible(wui_client: aiohttp.ClientSession):
     response = await wui_client.get('/')
     assert response.ok
@@ -52,7 +52,7 @@ async def test_not_found(wui_client: aiohttp.ClientSession):
     response = await wui_client.get('/api/not', headers=valid_headers())
     assert response.status == 404
 
-@pytest.mark.skip()
+
 async def test_auth(wui_client: aiohttp.ClientSession):
     # Not getting in when no X-Api-Kep is present.
     all_endpoints = ['version', 'printer', 'job']
@@ -77,14 +77,14 @@ async def test_auth(wui_client: aiohttp.ClientSession):
         assert response.headers["CONTENT-TYPE"] == 'application/json'
         await response.json()  # Tries to parse and throws if fails decoding
 
-@pytest.mark.skip()
+
 async def test_idle_version(wui_client: aiohttp.ClientSession):
     version_r = await wui_client.get('/api/version', headers=valid_headers())
     version = await version_r.json()
     for exp in ["text", "hostname", "api", "server"]:
         assert exp in version
 
-@pytest.mark.skip()
+
 async def test_idle_printer_api(wui_client: aiohttp.ClientSession):
     printer_r = await wui_client.get('/api/printer', headers=valid_headers())
     printer_j = await printer_r.json()
@@ -97,7 +97,7 @@ async def test_idle_printer_api(wui_client: aiohttp.ClientSession):
     assert printer_j["state"]["text"] == "Operational"
     assert not printer_j["state"]["flags"]["printing"]
 
-@pytest.mark.skip()
+
 async def test_idle_job(wui_client: aiohttp.ClientSession):
     job_r = await wui_client.get('/api/job', headers=valid_headers())
     job = await job_r.json()
@@ -315,7 +315,7 @@ async def test_upload(wui_client: aiohttp.ClientSession):
     await screen.wait_for_text(printer, 'empty.gcode')
     # TODO: Turn off printer and see that the file appeared on the flash drive.
 
-@pytest.mark.skip()
+
 async def test_upload_notauth(wui_client: aiohttp.ClientSession):
     data = aiohttp.FormData()
     data.add_field('file', b'', filename='empty.gcode')
