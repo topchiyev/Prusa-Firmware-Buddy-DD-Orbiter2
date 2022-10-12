@@ -83,20 +83,26 @@ class Simulator:
         process = await asyncio.create_subprocess_exec(
             str(simulator_path), *params, stdout=asyncio.subprocess.PIPE)
 
+        logger.info('Simulator process started')
+
         # connect over tcp to scriptio console
         process_start_timestamp = asyncio.get_event_loop().time()
         while asyncio.get_event_loop().time() - process_start_timestamp < 10.0:
             try:
+                logger.info('Trying to open connection')
                 scriptio_reader, scriptio_writer = await asyncio.open_connection(
                     'localhost', scriptio_port)
-            except OSError:
+            except OSError as err:
+                logger.info('Connection error occured: %s', err)
                 continue
             else:
+                logger.info('Connection opened.')
                 break
 
         # even in no-echo mode, the scriptio console currently prints one line at the beginning
         # so lets read it
         await scriptio_reader.readline()
+        logger.info('ScriptIO line read...')
 
         # start parsing stdout/logs
         logs = Publisher()
@@ -111,6 +117,7 @@ class Simulator:
         logs_task = asyncio.ensure_future(parse_simulator_stdout())
 
         # yield the simulator to the callee
+        logger.info('Creating simulator...')
         try:
             yield Simulator(process=process,
                             machine=machine,
