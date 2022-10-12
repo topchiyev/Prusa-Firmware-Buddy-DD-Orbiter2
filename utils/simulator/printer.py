@@ -3,12 +3,12 @@ from enum import Enum, auto
 from PIL import Image
 
 if sys.version_info < (3, 8):
-    from typing import Protocol
-else:
     # Protocol isn't available on Python < 3.8
     # More pythonic way would be to catch ImportError, but this breaks pyright analysis
     class Protocol:
         pass
+else:
+    from typing import Protocol
 
 
 class MachineType(Enum):
