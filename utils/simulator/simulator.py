@@ -85,6 +85,15 @@ class Simulator:
 
         logger.info('Simulator process started')
 
+        async def parse_simulator_stdout():
+            while process.stdout and not process.stdout.at_eof():
+                line = (await
+                        process.stdout.readline()).decode('utf-8').strip()
+                logger.info('%s', line)
+                await logs.publish(line)
+
+        logs_task = asyncio.ensure_future(parse_simulator_stdout())
+
         # connect over tcp to scriptio console
         process_start_timestamp = asyncio.get_event_loop().time()
         while asyncio.get_event_loop().time() - process_start_timestamp < 10.0:
@@ -106,15 +115,6 @@ class Simulator:
 
         # start parsing stdout/logs
         logs = Publisher()
-
-        async def parse_simulator_stdout():
-            while process.stdout and not process.stdout.at_eof():
-                line = (await
-                        process.stdout.readline()).decode('utf-8').strip()
-                logger.info('%s', line)
-                await logs.publish(line)
-
-        logs_task = asyncio.ensure_future(parse_simulator_stdout())
 
         # yield the simulator to the callee
         logger.info('Creating simulator...')
