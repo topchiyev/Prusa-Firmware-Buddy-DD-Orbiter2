@@ -100,6 +100,7 @@ pipeline {
                                 """
                             }
                         }
+                    stash name: "artifacts", includes: "build/mini_release_noboot/**/*"
                     }
                 }
             }
@@ -135,9 +136,10 @@ pipeline {
                 }
             }
             steps {
+                unstash "artifacts"
                 sh """
                 python3 -m pip install -r tests/integration/requirements.txt
-                #python3 -m pytest tests/integration --firmware build/mini_release_noboot/firmware.bin --log-cli-level info
+                python3 -m pytest tests/integration --firmware build/mini_release_noboot/firmware.bin --log-cli-level info
                 """
             }
         }
