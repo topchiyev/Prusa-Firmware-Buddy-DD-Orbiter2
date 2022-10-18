@@ -145,10 +145,12 @@ pipeline {
 
     post {
         always {
-            // archive build products
-            archiveArtifacts artifacts: 'build/products/*', fingerprint: true
-            // archive test products
-            archiveArtifacts artifacts: 'build-test/Testing/Temporary/LastTest.log'
+            node('master') {
+                // archive build products
+                archiveArtifacts artifacts: 'build/products/*', fingerprint: true
+                // archive test products
+                archiveArtifacts artifacts: 'build-test/Testing/Temporary/LastTest.log'
+            }
         }
         cleanup {
             deleteDir()
