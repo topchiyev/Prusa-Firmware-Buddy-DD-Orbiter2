@@ -96,13 +96,12 @@ class Simulator:
 
         # connect over tcp to scriptio console
         process_start_timestamp = asyncio.get_event_loop().time()
+        logger.info('Trying to open connection')
         while asyncio.get_event_loop().time() - process_start_timestamp < 10.0:
             try:
-                logger.info('Trying to open connection')
                 scriptio_reader, scriptio_writer = await asyncio.open_connection(
                     'localhost', scriptio_port)
             except OSError as err:
-                logger.info('Connection error occured: %s', err)
                 continue
             else:
                 logger.info('Connection opened.')
