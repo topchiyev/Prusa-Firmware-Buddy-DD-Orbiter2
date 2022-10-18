@@ -100,7 +100,7 @@ pipeline {
                                 """
                             }
                         }
-                    stash name: "artifacts", includes: "build/mini_release_noboot/**/*"
+                    stash name: "artifacts", includes: "build/**/*"
                     }
                 }
             }
