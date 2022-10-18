@@ -150,7 +150,6 @@ pipeline {
                 archiveArtifacts artifacts: 'build/products/*', fingerprint: true
                 // archive test products
                 archiveArtifacts artifacts: 'build-test/Testing/Temporary/LastTest.log'
-                emailext body: 'Pipeline finished', recipientProviders: [[$class: 'RequesterRecipientProvider']], subject: 'Pipeline status update'
             }
         }
         cleanup {
