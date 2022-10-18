@@ -130,8 +130,8 @@ pipeline {
             agent {
                 dockerfile {
                     label 'docker'
-                    filename 'utils/holly/Dockerfile'
-                    additionalBuildArgs '-t prusa-firmware-buddy'
+                    filename 'utils/holly/IntegrationTestsDockerfile'
+                    additionalBuildArgs '-t it-prusa-firmware-buddy'
                 }
             }
             steps {
