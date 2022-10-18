@@ -9,7 +9,7 @@ RUN apt-get clean && \
     apt-get install librbd-dev librdmacm-dev && \
     apt-get install libsasl2-dev libsdl2-dev libseccomp-dev libsnappy-dev libssh-dev && \
     apt-get install libvde-dev libvdeplug-dev libvte-2.91-dev libxen-dev liblzo2-dev && \
-    apt-get install valgrind xfslibs-dev
+    apt-get install valgrind xfslibs-dev && \
     apt-get install libgl1 libglu1 freeglut3 libglew2.1 libepoxy-dev multiarch-support libusb-1.0-0-dev
 RUN pip3 install --upgrade pip
 WORKDIR /work
