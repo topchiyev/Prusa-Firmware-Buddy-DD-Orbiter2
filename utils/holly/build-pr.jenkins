@@ -139,7 +139,7 @@ pipeline {
                 unstash "artifacts"
                 sh """
                 python3 -m pip install -r tests/integration/requirements.txt
-                python3 -m pytest tests/integration --firmware build/mini_release_noboot/firmware.bin --log-cli-level info
+                python3 -m pytest tests/integration --firmware build/mini_release_noboot/firmware.bin --log-cli-level info --log-cli-format="%(asctime)s [%(levelname)8s] (%(filename)s:%(lineno)s) %(message)s" --log-cli-date-format="%Y-%m-%d %H:%M:%S"
                 """
             }
         }
