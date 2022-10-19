@@ -29,4 +29,4 @@ WORKDIR /work
 ADD utils/bootstrap.py utils/bootstrap.py
 ADD utils/debug utils/debug
 RUN python3 utils/bootstrap.py && rm -rf utils
-python3 -m pip install pytest pytest-asyncio easyocr aiohttp
+RUN python3 -m pip install pytest pytest-asyncio easyocr aiohttp
