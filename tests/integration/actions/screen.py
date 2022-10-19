@@ -43,11 +43,9 @@ async def wait_for(condition):
 
 @timeoutable
 async def wait_for_text(printer: Printer, text):
-    logger.info('Waiting for text start...')
     while True:
         text_on_screen = await read(printer)
         if text in text_on_screen:
-            logger.info('Waiting for text end...')
             return text_on_screen
 
 

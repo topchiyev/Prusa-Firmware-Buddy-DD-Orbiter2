@@ -285,7 +285,7 @@ async def test_caching(printer_with_files):
         get1 = await printer_with_files.get(path, headers=h)
         assert get1.status == 200
         print(dict(get1.headers))
-        etag = get1.headers['ETag']
+        etag = get1.headers['Etag']
 
         # Match
         h['If-None-Match'] = etag
