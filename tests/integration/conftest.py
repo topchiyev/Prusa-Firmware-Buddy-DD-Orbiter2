@@ -119,7 +119,7 @@ async def prepare_xflash_content(firmware_path, basic_printer_arguments,
                              mount_dir_as_flash=flash_dir,
                              xflash_content=flash) as printer:
         try:
-            await asyncio.wait_for(wait_for_bootstrap(printer), timeout=420.0)
+            await asyncio.wait_for(wait_for_bootstrap(printer), timeout=600.0)
         except asyncio.TimeoutError:
             pytest.fail('timed out while waiting for xflash bootstrap')
 
