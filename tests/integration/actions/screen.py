@@ -17,7 +17,7 @@ async def take_screenshot(printer: Printer) -> Image.Image:
 
 
 async def read(printer: Printer):
-    ocr_reader = Reader(['en'])
+    ocr_reader = Reader(['en'], verbose=False)
     screenshot = await take_screenshot(printer)
     screenshot_io = io.BytesIO()
     screenshot.save(screenshot_io, format='PNG')
@@ -32,13 +32,6 @@ async def read(printer: Printer):
     text = ' '.join(words)
     logger.info('text on screen: %s', text)
     return text
-
-
-@timeoutable
-async def wait_for(condition):
-    while True:
-        if await condition():
-            break
 
 
 @timeoutable
