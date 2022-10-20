@@ -110,7 +110,7 @@ async def test_idle_job(wui_client: aiohttp.ClientSession):
 async def printer_with_files(printer_factory, printer_flash_dir, data_dir):
     gcode_name = 'box.gcode'
     gcode = (data_dir / gcode_name).read_bytes()
-    Path(printer_flash_dir / gcode_name).write_bytes(gcode)
+    (printer_flash_dir / gcode_name).write(gcode)
 
     async with printer_factory() as printer:
         printer: Printer
