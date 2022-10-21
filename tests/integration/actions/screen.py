@@ -24,11 +24,7 @@ async def read(printer: Printer):
     logger.info("Screenshot taken, saving...")
     screenshot.save(screenshot_io, format='PNG')
     logger.info("Screenshot saved, starting OCR...")
-    boxes = await asyncio.get_event_loop().run_in_executor(
-        None,
-        functools.partial(ocr_reader.readtext,
-                          screenshot_io.getvalue(),
-                          detail=0))
+    boxes = ocr_reader.readtext(screenshot_io.getvalue(), detail=0)
     logger.info("OCR finished...")
     words = []
     for box in boxes:
