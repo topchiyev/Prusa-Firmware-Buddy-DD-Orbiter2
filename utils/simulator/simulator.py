@@ -145,9 +145,7 @@ class Simulator:
                 if line.strip() == 'ScriptHost: Script FINISHED':
                     break
 
-        logger.info("Starting command: %s" % command)
         await asyncio.gather(issue_command(), wait_for_script_finished_line())
-        logger.info("Command finished: %s" % command)
 
         if readline:
             line = await self.scriptio_reader.readline()

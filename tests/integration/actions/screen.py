@@ -18,18 +18,14 @@ async def take_screenshot(printer: Printer) -> Image.Image:
 
 async def read(printer: Printer):
     ocr_reader = Reader(['en'], verbose=False)
-    logger.info("Starting screenshot...")
     screenshot = await take_screenshot(printer)
     screenshot_io = io.BytesIO()
-    logger.info("Screenshot taken, saving...")
     screenshot.save(screenshot_io, format='PNG')
-    logger.info("Screenshot saved, starting OCR...")
     boxes = await asyncio.get_event_loop().run_in_executor(
         None,
         functools.partial(ocr_reader.readtext,
                           screenshot_io.getvalue(),
                           detail=0))
-    logger.info("OCR finished...")
     words = []
     for box in boxes:
         words += [word.strip() for word in box.split()]
