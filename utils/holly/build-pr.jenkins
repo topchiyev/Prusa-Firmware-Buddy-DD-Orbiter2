@@ -126,7 +126,7 @@ pipeline {
                 """
             }
         }
-        
+        /*
         stage('IntegrationTests') {
             agent {
                 dockerfile {
@@ -142,7 +142,7 @@ pipeline {
                 python3 -m pytest tests/integration --firmware build/mini_release_noboot/firmware.bin --log-cli-level info --log-cli-format="%(asctime)s [%(levelname)8s] (%(filename)s:%(lineno)s) %(message)s" --log-cli-date-format="%Y-%m-%d %H:%M:%S"
                 """
             }
-        }
+        }*/
     }
 
     post {
@@ -152,6 +152,11 @@ pipeline {
                 archiveArtifacts artifacts: 'build/products/*', fingerprint: true
                 // archive test products
                 archiveArtifacts artifacts: 'build-test/Testing/Temporary/LastTest.log'
+                emailext(
+                    subject: "Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' finished",
+                    body: "<p>Finished</p>",
+                    recipientProviders: [[$class: 'RequesterRecipientProvider']]
+                )
             }
         }
         cleanup {
