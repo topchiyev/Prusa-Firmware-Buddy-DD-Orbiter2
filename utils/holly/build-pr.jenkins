@@ -155,7 +155,7 @@ pipeline {
                 emailext(
                     subject: "Job '${env.JOB_NAME} [${env.BUILD_NUMBER}]' finished",
                     body: "<p>Finished</p>",
-                    recipientProviders: [[$class: 'RequesterRecipientProvider']]
+                    recipientProviders: [[$class: 'ContributorMetadataRecipientProvider'], [$class: 'CulpritsRecipientProvider']]
                 )
             }
         }
