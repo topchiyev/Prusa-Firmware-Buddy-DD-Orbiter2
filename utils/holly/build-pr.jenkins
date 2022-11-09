@@ -153,9 +153,11 @@ pipeline {
                 // archive test products
                 archiveArtifacts artifacts: 'build-test/Testing/Temporary/LastTest.log'
                 emailext(
+                    from: "holly@prusa3d.com",
+                    to: "${env.CHANGE_AUTHOR_EMAIL}",
+                    recipientProviders: [[$class: 'DevelopersRecipientProvider']],
                     subject: "Jenkins Build ${currentBuild.currentResult}: Job ${env.JOB_NAME}",
-                    body: "${currentBuild.currentResult}: Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.BUILD_URL}",
-                    recipientProviders: [[$class: 'ContributorMetadataRecipientProvider'], [$class: 'CulpritsRecipientProvider']]
+                    body: "${currentBuild.currentResult}: Job ${env.JOB_NAME} build ${env.BUILD_NUMBER}\n More info at: ${env.JOB_DISPLAY_URL}"
                 )
             }
         }
