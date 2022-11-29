@@ -3,7 +3,7 @@ import logging
 import functools
 import io
 
-from easyocr import Reader
+import tesserocr
 from PIL import Image
 
 from simulator import Printer, MachineType
@@ -17,19 +17,11 @@ async def take_screenshot(printer: Printer) -> Image.Image:
 
 
 async def read(printer: Printer):
-    ocr_reader = Reader(['en'], verbose=False)
     screenshot = await take_screenshot(printer)
-    screenshot_io = io.BytesIO()
-    screenshot.save(screenshot_io, format='PNG')
-    boxes = await asyncio.get_event_loop().run_in_executor(
+    text = await asyncio.get_event_loop().run_in_executor(
         None,
-        functools.partial(ocr_reader.readtext,
-                          screenshot_io.getvalue(),
-                          detail=0))
-    words = []
-    for box in boxes:
-        words += [word.strip() for word in box.split()]
-    text = ' '.join(words)
+        functools.partial(tesserocr.image_to_text,
+                          screenshot))
     logger.info('text on screen: %s', text)
     return text
 
