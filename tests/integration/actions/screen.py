@@ -4,7 +4,9 @@ import functools
 import io
 from time import sleep
 
+from easyocr import Reader
 import pytesseract
+import tesserocr
 from PIL import Image
 
 from simulator import Printer, MachineType
@@ -22,8 +24,27 @@ async def read(printer: Printer):
     text = await asyncio.get_event_loop().run_in_executor(
         None,
         functools.partial(getData, screenshot))
-    logger.info('text on screen: %s', text)
-    sleep(1)
+    logger.info('Pytesseract: text on screen: %s', text)
+    
+    text = await asyncio.get_event_loop().run_in_executor(
+        None,
+        functools.partial(tesserocr.image_to_text, screenshot))
+    logger.info('TesserOCR: text on screen: %s', text)
+    
+    ocr_reader = Reader(['en'], verbose=False)
+    screenshot_io = io.BytesIO()
+    screenshot.save(screenshot_io, format='PNG')
+    boxes = await asyncio.get_event_loop().run_in_executor(
+        None,
+        functools.partial(ocr_reader.readtext,
+                          screenshot_io.getvalue(),
+                          detail=0))
+    words = []
+    for box in boxes:
+        words += [word.strip() for word in box.split()]
+    text = ' '.join(words)
+    logger.info('EasyOCR: text on screen: %s', text)
+    
     return text
 
 
