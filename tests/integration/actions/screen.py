@@ -2,8 +2,9 @@ import asyncio
 import logging
 import functools
 import io
+from time import sleep
 
-import tesserocr
+import pytesseract
 from PIL import Image
 
 from simulator import Printer, MachineType
@@ -20,11 +21,26 @@ async def read(printer: Printer):
     screenshot = await take_screenshot(printer)
     text = await asyncio.get_event_loop().run_in_executor(
         None,
-        functools.partial(tesserocr.image_to_text,
-                          screenshot))
+        functools.partial(getData, screenshot))
     logger.info('text on screen: %s', text)
+    sleep(1)
     return text
 
+
+def getData(image):
+    text = pytesseract.image_to_string(image)
+    return ' '.join(text.split())
+    # with tesserocr.PyTessBaseAPI() as api:
+    #     api.SetImage(image)
+    #     boxes = api.GetComponentImages(tesserocr.RIL.TEXTLINE, True)
+    #     words = []
+    #     logger.info('Found {} textline image components.'.format(len(boxes)))
+    #     for i, (im, box, _, _) in enumerate(boxes):
+    #         api.SetRectangle(box['x'], box['y'], box['w'], box['h'])
+    #         word = api.GetUTF8Text()
+    #         logger.info('Word: {}'.format(word))
+    #         words += [word.strip()]
+    #     return ' '.join(words)
 
 @timeoutable
 async def wait_for_text(printer: Printer, text):
