@@ -21,18 +21,21 @@ async def take_screenshot(printer: Printer) -> Image.Image:
 
 async def read(printer: Printer):
     screenshot = await take_screenshot(printer)
-    text = await asyncio.run(
+    text = await asyncio.get_event_loop().run_in_executor(
+        None,
         functools.partial(pytesseract.image_to_string, screenshot))
     logger.info('Pytesseract: text on screen: %s', ' '.join(text.split()))
     
-    text = await asyncio.run(
+    text = await asyncio.get_event_loop().run_in_executor(
+        None,
         functools.partial(tesserocr.image_to_text, screenshot))
     logger.info('TesserOCR: text on screen: %s', ' '.join(text.split()))
     
     ocr_reader = Reader(['en'], verbose=False)
     screenshot_io = io.BytesIO()
     screenshot.save(screenshot_io, format='PNG')
-    boxes = await asyncio.run(
+    boxes = await asyncio.get_event_loop().run_in_executor(
+        None,
         functools.partial(ocr_reader.readtext,
                           screenshot_io.getvalue(),
                           detail=0))
