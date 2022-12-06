@@ -19,6 +19,8 @@ async def take_screenshot(printer: Printer) -> Image.Image:
 
 async def read(printer: Printer):
     screenshot = await take_screenshot(printer)
+    width, height = screenshot.size
+    screenshot = screenshot.resize((width * 2, height * 2))
     text = await asyncio.get_event_loop().run_in_executor(
         None,
         functools.partial(tesserocr.image_to_text, screenshot))
