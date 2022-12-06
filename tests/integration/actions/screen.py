@@ -4,8 +4,6 @@ import functools
 import io
 from time import sleep
 
-from easyocr import Reader
-import pytesseract
 import tesserocr
 from PIL import Image
 
@@ -23,45 +21,12 @@ async def read(printer: Printer):
     screenshot = await take_screenshot(printer)
     text = await asyncio.get_event_loop().run_in_executor(
         None,
-        functools.partial(pytesseract.image_to_string, screenshot))
-    logger.info('Pytesseract: text on screen: %s', ' '.join(text.split()))
-    
-    text = await asyncio.get_event_loop().run_in_executor(
-        None,
         functools.partial(tesserocr.image_to_text, screenshot))
-    logger.info('TesserOCR: text on screen: %s', ' '.join(text.split()))
-    
-    ocr_reader = Reader(['en'], verbose=False)
-    screenshot_io = io.BytesIO()
-    screenshot.save(screenshot_io, format='PNG')
-    boxes = await asyncio.get_event_loop().run_in_executor(
-        None,
-        functools.partial(ocr_reader.readtext,
-                          screenshot_io.getvalue(),
-                          detail=0))
-    words = []
-    for box in boxes:
-        words += [word.strip() for word in box.split()]
     text = ' '.join(words)
-    logger.info('EasyOCR: text on screen: %s', text)
+    logger.info('text on screen: %s', text)
     
     return text
 
-
-def getData(image):
-    text = pytesseract.image_to_string(image)
-    return ' '.join(text.split())
-    # with tesserocr.PyTessBaseAPI() as api:
-    #     api.SetImage(image)
-    #     boxes = api.GetComponentImages(tesserocr.RIL.TEXTLINE, True)
-    #     words = []
-    #     logger.info('Found {} textline image components.'.format(len(boxes)))
-    #     for i, (im, box, _, _) in enumerate(boxes):
-    #         api.SetRectangle(box['x'], box['y'], box['w'], box['h'])
-    #         word = api.GetUTF8Text()
-    #         logger.info('Word: {}'.format(word))
-    #         words += [word.strip()]
-    #     return ' '.join(words)
 
 @timeoutable
 async def wait_for_text(printer: Printer, text):
