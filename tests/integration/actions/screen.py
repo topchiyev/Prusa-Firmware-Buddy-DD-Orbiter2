@@ -22,8 +22,9 @@ async def read(printer: Printer):
     text = await asyncio.get_event_loop().run_in_executor(
         None,
         functools.partial(tesserocr.image_to_text, screenshot))
-    text = ' '.join(words)
+    text = ' '.join(text.split())
     logger.info('text on screen: %s', text)
+    sleep(1)
     
     return text
 
