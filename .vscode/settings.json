@@ -19,5 +19,6 @@
     "cmake.buildDirectory": "${workspaceFolder}/build-vscode",
     "cmake.cmakePath": "${workspaceFolder}/.dependencies/cmake-3.21.3/bin/cmake",
     "cmake.generator": "Ninja",
-    "files.insertFinalNewline": true
+    "files.insertFinalNewline": true,
+    "C_Cpp.default.compilerPath": ""
 }
