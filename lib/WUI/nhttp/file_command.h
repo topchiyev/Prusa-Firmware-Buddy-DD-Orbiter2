@@ -1,10 +1,11 @@
 #pragma once
 
-#include "types.h"
 #include "status_page.h"
 
 // Why does FILE_PATH_BUFFER_LEN lives in *gui*!?
 #include "../../src/gui/file_list_defs.h"
+
+#include <http/types.h>
 
 #include <array>
 #include <string_view>
@@ -56,4 +57,4 @@ public:
     handler::Step step(std::string_view input, bool terminated_by_client, uint8_t *buffer, size_t buffer_size);
 };
 
-}
+} // namespace nhttp::printer
