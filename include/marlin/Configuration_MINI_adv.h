@@ -1589,7 +1589,7 @@
         
         
         //#define E0_CURRENT 400 //520
-        #define E0_CURRENT 700
+        #define E0_CURRENT 1200
 
         #define E0_MICROSTEPS 16 //32
         #define E0_RSENSE 0.22
