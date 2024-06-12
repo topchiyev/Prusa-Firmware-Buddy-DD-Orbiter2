@@ -15,6 +15,8 @@
 #include <math.h>
 #include "guitypes.hpp"
 #include "cmath_ext.h"
+#include <utility_extensions.hpp>
+#include "font_character_sets.hpp"
 
 // just to test the FW with fonts - will be refactored
 struct FCIndex {
@@ -22,38 +24,67 @@ struct FCIndex {
     uint8_t charX, charY;
 };
 
-static constexpr const FCIndex fontCharIndices[] =
-#include "fnt-indices.ipp"
-    static constexpr const uint32_t fontCharIndicesNumItems = sizeof(fontCharIndices) / sizeof(FCIndex);
+// clang-format off
+static constexpr const FCIndex font_full_char_indices[] =
+    #include "../guiapi/include/fnt-full-indices.ipp"
+static constexpr const FCIndex font_standard_char_indices[] =
+    #include "../guiapi/include/fnt-standard-indices.ipp"
+static constexpr const FCIndex font_digits_char_indices[] =
+    #include "../guiapi/include/fnt-digits-indices.ipp"
+
+const FCIndex * find_indexed_char(const unichar c, const FCIndex font_indices[], const size_t font_indices_count) {
+    auto cmp = [](const FCIndex &i, unichar ch) { return i.unc < ch; };
+
+    const FCIndex *i = std::lower_bound(font_indices, font_indices + font_indices_count, c, cmp);
+    if (i == font_indices + font_indices_count || i->unc != c) {
+        i = nullptr;
+    }
+    return i;
+}
+// clang-format on
+
+bool hasASCII(FontCharacterSet charset_option) {
+    return charset_option == FontCharacterSet::full || charset_option == FontCharacterSet::standard;
+}
 
 void get_char_position_in_font(unichar c, const font_t *pf, uint8_t *charX, uint8_t *charY) {
     static_assert(sizeof(FCIndex) == 4, "font char indices size mismatch");
-    // convert unichar into font index - all fonts have the same layout, thus this can be computed here
-    // ... and also because doing it in C++ is much easier than in plain C
-    *charX = 15;
-    *charY = 1;
 
     if (c < uint8_t(pf->asc_min)) { // this really happens with non-utf8 characters on filesystems
-        c = '?'; // substitute with a '?' or any other suitable character, which is in the range of the fonts
+        get_char_position_in_font('?', pf, charX, charY);
+        return;
     }
-    // here is intentionally no else
-    if (c < 128) {
-        // normal ASCII character
+
+    if (hasASCII(pf->charset) && c < 127) {
+        // standard ASCII character
+        // This means that fonts with FontCharacterSet::full have to have all standard ASCII characters even though some of them are not used
+        // We take this trade off - we waste a little bit of space, but no lower_bound is necessary for standard character indices
         *charX = (c - pf->asc_min) % 16;
         *charY = (c - pf->asc_min) / 16;
+        return;
+    }
+
+    // extended utf8 character - must search in the font_XXX_char_indices map
+    const FCIndex *i = nullptr;
+
+    switch (pf->charset) {
+    case FontCharacterSet::full:
+        i = find_indexed_char(c, font_full_char_indices, std::size(font_full_char_indices));
+        break;
+    case FontCharacterSet::standard:
+        i = find_indexed_char(c, font_standard_char_indices, std::size(font_standard_char_indices));
+        break;
+    case FontCharacterSet::digits:
+        i = find_indexed_char(c, font_digits_char_indices, std::size(font_digits_char_indices));
+        break;
+    }
+
+    if (!i) {
+        // character not found
+        get_char_position_in_font('?', pf, charX, charY);
     } else {
-        // extended utf8 character - must search in the fontCharIndices map
-        const FCIndex *i = std::lower_bound(fontCharIndices, fontCharIndices + fontCharIndicesNumItems, c, [](const FCIndex &i, unichar ch) {
-            return i.unc < ch;
-        });
-        if (i == fontCharIndices + fontCharIndicesNumItems || i->unc != c) {
-            // character not found
-            *charX = 15; // put '?' as a replacement
-            *charY = 1;
-        } else {
-            *charX = i->charX;
-            *charY = i->charY;
-        }
+        *charX = i->charX;
+        *charY = i->charY;
     }
 }
 
@@ -182,13 +213,14 @@ static RectTextLayout multiline_loop(uint8_t MaxColsInRect, [[maybe_unused]] uin
 
 /// Draws text into the specified rectangle with proper alignment (@flags)
 /// This cannot horizontally align a text spread over more lines (multiline text).
-void render_text_align(Rect16 rc, string_view_utf8 text, const font_t *font, color_t clr_bg, color_t clr_fg, padding_ui8_t padding, text_flags flags, bool fill_rect) {
+void render_text_align(Rect16 rc, string_view_utf8 text, Font f, color_t clr_bg, color_t clr_fg, padding_ui8_t padding, text_flags flags, bool fill_rect) {
+    const font_t *font = resource_font(f);
     Rect16 rc_pad = rc;
     rc_pad.CutPadding(padding);
 
     /// 1st pass reading the string_view_utf8 - font_meas_text also computes the number of utf8 characters (i.e. individual bitmaps) in the input string
     uint16_t strlen_text = 0;
-    const size_ui16_t txt_size = font_meas_text(font, &text, &strlen_text);
+    const size_ui16_t txt_size = font_meas_text(f, &text, &strlen_text);
     if (txt_size.w == 0 || txt_size.h == 0) {
         /// empty text => draw background rectangle only
         if (fill_rect) {
@@ -355,30 +387,12 @@ std::optional<size_ui16_t> characters_meas_text(string_view_utf8 &str, uint16_t 
     return size_ui16_t({ uint16_t(chars_longest_line), uint16_t(row_no + 1) });
 }
 
-/**
- * @brief calculate size of required rectangle
- *
- * @param font                          font
- * @param str                           text to be measured
- * @param max_width                     max returned width
- * @param ret_numOfUTF8Chars            optional return number of characters (use nullptr if not needed)
- * @return std::optional<size_ui16_t>   size of needed rectangle, it might be narrower than max_width
- */
-std::optional<size_ui16_t> font_meas_text(const font_t &font, string_view_utf8 &str, uint16_t max_width, uint16_t *numOfUTF8Chars) {
-    std::optional<size_ui16_t> sz_in_chars = characters_meas_text(str, max_width / font.w, numOfUTF8Chars);
-    if (sz_in_chars) {
-        return size_ui16_t({ uint16_t(font.w * sz_in_chars->w), uint16_t(font.h * sz_in_chars->h) });
-    }
-    return std::nullopt;
-}
-
-// TODO call previous function with max_width == UINT16_MAX
-// currently not called to not break anything
-size_ui16_t font_meas_text(const font_t *pf, string_view_utf8 *str, uint16_t *numOfUTF8Chars) {
+size_ui16_t font_meas_text(Font font, string_view_utf8 *str, uint16_t *numOfUTF8Chars) {
     int x = 0;
     int y = 0;
     int w = 0;
     int h = 0;
+    const font_t *pf = resource_font(font);
     const int8_t char_w = pf->w;
     const int8_t char_h = pf->h;
     *numOfUTF8Chars = 0;

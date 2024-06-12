@@ -1,7 +1,9 @@
 #pragma once
 
-#include <common/shared_buffer.hpp>
+#include "printer.hpp"
 
+#include <common/shared_buffer.hpp>
+#include <device/board.h>
 #include <cstdint>
 #include <string_view>
 #include <variant>
@@ -64,8 +66,35 @@ struct CreateFolder {
     SharedPath path;
 };
 struct StopTransfer {};
+struct SetToken {
+    SharedBorrow token;
+};
+struct ResetPrinter {};
+struct SendStateInfo {};
+struct DialogAction {
+    uint32_t dialog_id;
+    Response response;
+};
 
-using CommandData = std::variant<UnknownCommand, BrokenCommand, GcodeTooLarge, ProcessingOtherCommand, ProcessingThisCommand, Gcode, SendInfo, SendJobInfo, SendFileInfo, SendTransferInfo, PausePrint, ResumePrint, StopPrint, StartPrint, SetPrinterReady, CancelPrinterReady, StartEncryptedDownload, DeleteFile, DeleteFolder, CreateFolder, StopTransfer>;
+#if XL_ENCLOSURE_SUPPORT()
+enum class PropertyName {
+    EnclosureEnabled,
+    EnclosurePrintingFiltration,
+    EnclosurePostPrint,
+    EnclosurePostPrintFiltrationTime,
+};
+
+struct SetValue {
+    PropertyName name;
+    bool bool_value;
+    uint32_t int_value;
+    SharedBorrow str_value;
+};
+
+using CommandData = std::variant<UnknownCommand, BrokenCommand, GcodeTooLarge, ProcessingOtherCommand, ProcessingThisCommand, Gcode, SendInfo, SendJobInfo, SendFileInfo, SendTransferInfo, PausePrint, ResumePrint, StopPrint, StartPrint, SetPrinterReady, CancelPrinterReady, StartEncryptedDownload, DeleteFile, DeleteFolder, CreateFolder, StopTransfer, SetToken, ResetPrinter, SendStateInfo, DialogAction, SetValue>;
+#else
+using CommandData = std::variant<UnknownCommand, BrokenCommand, GcodeTooLarge, ProcessingOtherCommand, ProcessingThisCommand, Gcode, SendInfo, SendJobInfo, SendFileInfo, SendTransferInfo, PausePrint, ResumePrint, StopPrint, StartPrint, SetPrinterReady, CancelPrinterReady, StartEncryptedDownload, DeleteFile, DeleteFolder, CreateFolder, StopTransfer, SetToken, ResetPrinter, SendStateInfo, DialogAction>;
+#endif
 
 struct Command {
     CommandId id;

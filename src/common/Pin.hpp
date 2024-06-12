@@ -113,8 +113,8 @@ public:
         high = GPIO_PinState::GPIO_PIN_SET,
     };
 
-    static constexpr uint16_t IoPinToHal(IoPin ioPin) {
-        return (0x1U << static_cast<uint16_t>(ioPin));
+    static constexpr uint32_t IoPinToHal(IoPin ioPin) {
+        return (0x1U << static_cast<uint32_t>(ioPin));
     }
 
 protected:
@@ -133,7 +133,7 @@ private:
     const uint32_t m_halPortBase;
 
 protected:
-    const uint16_t m_halPin;
+    const uint32_t m_halPin;
     friend class PinChecker;
 };
 
@@ -151,7 +151,7 @@ public:
     static_assert(Pin::IoPinToHal(IoPin::p1) == GPIO_PIN_1, "IoPinToHal broken");
     static_assert(Pin::IoPinToHal(IoPin::p15) == GPIO_PIN_15, "IoPinToHal broken");
     constexpr uint32_t getPort() const { return m_halPortBase; }
-    constexpr uint16_t getPin() const { return m_halPin; }
+    constexpr uint32_t getPin() const { return m_halPin; }
 };
 
 enum class IMode {
@@ -174,7 +174,7 @@ public:
         , m_mode(iMode)
         , m_pull(pull) {}
     State read() const {
-        if ((getHalPort()->IDR & m_halPin) != (uint32_t)GPIO_PIN_RESET) {
+        if ((getHalPort()->IDR & m_halPin) != static_cast<uint32_t>(GPIO_PIN_RESET)) {
             return State::high;
         } else {
             return State::low;
@@ -250,7 +250,7 @@ public:
         : InterruptPin(ioPort, ioPin, iMode, pull, preemptPriority, subPriority) {}
 
     State read() const {
-        if ((getHalPort()->IDR & m_halPin) != (uint32_t)GPIO_PIN_RESET) {
+        if ((getHalPort()->IDR & m_halPin) != static_cast<uint32_t>(GPIO_PIN_RESET)) {
             return State::low;
         } else {
             return State::high;
@@ -289,11 +289,18 @@ enum class OSpeed : uint8_t {
 
 class OutputPin : protected Pin {
 public:
+    constexpr OutputPin(Pin pin, State initState, OMode oMode, OSpeed oSpeed)
+        : Pin(pin)
+        , m_initState(initState)
+        , m_mode(oMode)
+        , m_speed(oSpeed) {}
+
     constexpr OutputPin(IoPort ioPort, IoPin ioPin, State initState, OMode oMode, OSpeed oSpeed)
         : Pin(ioPort, ioPin)
         , m_initState(initState)
         , m_mode(oMode)
         , m_speed(oSpeed) {}
+
     /**
      * @brief  Read output pin.
      *
@@ -312,12 +319,16 @@ public:
         if (pinState != State::low) {
             getHalPort()->BSRR = m_halPin;
         } else {
-            getHalPort()->BSRR = static_cast<uint32_t>(m_halPin) << 16U;
+            getHalPort()->BSRR = m_halPin << 16U;
         }
     }
 
     __attribute__((always_inline)) inline void toggle() const {
-        getHalPort()->ODR ^= m_halPin;
+        // WARNING: pass through BSRR to ensure the store operation remains atomic when DMA is involved
+        const auto port = getHalPort();
+        const uint32_t mask = m_halPin;
+        const uint32_t state = (port->ODR & mask);
+        port->BSRR = state ? mask << 16U : mask;
     }
 
     __attribute__((always_inline)) inline void set() const {
@@ -325,7 +336,7 @@ public:
     }
 
     __attribute__((always_inline)) inline void reset() const {
-        getHalPort()->BSRR = static_cast<uint32_t>(m_halPin) << 16U;
+        getHalPort()->BSRR = m_halPin << 16U;
     }
 
     void configure() const;
@@ -359,14 +370,14 @@ public:
     }
     void write(State pinState) const {
         if (pinState != State::low) {
-            getHalPort()->BSRR = static_cast<uint32_t>(m_halPin) << 16U;
+            getHalPort()->BSRR = m_halPin << 16U;
         } else {
             getHalPort()->BSRR = m_halPin;
         }
     }
 
     __attribute__((always_inline)) inline void set() const {
-        getHalPort()->BSRR = static_cast<uint32_t>(m_halPin) << 16U;
+        getHalPort()->BSRR = m_halPin << 16U;
     }
 
     __attribute__((always_inline)) inline void reset() const {
@@ -393,7 +404,7 @@ public:
 
 private:
     State read() const {
-        if ((getHalPort()->IDR & m_halPin) != (uint32_t)GPIO_PIN_RESET) {
+        if ((getHalPort()->IDR & m_halPin) != static_cast<uint32_t>(GPIO_PIN_RESET)) {
             return State::high;
         } else {
             return State::low;
@@ -421,7 +432,7 @@ private:
         if (pinState != State::low) {
             getHalPort()->BSRR = m_halPin;
         } else {
-            getHalPort()->BSRR = static_cast<uint32_t>(m_halPin) << 16U;
+            getHalPort()->BSRR = m_halPin << 16U;
         }
     }
     void enableInput() const {
@@ -475,7 +486,10 @@ private:
 class OutputEnabler {
 public:
     OutputEnabler(const InputOutputPin &innputOutputPin, Pin::State pinState, OMode mode, OSpeed speed)
-        : m_innputOutputPin(innputOutputPin) {
+        : m_innputOutputPin(innputOutputPin)
+        , m_pinState { pinState }
+        , m_mode { mode }
+        , m_speed { speed } {
         innputOutputPin.enableOutput(pinState, mode, speed);
     }
     ~OutputEnabler() {
@@ -485,8 +499,15 @@ public:
         m_innputOutputPin.write(pinState);
     }
 
+    OutputPin pin() {
+        return { m_innputOutputPin, m_pinState, m_mode, m_speed };
+    }
+
 private:
     const InputOutputPin &m_innputOutputPin;
+    Pin::State m_pinState;
+    OMode m_mode;
+    OSpeed m_speed;
 };
 
 } // namespace buddy::hw

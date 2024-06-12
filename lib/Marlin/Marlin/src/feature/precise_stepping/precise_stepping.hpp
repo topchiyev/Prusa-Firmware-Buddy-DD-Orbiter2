@@ -28,6 +28,12 @@ constexpr const double EPSILON_DISTANCE = 0.000001;
 // Currently, it is equal to 65.536ms.
 constexpr const int32_t STEP_TIMER_MAX_TICKS_LIMIT = int32_t(std::numeric_limits<decltype(step_event_u16_t::time_ticks)>::max());
 
+// Precomputed period of calling PreciseStepping::isr() when there is no queued step event (1ms).
+constexpr const uint16_t STEPPER_ISR_PERIOD_IN_TICKS = (STEPPER_TIMER_RATE / 1000);
+
+// Precomputed conversion rate from seconds to timer ticks.
+constexpr const double STEPPER_TICKS_PER_SEC = double(STEPPER_TIMER_RATE);
+
 struct move_t;
 struct step_generator_state_t;
 
@@ -38,6 +44,12 @@ enum PreciseSteppingFlag : PreciseSteppingFlag_t {
     PRECISE_STEPPING_FLAG_RESET_POSITION_Y = _BV(1),
     PRECISE_STEPPING_FLAG_RESET_POSITION_Z = _BV(2),
     PRECISE_STEPPING_FLAG_RESET_POSITION_E = _BV(3),
+
+    // Indicating logical axis usage until reset
+    PRECISE_STEPPING_FLAG_X_USED = _BV(8),
+    PRECISE_STEPPING_FLAG_Y_USED = _BV(9),
+    PRECISE_STEPPING_FLAG_Z_USED = _BV(10),
+    PRECISE_STEPPING_FLAG_E_USED = _BV(11),
 };
 
 // Ensure XYZE bits are always adjacent and ordered.
@@ -50,6 +62,11 @@ static_assert(MoveFlag::MOVE_FLAG_RESET_POSITION_X == (PreciseSteppingFlag::PREC
 static_assert(MoveFlag::MOVE_FLAG_RESET_POSITION_Y == (PreciseSteppingFlag::PRECISE_STEPPING_FLAG_RESET_POSITION_Y << MOVE_FLAG_RESET_POSITION_SHIFT));
 static_assert(MoveFlag::MOVE_FLAG_RESET_POSITION_Z == (PreciseSteppingFlag::PRECISE_STEPPING_FLAG_RESET_POSITION_Z << MOVE_FLAG_RESET_POSITION_SHIFT));
 static_assert(MoveFlag::MOVE_FLAG_RESET_POSITION_E == (PreciseSteppingFlag::PRECISE_STEPPING_FLAG_RESET_POSITION_E << MOVE_FLAG_RESET_POSITION_SHIFT));
+
+static_assert(MoveFlag::MOVE_FLAG_X_ACTIVE == (MoveFlag)PreciseSteppingFlag::PRECISE_STEPPING_FLAG_X_USED);
+static_assert(MoveFlag::MOVE_FLAG_Y_ACTIVE == (MoveFlag)PreciseSteppingFlag::PRECISE_STEPPING_FLAG_Y_USED);
+static_assert(MoveFlag::MOVE_FLAG_Z_ACTIVE == (MoveFlag)PreciseSteppingFlag::PRECISE_STEPPING_FLAG_Z_USED);
+static_assert(MoveFlag::MOVE_FLAG_E_ACTIVE == (MoveFlag)PreciseSteppingFlag::PRECISE_STEPPING_FLAG_E_USED);
 
 class PreciseStepping {
 
@@ -67,11 +84,6 @@ public:
     // Or number of ticks to next call of stepper ISR when step event queue is empty.
     static uint16_t left_ticks_to_next_step_event;
 
-    // Precomputed period of calling PreciseStepping::isr() when there is no queued step event.
-    static uint16_t stepper_isr_period_in_ticks;
-    // Precomputed conversion rate from seconds to timer ticks.
-    static double ticks_per_sec;
-
     // Indicate which direction bits are inverted.
     static uint16_t inverted_dirs;
 
@@ -82,9 +94,10 @@ public:
     // ordering of step events.
     static double max_lookback_time;
 
-    static double total_print_time;
-    static xyze_double_t total_start_pos;
-    static xyze_long_t total_start_pos_msteps;
+    static xyze_double_t initial_start_pos; // Initial absolute position (mm, cartesian)
+    static double total_print_time; // Cumulative time since beginning of motion (s)
+    static xyze_double_t total_start_pos; // Current absolute position (mm, cartesian)
+    static xyze_long_t total_start_pos_msteps; // Current absolute position in mini-steps (msteps, cartesian)
 
     // Flags that affect the whole precise stepping. Those flags are reset when all queues are empty.
     // For now, used only for resetting the positions of axes.
@@ -156,6 +169,17 @@ public:
     FORCE_INLINE static move_t *get_current_unprocessed_move_segment() {
         if (has_unprocessed_move_segments_queued()) {
             return &move_segment_queue.data[move_segment_queue.unprocessed];
+        }
+
+        return nullptr;
+    }
+
+    // Returns the last move segment that has been processed by
+    // PreciseStepping::process_queue_of_move_segments(), nullptr if the queue is empty or not
+    // processed.
+    FORCE_INLINE static move_t *get_last_processed_move_segment() {
+        if (move_segment_queue.unprocessed != move_segment_queue.tail) {
+            return &move_segment_queue.data[move_segment_queue_prev_index(move_segment_queue.unprocessed)];
         }
 
         return nullptr;
@@ -288,16 +312,18 @@ public:
     static bool has_blocks_queued() { return has_move_segments_queued() || has_step_events_queued(); }
 
     // Return if some processing is still pending before all queues are flushed
-    static bool processing() { return has_blocks_queued() || stop_pending; }
+    static bool processing() { return busy || stop_pending; }
 
     static volatile uint8_t step_dl_miss; // stepper deadline misses
     static volatile uint8_t step_ev_miss; // stepper event misses
 
 private:
     static uint32_t waiting_before_delivering_start_time;
+    static uint32_t last_step_isr_delay;
 
     static void step_generator_state_init(const move_t &move);
 
+    static std::atomic<bool> busy;
     static std::atomic<bool> stop_pending;
     static void reset_queues();
     static bool is_waiting_before_delivering();
@@ -306,3 +332,8 @@ private:
 void classic_step_generator_init(const move_t &move, classic_step_generator_t &step_generator, step_generator_state_t &step_generator_state);
 
 FORCE_INLINE void classic_step_generator_update(classic_step_generator_t &step_generator);
+
+// Common functions:
+float get_move_axis_r(const move_t &move, const int axis);
+void mark_ownership(move_t &move);
+void discard_ownership(move_t &move);

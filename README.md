@@ -1,11 +1,14 @@
 # Buddy
-[![GitHub release](https://img.shields.io/github/release/prusa3d/Prusa-Firmware-Buddy.svg)](https://github.com/prusa3d/Prusa-Firmware-Buddy/releases)
-[![Build Status](https://holly.prusa3d.com/buildStatus/icon?job=Prusa-Firmware-Buddy%2FMultibranch%2Fmaster)](https://holly.prusa3d.com/job/Prusa-Firmware-Buddy/job/Multibranch/job/master/)
+[![Build Status](<https://holly.prusa3d.com/buildStatus/icon?job=Prusa-Firmware-Buddy-Private%2FMultibranch%2Fprivate&subject=private>)](https://holly.prusa3d.com/job/Prusa-Firmware-Buddy-Private/job/Multibranch/job/private/)
+[![Build Status](<https://holly.prusa3d.com/buildStatus/icon?job=Prusa-Firmware-Buddy-Private%2FMultibranch%2Fmaster&subject=master>)](https://holly.prusa3d.com/job/Prusa-Firmware-Buddy-Private/job/Multibranch/job/master/)
+[![Build Status](<https://holly.prusa3d.com/buildStatus/icon?job=Prusa-Firmware-Buddy-Private%2FAuto-Pull-Master&subject=auto-update-master>)](https://holly.prusa3d.com/job/Prusa-Firmware-Buddy-Private/job/Auto-Pull-Master/)
+[![Build Status](<https://holly.prusa3d.com/buildStatus/icon?job=Prusa-Firmware-Buddy-Private%2FMerge-Master-To-Private&subject=merge-master-to-private-daily>)](https://holly.prusa3d.com/job/Prusa-Firmware-Buddy-Private/job/Merge-Master-To-Private/)
 
 This repository includes source code and firmware releases for the Original Prusa 3D printers based on the 32-bit ARM microcontrollers.
 
 The currently supported models are:
-- Original Prusa MINI
+- Original Prusa MINI/MINI+
+- Original Prusa MK3.9
 - Original Prusa MK4
 - Original Prusa XL
 
@@ -59,15 +62,9 @@ The build process of this project is driven by CMake and `build.py` is just a hi
 - [Eclipse, STM32CubeIDE](doc/editor/stm32cubeide.md)
 - [Other LSP-based IDEs (Atom, Sublime Text, ...)](doc/editor/lsp-based-ides.md)
 
-#### Formatting
+#### Contributing
 
-All the source code in this repository is automatically formatted:
-
-- C/C++ files using [clang-format](https://clang.llvm.org/docs/ClangFormat.html),
-- Python files using [yapf](https://github.com/google/yapf),
-- and CMake files using [cmake-format](https://github.com/cheshirekow/cmake_format).
-
-If you want to contribute, make sure to install [pre-commit](https://pre-commit.com) and then run `pre-commit install` within the repository. This makes sure that all your future commits will be formatted appropriately. Our build server automatically rejects improperly formatted pull requests.
+If you want to contribute to the codebase, please read the [Contribution Guidelines](doc/contributing.md).
 
 #### XL and Puppies
 

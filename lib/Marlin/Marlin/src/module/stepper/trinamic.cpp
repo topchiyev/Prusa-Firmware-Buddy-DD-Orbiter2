@@ -37,6 +37,7 @@
     #include <config_store/store_instance.hpp>
 #endif
 
+#include <feature/phase_stepping/phase_stepping.hpp>
 #include <HardwareSerial.h>
 
 
@@ -675,6 +676,8 @@ void restore_trinamic_drivers() {
 }
 
 void reset_trinamic_drivers() {
+  assert(!phase_stepping::any_axis_active());
+
   static constexpr bool stealthchop_by_axis[] = {
     #if ENABLED(STEALTHCHOP_XY)
       true
@@ -865,5 +868,27 @@ uint16_t stepper_mscnt(const AxisEnum axis)
     return stepper_axis(axis).MSCNT();
 }
 
+bool stepper_wait_for_standstill(uint8_t axis_mask, millis_t max_delay) {
+    millis_t timeout = millis() + max_delay;
+    for (;;) {
+        bool stst = true;
+        LOOP_L_N(i, XYZE_N) {
+            if (TEST(axis_mask, i)) {
+                if (!static_cast<TMC2130Stepper &>(stepper_axis((AxisEnum)i)).stst()) {
+                    stst = false;
+                    break;
+                }
+            }
+        }
+        if (stst) {
+          break;
+        }
+        if (millis() > timeout || planner.draining()) {
+            return false;
+        }
+        safe_delay(10);
+    }
+    return true;
+}
 
 #endif // HAS_TRINAMIC

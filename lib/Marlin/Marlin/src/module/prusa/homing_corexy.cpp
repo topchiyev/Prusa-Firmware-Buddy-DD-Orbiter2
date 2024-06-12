@@ -12,22 +12,24 @@
 #if ENABLED(CRASH_RECOVERY)
     #include "feature/prusa/crash_recovery.hpp"
 #endif
-#include "bsod_gui.hpp"
+
+#include "bsod.h"
+#include "feature/phase_stepping/phase_stepping.hpp"
 
 // convert raw AB steps to XY mm
 void corexy_ab_to_xy(const xy_long_t &steps, xy_pos_t &mm) {
     float x = static_cast<float>(steps.a + steps.b) / 2.f;
     float y = static_cast<float>(CORESIGN(steps.a - steps.b)) / 2.f;
-    mm.x = x / planner.settings.axis_steps_per_mm[0];
-    mm.y = y / planner.settings.axis_steps_per_mm[1];
+    mm.x = x * planner.mm_per_step[X_AXIS];
+    mm.y = y * planner.mm_per_step[Y_AXIS];
 }
 
 // convert raw AB steps to XY mm and position in mini-steps
 static void corexy_ab_to_xy(const xy_long_t &steps, xy_pos_t &mm, xy_long_t &pos_msteps) {
     float x = static_cast<float>(steps.a + steps.b) / 2.f;
     float y = static_cast<float>(CORESIGN(steps.a - steps.b)) / 2.f;
-    mm.x = x / planner.settings.axis_steps_per_mm[0];
-    mm.y = y / planner.settings.axis_steps_per_mm[1];
+    mm.x = x * planner.mm_per_step[X_AXIS];
+    mm.y = y * planner.mm_per_step[Y_AXIS];
     pos_msteps.x = LROUND(x * PLANNER_STEPS_MULTIPLIER);
     pos_msteps.y = LROUND(y * PLANNER_STEPS_MULTIPLIER);
 }
@@ -65,12 +67,25 @@ static void plan_corexy_raw_move(const xy_long_t &target_steps_ab, const feedRat
 
 // TMC µsteps(phase) per Marlin µsteps
 static int16_t phase_per_ustep(const AxisEnum axis) {
-    return 256 / stepper_axis(axis).microsteps();
-}
+    // Originally, we read the microstep configuration from the driver; this no
+    // longer make sense with 256 microsteps.
+    // Thus, we use the printer defaults instead of stepper_axis(axis).microsteps();
+    assert(axis <= AxisEnum::Z_AXIS);
+    static const int MICROSTEPS[] = { X_MICROSTEPS, Y_MICROSTEPS, Z_MICROSTEPS };
+    return 256 / MICROSTEPS[axis];
+};
 
 // TMC full cycle µsteps per Marlin µsteps
 static int16_t phase_cycle_steps(const AxisEnum axis) {
     return 1024 / phase_per_ustep(axis);
+}
+
+static int16_t axis_mscnt(const AxisEnum axis) {
+#if HAS_PHASE_STEPPING()
+    return phase_stepping::logical_ustep(axis);
+#else
+    return stepper_axis(axis).MSCNT();
+#endif
 }
 
 static int16_t phase_backoff_steps(const AxisEnum axis) {
@@ -89,16 +104,17 @@ static int16_t phase_backoff_steps(const AxisEnum axis) {
         bsod("invalid backoff axis");
     }
 
-    int16_t phaseCurrent = stepper_axis(axis).MSCNT(); // The TMC µsteps(phase) count of the current position
+    int16_t phaseCurrent = axis_mscnt(axis); // The TMC µsteps(phase) count of the current position
     int16_t phaseDelta = (0 - phaseCurrent) * stepperBackoutDir;
     if (phaseDelta < 0) {
         phaseDelta += 1024;
     }
-    return int16_t(phaseDelta / phase_per_ustep(axis)) * effectorBackoutDir;
+    int16_t phasePerStep = phase_per_ustep(axis);
+    return int16_t((phaseDelta + phasePerStep / 2) / phasePerStep) * effectorBackoutDir;
 }
 
 static bool phase_aligned(AxisEnum axis) {
-    int16_t phase_cur = stepper_axis(axis).MSCNT();
+    int16_t phase_cur = axis_mscnt(axis);
     int16_t ustep_max = phase_per_ustep(axis) / 2;
     return (phase_cur <= ustep_max || phase_cur >= (1024 - ustep_max));
 }
@@ -248,28 +264,6 @@ static measure_phase_cycles_ret measure_phase_cycles(int32_t &c_dist_a, int32_t 
     return { true, true }; // Success
 }
 
-static bool wait_for_standstill(uint8_t axis_mask, millis_t max_delay = 150) {
-    millis_t timeout = millis() + max_delay;
-    for (;;) {
-        bool stst = true;
-        LOOP_L_N(i, XYZE_N) {
-            if (TEST(axis_mask, i)) {
-                if (!static_cast<TMC2130Stepper &>(stepper_axis((AxisEnum)i)).stst()) {
-                    stst = false;
-                    break;
-                }
-            }
-        }
-        if (stst) {
-            return true;
-        }
-        if (millis() > timeout || planner.draining()) {
-            return false;
-        }
-        safe_delay(10);
-    }
-}
-
 /**
  * @brief Precise homing on core-XY.
  * @return true on success
@@ -294,23 +288,37 @@ bool refine_corexy_origin() {
     planner.synchronize();
 
     // align both motors to a full phase
-    wait_for_standstill(_BV(A_AXIS) | _BV(B_AXIS));
-    xy_long_t origin_steps = { stepper.position(A_AXIS) + phase_backoff_steps(A_AXIS),
-        stepper.position(B_AXIS) + phase_backoff_steps(B_AXIS) };
-    plan_corexy_raw_move(origin_steps, fr_mm_s);
+    stepper_wait_for_standstill(_BV(A_AXIS) | _BV(B_AXIS));
+    xy_long_t origin_steps = {
+        stepper.position(A_AXIS) + phase_backoff_steps(A_AXIS),
+        stepper.position(B_AXIS) + phase_backoff_steps(B_AXIS)
+    };
 
-    // sanity checks
-    wait_for_standstill(_BV(A_AXIS) | _BV(B_AXIS));
+    // sanity checks: don't remove these! Issues in repositioning are a result of planner/stepper
+    // calculation issues which will show up elsewhere and are NOT just mechanical issues. We need
+    // step-accuracy while homing! ask @wavexx when in doubt regarding these
+    plan_corexy_raw_move(origin_steps, fr_mm_s);
+    xy_long_t raw_move_diff = {
+        stepper.position(A_AXIS) - origin_steps[A_AXIS],
+        stepper.position(B_AXIS) - origin_steps[B_AXIS]
+    };
+    if (raw_move_diff[A_AXIS] != 0 || raw_move_diff[B_AXIS] != 0) {
+        if (planner.draining()) {
+            return true;
+        }
+        SERIAL_ECHOLN("raw move failed");
+        SERIAL_ECHOLNPAIR("diff A:", raw_move_diff[A_AXIS], " B:", raw_move_diff[B_AXIS]);
+        bsod("raw move didn't reach requested position");
+    }
+
+    stepper_wait_for_standstill(_BV(A_AXIS) | _BV(B_AXIS));
     if (!phase_aligned(A_AXIS) || !phase_aligned(B_AXIS)) {
         if (planner.draining()) {
             return true;
         }
-
         SERIAL_ECHOLN("phase alignment failed");
-        SERIAL_ECHOLNPAIR("phase A:", stepperX.MSCNT(), " B:", stepperY.MSCNT());
-        ui.status_printf_P(0, "Phase alignment failed");
-        homing_failed([]() { fatal_error(ErrCode::ERR_MECHANICAL_PRECISE_REFINEMENT_FAILED); }, orig_crash);
-        return false;
+        SERIAL_ECHOLNPAIR("phase A:", axis_mscnt(A_AXIS), " B:", axis_mscnt(B_AXIS));
+        bsod("phase alignment failed");
     }
 
     // increase current of the holding motor

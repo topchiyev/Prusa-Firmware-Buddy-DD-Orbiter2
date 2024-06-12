@@ -101,12 +101,13 @@ spinner1_16x16.png
 spinner2_16x16.png
 spinner3_16x16.png
 spool_16x16.png
+stealth_20x16.png
 switch_off_36x18.png
 switch_on_36x18.png
 temperature_16x16.png
 transfer_icon_16x16.png
 turn_knob_81x55.png
-usb_32x16.png
+usb_20x16.png
 usb_error_48x48.png
 warning_48x48.png
 wifi_64x64.png
@@ -118,6 +119,7 @@ flag_es_16x11.png
 flag_fr_16x11.png
 flag_it_16x11.png
 flag_pl_16x11.png
+flag_jp_16x11.png
 language_white_16x16.png
 ok_color_16x16.png
 na_color_16x16.png

@@ -11,7 +11,7 @@
 #include "img_resources.hpp"
 
 MI_LangBase::MI_LangBase(const char *label, const img::Resource *icon, is_hidden_t hidden)
-    : WI_LABEL_t(_(label), icon, is_enabled_t::yes, hidden) {
+    : IWindowMenuItem(_(label), icon, is_enabled_t::yes, hidden) {
     setLabelFont(GuiDefaults::FontMenuSpecial);
 }
 
@@ -72,6 +72,13 @@ MI_POLISH::MI_POLISH()
 
 uint16_t MI_POLISH::LangCode() const {
     return Translations::MakeLangCode("pl");
+}
+
+MI_JAPANESE::MI_JAPANESE()
+    : MI_LangBase(label, &img::flag_jp_16x11, is_hidden_t::no) {}
+
+uint16_t MI_JAPANESE::LangCode() const {
+    return Translations::MakeLangCode("jp");
 }
 
 MI_TEST_LANG::MI_TEST_LANG()

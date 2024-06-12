@@ -409,7 +409,7 @@ class Stepper {
     // Get the position of a stepper, in steps
     static int32_t position(const AxisEnum axis);
     static int32_t position_from_startup(const AxisEnum axis);
-    
+
     // Report the positions of the steppers, in steps
     static void report_positions();
 
@@ -522,8 +522,42 @@ class Stepper {
       static uint16_t get_LA_steps() { return LA_current_adv_steps; }
     #endif
 
-private:
+    static long get_axis_steps(const AxisEnum a) {
+      return count_position[a];
+    }
 
+    static long get_axis_steps_from_startup(const AxisEnum a) {
+      return count_position_from_startup[a];
+    }
+
+    static void set_axis_steps(const AxisEnum a, long steps_made) {
+      count_position[a] = steps_made;
+    }
+
+    static void set_axis_steps_from_startup(const AxisEnum a, long steps_made) {
+      count_position_from_startup[a] = steps_made;
+    }
+
+    // Set axis usage and direction bits based on physical direction
+    static void report_axis_movement(AxisEnum a, float speed) {
+      uint8_t axis_mask = 1 << a;
+      axis_did_move |= axis_mask;
+
+      if (speed > 0)
+        last_direction_bits |= axis_mask;
+      else
+        last_direction_bits &= ~axis_mask;
+    }
+
+    // Return last physical direction of an axis
+    static bool last_axis_direction(AxisEnum a) {
+      return last_direction_bits & _BV(a);
+    }
+
+    // Return true if the physical axis direction is inverted
+    static bool is_axis_inverted(AxisEnum a);
+
+private:
     // Set the current position in steps
     static void _set_position(const int32_t &a, const int32_t &b, const int32_t &c, const int32_t &e);
     FORCE_INLINE static void _set_position(const abce_long_t &spos) { _set_position(spos.a, spos.b, spos.c, spos.e); }

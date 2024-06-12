@@ -287,12 +287,6 @@
 //#define HOTEND_OFFSET_Y {0.0, 5.00}  // (mm) relative Y-offset for each nozzle
 //#define HOTEND_OFFSET_Z {0.0, 0.00}  // (mm) relative Z-offset for each nozzle
 
-//#define ACCELEROMETER
-#if ENABLED(ACCELEROMETER)
-    #define LOCAL_ACCELEROMETER
-    //#define REMOTE_ACCELEROMETER
-#endif
-
 // @section temperature
 
 //===========================================================================
@@ -397,7 +391,7 @@
 // Above this temperature the heater will be switched off.
 // This can protect components from overheating, but NOT from shorts and failures.
 // (Use MINTEMP for thermistor short/failure protection.)
-#define HEATER_0_MAXTEMP 315 // 290
+#define HEATER_0_MAXTEMP 295
 #define HEATER_1_MAXTEMP 275
 #define HEATER_2_MAXTEMP 275
 #define HEATER_3_MAXTEMP 275
@@ -409,7 +403,7 @@
 // Thus all usage in the UI must be lowered by 10C to offer a valid temperature limit.
 // Those 10C are a safety margin used throughout the whole Marlin code
 // (without a proper #define though :( )
-#define BED_MAXTEMP 120 // 110
+#define BED_MAXTEMP 110
 #define BED_MAXTEMP_SAFETY_MARGIN 10
 #define BOARD_MAXTEMP 120
 #define CHAMBER_MAXTEMP 100
@@ -680,11 +674,8 @@
  *                                      X, Y, Z, E0 [, E1[, E2[, E3[, E4[, E5]]]]]
  */
 //#define DEFAULT_AXIS_STEPS_PER_UNIT   { 100, 100, 400, 280 } //E0 280 295
-
-
-//#define DEFAULT_AXIS_STEPS_PER_UNIT    { 100, 100, 400, 325 } //E0 280 295
-#define DEFAULT_AXIS_STEPS_PER_UNIT      { 100, 100, 400, 690 } //E0 280 295
-
+#define DEFAULT_AXIS_STEPS_PER_UNIT \
+    { 100, 100, 400, 325 } //E0 280 295
 //#define DEFAULT_AXIS_STEPS_PER_UNIT   { 800, 800, 3200, 1120 } //E0 280 295
 //#define DEFAULT_AXIS_STEPS_PER_UNIT   { 100, 100, 400, 1120 } //E0 280 295
 
@@ -696,6 +687,12 @@
 #define DEFAULT_MAX_FEEDRATE \
     { 180, 180, 12, 80 }
 
+/// HW limits of feed rate
+#define HWLIMIT_NORMAL_MAX_FEEDRATE \
+    { 400, 400, 12, 80 }
+#define HWLIMIT_STEALTH_MAX_FEEDRATE \
+    { 180, 180, 12, 80 }
+
 /**
  * Default Max Acceleration (change/s) change = mm/s
  * (Maximum start speed for accelerated moves)
@@ -704,6 +701,12 @@
  */
 #define DEFAULT_MAX_ACCELERATION \
     { 1250, 1250, 400, 4000 }
+
+/// HW limits of max acceleration
+#define HWLIMIT_NORMAL_MAX_ACCELERATION \
+    { 7000, 7000, 400, 5000 }
+#define HWLIMIT_STEALTH_MAX_ACCELERATION \
+    { 2500, 2500, 400, 5000 }
 
 /**
  * Default Acceleration (change/s) change = mm/s
@@ -716,6 +719,14 @@
 #define DEFAULT_ACCELERATION 1250 // X, Y, Z and E acceleration for printing moves
 #define DEFAULT_RETRACT_ACCELERATION 1250 // E acceleration for retracts
 #define DEFAULT_TRAVEL_ACCELERATION 1250 // X, Y, Z acceleration for travel (non printing) moves
+
+/// HW limits of Acceleration
+#define HWLIMIT_NORMAL_ACCELERATION 4000
+#define HWLIMIT_STEALTH_ACCELERATION 2500
+#define HWLIMIT_NORMAL_RETRACT_ACCELERATION 1250
+#define HWLIMIT_STEALTH_RETRACT_ACCELERATION 1250
+#define HWLIMIT_NORMAL_TRAVEL_ACCELERATION 4000
+#define HWLIMIT_STEALTH_TRAVEL_ACCELERATION 2500
 
 //
 // Use Junction Deviation instead of traditional Jerk Limiting
@@ -742,6 +753,10 @@
 #endif
 
 #define DEFAULT_EJERK 10 // May be used by Linear Advance
+
+/// HW limits of Jerk
+#define HWLIMIT_NORMAL_JERK { 10, 10, 2, 10 }
+#define HWLIMIT_STEALTH_JERK { 8, 8, 2, 10 }
 
 /**
  * S-Curve Acceleration

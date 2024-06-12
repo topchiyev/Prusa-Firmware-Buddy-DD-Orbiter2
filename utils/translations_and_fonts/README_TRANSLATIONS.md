@@ -55,19 +55,26 @@ find build-vscode-buddy/lib/error_codes -regextype posix-extended -regex "^.*\.c
 3. Insert header data
 ```bash
 sed -i "s/SOME DESCRIPTIVE TITLE./Prusa-Firmware-Buddy/g" src/lang/po/Prusa-Firmware-Buddy.pot
-sed -i "s/YEAR THE PACKAGE'S COPYRIGHT HOLDER/2023 Prusa Research/g" src/lang/po/Prusa-Firmware-Buddy.pot # update year
-sed -i "s/FIRST AUTHOR <EMAIL@ADDRESS>, YEAR./Prusa Research <info@prusa3d.com>, 2023/g" src/lang/po/Prusa-Firmware-Buddy.pot # update year
+sed -i "s/YEAR THE PACKAGE'S COPYRIGHT HOLDER/2024 Prusa Research/g" src/lang/po/Prusa-Firmware-Buddy.pot # update year
+sed -i "s/FIRST AUTHOR <EMAIL@ADDRESS>, YEAR./Prusa Research <info@prusa3d.com>, 2024/g" src/lang/po/Prusa-Firmware-Buddy.pot # update year
 ```
 
 ## Receiving PO files from Content
 PO files are usually received from content with bad naming. Rename them to comply with format "Prusa-Firmware-Buddy_XX.po", where XX is the location code e.g. `Prusa-Firmware-Buddy_en.po` or `Prusa-Firmware-Buddy_cs.po` and then place them in their designated directiories in `src/lang/po`.
 
 ## Delete unused strings
-Run this for every language code
+Run this for every language code from within its folder (src/lang/po/XX)
 ```bash
 msgattrib --set-obsolete --ignore-file=../Prusa-Firmware-Buddy.pot -o Prusa-Firmware-Buddy_XX.po Prusa-Firmware-Buddy_XX.po # replace XX with language code
 msgattrib --no-obsolete -o Prusa-Firmware-Buddy_XX.po Prusa-Firmware-Buddy_XX.po # replace XX with language code
 ```
+
+## Replacing unsupported characters
+Sometimes, translators are using unsupported characters in their translations (.po). We have to replace them with supported characters. The script will go through every .po file and replace them unsupported characters that we know of.
+```bash
+python3 replace_unsupported_chars.py src/lang/po/
+```
+[script](replace_unsupported_chars.py)
 
 ## Regenerating fonts
 To safe space, our fonts have only set of characters, that are used in the translations. Fonts have to be regenerated because new translations could contain an unknown character.
@@ -81,7 +88,7 @@ cd build_tests
 # If it says, that -std=c++20 does not exist, your compilator is too old. Install g++-10 and run this command before cmake:
 # export CXX=/bin/g++-10
 
-../.dependencies/cmake-3.22.5/bin/cmake -D CMAKE_EXPORT_COMPILE_COMMANDS:BOOL=YES -D CMAKE_C_FLAGS="-O0 -ggdb3" -D CMAKE_CXX_FLAGS="-O0 -ggdb3 -std=c++20" -D CMAKE_BUILD_TYPE=Debug ..
+../.dependencies/cmake-3.28.3/bin/cmake -D CMAKE_EXPORT_COMPILE_COMMANDS:BOOL=YES -D CMAKE_C_FLAGS="-O0 -ggdb3" -D CMAKE_CXX_FLAGS="-O0 -ggdb3 -std=c++20" -D CMAKE_BUILD_TYPE=Debug ..
 make -j$(nproc) tests VERBOSE=1 # This will build unit tests
-../.dependencies/cmake-3.22.5/bin/ctest --output-on-failure . # This will run unit tests
+../.dependencies/cmake-3.28.3/bin/ctest --output-on-failure . # This will run unit tests
 ```
