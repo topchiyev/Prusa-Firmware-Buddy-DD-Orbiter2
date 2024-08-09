@@ -50,7 +50,7 @@ This file is generated automatically so don't edit it directly
 - W25X: LOG_SEVERITY_DEBUG, src/common/w25x.cpp
 - WUI: LOG_SEVERITY_DEBUG, lib/WUI/wui.cpp
 - XLCD: LOG_SEVERITY_INFO, src/gui/guimain.cpp
-- connect: LOG_SEVERITY_INFO, src/connect/connect.cpp
+- connect: LOG_SEVERITY_INFO, src/Connect/connect.cpp
 - httpc: LOG_SEVERITY_DEBUG, src/common/http/httpc.cpp
 - socket: LOG_SEVERITY_DEBUG, src/common/http/socket.cpp
 - transfers: LOG_SEVERITY_INFO, src/transfers/logging.cpp

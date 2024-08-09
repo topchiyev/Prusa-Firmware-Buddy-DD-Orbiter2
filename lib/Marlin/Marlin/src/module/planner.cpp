@@ -139,16 +139,16 @@ void Planner::apply_settings(const user_planner_settings_t &settings) {
   static constexpr planner_settings_t standard_limits = {
     .max_acceleration_mm_per_s2 = HWLIMIT_NORMAL_MAX_ACCELERATION,
     .max_feedrate_mm_s = HWLIMIT_NORMAL_MAX_FEEDRATE,
-    .acceleration = HWLIMIT_NORMAL_ACCELERATION,
-    .retract_acceleration = HWLIMIT_NORMAL_RETRACT_ACCELERATION,
-    .travel_acceleration = HWLIMIT_NORMAL_TRAVEL_ACCELERATION,
+#if HAS_CLASSIC_JERK
+    .max_jerk = HWLIMIT_NORMAL_JERK,
+#endif
   };
   static constexpr planner_settings_t stealth_limits = {
     .max_acceleration_mm_per_s2 = HWLIMIT_STEALTH_MAX_ACCELERATION,
     .max_feedrate_mm_s = HWLIMIT_STEALTH_MAX_FEEDRATE,
-    .acceleration = HWLIMIT_STEALTH_ACCELERATION,
-    .retract_acceleration = HWLIMIT_STEALTH_RETRACT_ACCELERATION,
-    .travel_acceleration = HWLIMIT_STEALTH_TRAVEL_ACCELERATION,
+#if HAS_CLASSIC_JERK
+    .max_jerk = HWLIMIT_STEALTH_JERK,
+#endif
   };
   const auto &limits = stealth_mode_ ? stealth_limits : standard_limits;
 
@@ -160,7 +160,11 @@ void Planner::apply_settings(const user_planner_settings_t &settings) {
     const auto &limit = limits.*member;
 
     if constexpr(std::is_array_v<T>) {
-      for(size_t i = 0; i <std::size(value); i++) {
+      for(size_t i = 0; i < std::size(value); i++) {
+        value[i] = std::min(value[i], limit[i]);
+      }
+    } else if constexpr(std::is_array_v<T> || std::is_same_v<T, xyze_pos_t>) {
+      for(size_t i = 0; i < std::size(value.pos); i++) {
         value[i] = std::min(value[i], limit[i]);
       }
     } else {
@@ -170,9 +174,9 @@ void Planner::apply_settings(const user_planner_settings_t &settings) {
 
   apply_limit(&planner_settings_t::max_feedrate_mm_s);
   apply_limit(&planner_settings_t::max_acceleration_mm_per_s2);
-  apply_limit(&planner_settings_t::acceleration);
-  apply_limit(&planner_settings_t::retract_acceleration);
-  apply_limit(&planner_settings_t::travel_acceleration);
+#if HAS_CLASSIC_JERK
+  apply_limit(&planner_settings_t::max_jerk);
+#endif
 
   refresh_acceleration_rates();
 }

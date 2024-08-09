@@ -778,7 +778,7 @@
 
 /// HW limits of max acceleration
 #define HWLIMIT_NORMAL_MAX_ACCELERATION \
-    { 7000, 7000, 200, 2500 }
+    { 7000, 7000, 750, 6000 }
 #define HWLIMIT_STEALTH_MAX_ACCELERATION \
     { 2500, 2500, 200, 2500 }
 
@@ -794,14 +794,6 @@
 #define DEFAULT_ACCELERATION 1250 // X, Y, Z and E acceleration for printing moves
 #define DEFAULT_RETRACT_ACCELERATION 800 // E acceleration for retracts
 #define DEFAULT_TRAVEL_ACCELERATION 1250 // X, Y, Z acceleration for travel (non printing) moves
-
-/// HW limits of Acceleration
-#define HWLIMIT_NORMAL_ACCELERATION 4000
-#define HWLIMIT_STEALTH_ACCELERATION 2500
-#define HWLIMIT_NORMAL_RETRACT_ACCELERATION 1200
-#define HWLIMIT_STEALTH_RETRACT_ACCELERATION 1200
-#define HWLIMIT_NORMAL_TRAVEL_ACCELERATION 4000
-#define HWLIMIT_STEALTH_TRAVEL_ACCELERATION 2500
 
 //
 // Use Junction Deviation instead of traditional Jerk Limiting

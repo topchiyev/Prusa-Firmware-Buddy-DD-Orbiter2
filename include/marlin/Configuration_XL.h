@@ -787,7 +787,7 @@
 
 /// HW limits of feed rate
 #define HWLIMIT_NORMAL_MAX_FEEDRATE \
-    { 400, 400, 40, 100 }
+    { 400, 400, 20, 100 }
 #define HWLIMIT_STEALTH_MAX_FEEDRATE \
     { 140, 140, 12, 100 }
 
@@ -808,7 +808,7 @@
 
 /// HW limits of max acceleration
 #define HWLIMIT_NORMAL_MAX_ACCELERATION \
-    { 7000, 7000, 200, 2500 }
+    { 7000, 7000, 200, 6000 }
 #define HWLIMIT_STEALTH_MAX_ACCELERATION \
     { 2500, 2500, 200, 2500 }
 
@@ -823,14 +823,6 @@
 #define DEFAULT_ACCELERATION 1800 // X, Y, Z and E acceleration for printing moves
 #define DEFAULT_RETRACT_ACCELERATION 1200 // E acceleration for retracts
 #define DEFAULT_TRAVEL_ACCELERATION 5000 // X, Y, Z acceleration for travel (non printing) moves
-
-/// HW limits of Acceleration
-#define HWLIMIT_NORMAL_ACCELERATION 7000
-#define HWLIMIT_STEALTH_ACCELERATION 2500
-#define HWLIMIT_NORMAL_RETRACT_ACCELERATION 1200
-#define HWLIMIT_STEALTH_RETRACT_ACCELERATION 1200
-#define HWLIMIT_NORMAL_TRAVEL_ACCELERATION 7000
-#define HWLIMIT_STEALTH_TRAVEL_ACCELERATION 2500
 
 //
 // Use Junction Deviation instead of traditional Jerk Limiting
@@ -858,8 +850,8 @@
 #define DEFAULT_EJERK 5 // May be used by Linear Advance
 
 /// HW limits of Jerk
-#define HWLIMIT_NORMAL_JERK { 8, 8, 2, 10 }
-#define HWLIMIT_STEALTH_JERK {8, 8, 2, 10 }
+#define HWLIMIT_NORMAL_JERK {10, 10, 2, 10}
+#define HWLIMIT_STEALTH_JERK {8, 8, 2, 10}
 
 /**
  * S-Curve Acceleration

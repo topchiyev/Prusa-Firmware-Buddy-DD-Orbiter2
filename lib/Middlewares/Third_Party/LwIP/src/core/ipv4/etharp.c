@@ -729,7 +729,12 @@ etharp_input(struct pbuf *p, struct netif *netif)
        * IP address also offered to us by the DHCP server. We do not
        * want to take a duplicate IP address on a single network.
        * @todo How should we handle redundant (fail-over) interfaces? */
-      dhcp_arp_reply(netif, &sipaddr);
+      // ESP sometimes for some unknown reason decides to participate in the ARP negotiations
+      // and then it refuses all the IP addresses the printer wants, because it has the same IP.
+      // This hack prevents this behaviour, because sadly we cannot just turn off the ARP on the ESP.
+      if (!eth_addr_cmp(&hdr->shwaddr, &hdr->dhwaddr) && !eth_addr_cmp(&hdr->shwaddr, (struct eth_addr *)netif->hwaddr)) {
+          dhcp_arp_reply(netif, &sipaddr);
+      }
 #endif /* (LWIP_DHCP && DHCP_DOES_ARP_CHECK) */
       break;
     default:

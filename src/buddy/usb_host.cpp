@@ -8,12 +8,12 @@
 #include "common/timing.h"
 
 #include <atomic>
+#include <state/printer_state.hpp>
 #include "usbh_async_diskio.hpp"
 #include "marlin_client.hpp"
 
 LOG_COMPONENT_REF(USBHost);
 USBH_HandleTypeDef hUsbHostHS;
-ApplicationTypeDef Appli_state = APPLICATION_IDLE;
 
 namespace usbh_power_cycle {
 // USB communication problems may occur at the physical layer. (emc interference, etc.)
@@ -41,7 +41,7 @@ enum class RecoveryPhase : uint_fast8_t {
 };
 
 std::atomic<RecoveryPhase> recovery_phase = RecoveryPhase::idle;
-std::atomic<bool> printing_paused = false;
+std::atomic<bool> resume_print_on_recovery = false;
 std::atomic<bool> trigger_usb_failed_dialog = true;
 
 // Initialize FreeRTOS timer
@@ -76,6 +76,10 @@ void msc_active() {
     if (recovery_phase == RecoveryPhase::power_on) {
         xTimerStop(restart_timer, portMAX_DELAY);
         recovery_phase = RecoveryPhase::idle;
+    }
+
+    if (resume_print_on_recovery) {
+        resume_print_on_recovery = false;
 
         // lazy initialization of marlin_client
         static bool marlin_client_initializated = false;
@@ -104,7 +108,7 @@ void msc_active() {
 void restart_timer_callback(TimerHandle_t) {
     switch (recovery_phase) {
 
-    case RecoveryPhase::idle:
+    case RecoveryPhase::idle: {
         // If the phase is idle and the timer was called -> problem occured, start recovery process
         // This can either mean that the USB was disconnected,
         // or the communication had a problem (but the flash is still inserted and we need to recover)
@@ -113,9 +117,17 @@ void restart_timer_callback(TimerHandle_t) {
         recovery_phase = RecoveryPhase::power_off;
         USBH_Stop(&hUsbHostHS);
 
+        const auto print_state = printer_state::get_print_state(marlin_vars()->print_state.get(), false);
+        const auto should_resume = (print_state == printer_state::DeviceState::Printing);
+
+        // Expected value is false, so we're basically doing an atomic or ehre
+        bool resume_print_expected = false;
+        resume_print_on_recovery.compare_exchange_strong(resume_print_expected, should_resume);
+
         // Call this timer again in 150 ms for the next phase
         xTimerChangePeriod(restart_timer, 150, portMAX_DELAY);
         break;
+    }
 
     case RecoveryPhase::power_off:
         // Prevent one click print from popping up when the drive initializes.
@@ -126,6 +138,12 @@ void restart_timer_callback(TimerHandle_t) {
 
         // Turn the USB on
         recovery_phase = RecoveryPhase::power_on;
+
+        // Reinitialize the USB host low-level driver
+        // This seems to fix BFW-5333
+        USBH_LL_DeInit(&hUsbHostHS);
+        USBH_LL_Init(&hUsbHostHS);
+
         USBH_Start(&hUsbHostHS);
 
         // Give some time for the USB device to respond.
@@ -201,11 +219,8 @@ void USBH_UserProcess([[maybe_unused]] USBH_HandleTypeDef *phost, uint8_t id) {
     }
 
     switch (id) {
-    case HOST_USER_SELECT_CONFIGURATION:
-        break;
 
     case HOST_USER_DISCONNECTION:
-        Appli_state = APPLICATION_DISCONNECT;
 #ifdef USBH_MSC_READAHEAD
         usbh_msc_readahead.disable();
 #endif
@@ -215,7 +230,6 @@ void USBH_UserProcess([[maybe_unused]] USBH_HandleTypeDef *phost, uint8_t id) {
         break;
 
     case HOST_USER_CLASS_ACTIVE: {
-        Appli_state = APPLICATION_READY;
         FRESULT result = f_mount(&USBHFatFS, (TCHAR const *)USBHPath, 0);
         if (result == FR_OK) {
             if (one_click_print_timeout > 0 && ticks_ms() < one_click_print_timeout) {
@@ -231,9 +245,6 @@ void USBH_UserProcess([[maybe_unused]] USBH_HandleTypeDef *phost, uint8_t id) {
         }
         break;
     }
-    case HOST_USER_CONNECTION:
-        Appli_state = APPLICATION_START;
-        break;
 
     default:
         break;
