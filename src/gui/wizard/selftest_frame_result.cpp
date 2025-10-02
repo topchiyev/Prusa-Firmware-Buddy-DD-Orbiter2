@@ -11,6 +11,7 @@
 #include "selftest_result_type.hpp"
 #include "marlin_client.hpp"
 #include "client_response.hpp"
+#include <option/has_switched_fan_test.h>
 
 static constexpr size_t view_msg_gap = 10;
 static constexpr size_t msg_bottom_gap = 6;
@@ -18,7 +19,7 @@ static Rect16::Height_t msg_height() { return (GuiDefaults::ScreenWidth > 240 ? 
 static Rect16::Height_t view_height() { return WizardDefaults::Y_space - msg_height() - view_msg_gap - msg_bottom_gap; }
 
 SelftestFrameResult::SelftestFrameResult(window_t *parent, PhasesSelftest ph, fsm::PhaseData data)
-    : AddSuperWindow<SelftestFrame>(parent, ph, data)
+    : SelftestFrame(parent, ph, data)
     , msg(this, { WizardDefaults::col_0, WizardDefaults::row_0, WizardDefaults::X_space, msg_height() }, is_multiline::yes)
     , view(this, this->GenerateRect(view_height(), view_msg_gap))
     , bar(this)
@@ -37,9 +38,9 @@ SelftestFrameResult::SelftestFrameResult(window_t *parent, PhasesSelftest ph, fs
             eeres.tools[e].printFan = get_state(e);
             eeres.tools[e].heatBreakFan = get_state(e + 1);
 
-#if not PRINTER_IS_PRUSA_MINI
+#if HAS_SWITCHED_FAN_TEST()
             eeres.tools[e].fansSwitched = get_state(e + 2);
-#endif
+#endif /* HAS_SWITCHED_FAN_TEST */
             eeres.tools[e].nozzle = get_state(e + 3);
             eeres.tools[e].fsensor = get_state(e + 4);
             eeres.tools[e].loadcell = get_state(e + 5);
@@ -69,7 +70,7 @@ SelftestFrameResult::SelftestFrameResult(window_t *parent, PhasesSelftest ph, fs
 #endif /*HAS_TOOLCHANGER()*/
 
     // Set results
-    fans.SetState(eeres.tools[0].heatBreakFan, eeres.tools[0].printFan, eeres.tools[0].fansSwitched);
+    fans.SetState(eeres.tools[0]);
 #if HAS_LOADCELL()
     loadcell.SetState(eeres.tools[0].loadcell);
 #endif /*HAS_LOADCELL()*/
@@ -100,7 +101,7 @@ SelftestFrameResult::SelftestFrameResult(window_t *parent, PhasesSelftest ph, fs
     bar.SetScrollOffset(height_draw_offset);
 }
 
-void SelftestFrameResult::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void SelftestFrameResult::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     switch (event) {
     case GUI_event_t::CLICK:
         marlin_client::FSM_response(phase_current, ClientResponses::GetResponses(phase_current)[0]);
@@ -116,6 +117,6 @@ void SelftestFrameResult::windowEvent(EventLock /*has private ctor*/, window_t *
         bar.SetScrollOffset(height_draw_offset);
         break;
     default:
-        SuperWindowEvent(sender, event, param);
+        SelftestFrame::windowEvent(sender, event, param);
     }
 }

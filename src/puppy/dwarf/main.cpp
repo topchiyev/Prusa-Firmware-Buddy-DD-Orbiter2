@@ -10,7 +10,7 @@
 #include "trigger_crash_dump.h"
 #include "safe_state.h"
 #include "bsod.h"
-#include "log.h"
+#include <logging/log.hpp>
 #include "buddy/priorities_config.h"
 
 LOG_COMPONENT_REF(Marlin);
@@ -46,7 +46,7 @@ void system_core_error_handler() {
     bsod("system_core_error_handler");
 }
 
-extern "C" void vApplicationStackOverflowHook([[maybe_unused]] TaskHandle_t xTask, [[maybe_unused]] signed char *pcTaskName) {
+extern "C" void vApplicationStackOverflowHook([[maybe_unused]] TaskHandle_t xTask, [[maybe_unused]] char *pcTaskName) {
     bsod("vApplicationStackOverflowHook");
 }
 

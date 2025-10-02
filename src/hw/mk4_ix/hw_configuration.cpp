@@ -3,45 +3,22 @@
  */
 
 #include "hw_configuration.hpp"
+#include "data_exchange.hpp"
 #include "otp.hpp"
 #include "timing_precise.hpp"
 #include <option/bootloader.h>
-
-#if BOOTLOADER()
-    #include "data_exchange.hpp"
-static std::pair<LoveBoardEeprom, OtpStatus> read_loveboard() {
-    return { data_exchange::get_loveboard_eeprom(), data_exchange::get_loveboard_status() };
-}
-#else
-    #include "at21csxx_otp.hpp"
-    #include <device/hal.h>
-
-using buddy::hw::hx717Dout;
-using buddy::hw::hx717Sck;
-using buddy::hw::Pin;
-
-/**
- * @brief use this  function only once during startup!!!
- * currently LoveBoardEeprom has to be OTP_v2
- *
- * @return LoveBoardEeprom data from loveboards eeprom
- */
-static std::pair<LoveBoardEeprom, OtpStatus> read_loveboard() {
-    __HAL_RCC_GPIOF_CLK_ENABLE(); // enable loveboard eeprom pin port clock
-    OtpFromEeprom LoveBoard = OtpFromEeprom(GPIOF, GPIO_PIN_13);
-    return { LoveBoard.calib_data, LoveBoard.get_status() };
-}
-#endif
+#include <common/adc.hpp>
 
 namespace buddy::hw {
 
 Configuration &Configuration::Instance() {
-    static Configuration ths = Configuration(read_loveboard());
+    static Configuration ths = Configuration();
     return ths;
 }
 
-Configuration::Configuration(std::pair<LoveBoardEeprom, OtpStatus> loveboard_)
-    : loveboard(loveboard_) {
+Configuration::Configuration() {
+    loveboard_eeprom = data_exchange::get_loveboard_eeprom();
+    loveboard_status = data_exchange::get_loveboard_status();
 }
 
 float Configuration::curr_measurement_voltage_to_current(float voltage) const {
@@ -53,7 +30,13 @@ float Configuration::curr_measurement_voltage_to_current(float voltage) const {
 }
 
 bool Configuration::is_fw_incompatible_with_hw() {
-#if PRINTER_IS_PRUSA_MK4
+#if PRINTER_IS_PRUSA_MK4()
+    // If door sensor sensor is detected, this is CORE ONE HW
+    static constexpr uint16_t door_sensor_disconnected_threshold = 0xcff;
+    if (AdcGet::door_sensor() < door_sensor_disconnected_threshold) {
+        return true;
+    }
+
     if (get_loveboard_status().data_valid) {
         return false; // valid data, fw compatible
     }
@@ -78,11 +61,11 @@ bool Configuration::is_fw_incompatible_with_hw() {
         }
     }
 
-    return mk35_extruder_detected;
-
-#else
-    return false; // There is no need for this compatibility check on other build configurations
+    if (mk35_extruder_detected) {
+        return true;
+    }
 #endif
+    return false;
 }
 
 } // namespace buddy::hw

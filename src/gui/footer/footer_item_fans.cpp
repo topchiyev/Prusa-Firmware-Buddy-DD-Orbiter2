@@ -30,33 +30,33 @@ string_view_utf8 IFooterItemFan::static_makeViewIntoBuff(int value, buffer_t &bu
 }
 
 IFooterItemFan::IFooterItemFan(window_t *parent, const img::Resource *icon, view_maker_cb view_maker, reader_cb value_reader)
-    : AddSuperWindow<FooterIconText_IntVal>(parent, icon, view_maker, value_reader) {
+    : FooterIconText_IntVal(parent, icon, view_maker, value_reader) {
 }
 
 FooterItemPrintFan::FooterItemPrintFan(window_t *parent)
-    : AddSuperWindow<IFooterItemFan>(parent, &img::turbine_16x16, static_makeView, static_readValue) {
+    : IFooterItemFan(parent, &img::turbine_16x16, static_makeView, static_readValue) {
 }
 
 int FooterItemPrintFan::static_readValue() {
 #if HAS_TOOLCHANGER()
-    if (marlin_vars()->active_extruder == PrusaToolChanger::MARLIN_NO_TOOL_PICKED) {
+    if (marlin_vars().active_extruder == PrusaToolChanger::MARLIN_NO_TOOL_PICKED) {
         return no_tool_value;
     }
 #endif /*HAS_TOOLCHANGER()*/
 
-    return marlin_vars()->active_hotend().print_fan_rpm;
+    return marlin_vars().active_hotend().print_fan_rpm;
 }
 
 FooterItemHeatBreakFan::FooterItemHeatBreakFan(window_t *parent)
-    : AddSuperWindow<IFooterItemFan>(parent, &img::fan_16x16, static_makeView, static_readValue) {
+    : IFooterItemFan(parent, &img::fan_16x16, static_makeView, static_readValue) {
 }
 
 int FooterItemHeatBreakFan::static_readValue() {
 #if HAS_TOOLCHANGER()
-    if (marlin_vars()->active_extruder == PrusaToolChanger::MARLIN_NO_TOOL_PICKED) {
+    if (marlin_vars().active_extruder == PrusaToolChanger::MARLIN_NO_TOOL_PICKED) {
         return no_tool_value;
     }
 #endif /*HAS_TOOLCHANGER()*/
 
-    return marlin_vars()->active_hotend().heatbreak_fan_rpm;
+    return marlin_vars().active_hotend().heatbreak_fan_rpm;
 }

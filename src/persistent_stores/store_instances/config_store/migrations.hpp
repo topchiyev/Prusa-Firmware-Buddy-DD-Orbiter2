@@ -34,19 +34,45 @@ namespace deprecated_ids {
     inline constexpr uint16_t fsensor_enabled_v1[] {
         journal::hash("FSensor Enabled"),
     };
+#if PRINTER_IS_PRUSA_MK4()
+    inline constexpr uint16_t extended_printer_type[] {
+        journal::hash("400 step motors on X and Y axis"),
+    };
+#endif
+    inline constexpr uint16_t hostname[] {
+        decltype(DeprecatedStore::lan_hostname)::hashed_id,
+        decltype(DeprecatedStore::wifi_hostname)::hashed_id,
+    };
+    inline constexpr std::array loaded_filament_type {
+        decltype(DeprecatedStore::filament_type_0)::hashed_id,
+#if EXTRUDERS > 1
+            decltype(DeprecatedStore::filament_type_1)::hashed_id,
+            decltype(DeprecatedStore::filament_type_2)::hashed_id,
+            decltype(DeprecatedStore::filament_type_3)::hashed_id,
+            decltype(DeprecatedStore::filament_type_4)::hashed_id,
+            decltype(DeprecatedStore::filament_type_5)::hashed_id,
+#endif
+    };
 } // namespace deprecated_ids
 
 namespace migrations {
     // Commented thoroughly to be used as an example for more migrations.
     void selftest_result_pre_23(journal::Backend &backend);
 
-#if PRINTER_IS_PRUSA_XL // MINI goes directly from old eeprom to multiple footer items, MK4 gets its footer reset
+#if PRINTER_IS_PRUSA_XL() // MINI goes directly from old eeprom to multiple footer items, MK4 gets its footer reset
     void footer_setting_v1(journal::Backend &backend);
 #endif
     void footer_setting_v2(journal::Backend &backend);
 
     void selftest_result_pre_gears(journal::Backend &backend);
     void fsensor_enabled_v1(journal::Backend &backend);
+
+#if PRINTER_IS_PRUSA_MK4()
+    void extended_printer_type(journal::Backend &backend);
+#endif
+
+    void hostname(journal::Backend &backend);
+    void loaded_filament_type(journal::Backend &backend);
 } // namespace migrations
 
 /**
@@ -57,7 +83,7 @@ inline constexpr journal::Backend::MigrationFunction migration_functions[] {
 #if HAS_SELFTEST()
     { migrations::selftest_result_pre_23, deprecated_ids::selftest_result_pre_23 },
 #endif
-#if PRINTER_IS_PRUSA_XL && HAS_GUI() // MINI goes directly from old eeprom to multiple footer items, MK4 gets its footer reset
+#if PRINTER_IS_PRUSA_XL() && HAS_GUI() // MINI goes directly from old eeprom to multiple footer items, MK4 gets its footer reset
         { migrations::footer_setting_v1, deprecated_ids::footer_setting_v1 },
 #endif
 #if HAS_SELFTEST()
@@ -65,6 +91,13 @@ inline constexpr journal::Backend::MigrationFunction migration_functions[] {
 #endif
         { migrations::fsensor_enabled_v1, deprecated_ids::fsensor_enabled_v1 },
         { migrations::footer_setting_v2, deprecated_ids::footer_setting_v2 },
+
+#if PRINTER_IS_PRUSA_MK4()
+        { migrations::extended_printer_type, deprecated_ids::extended_printer_type },
+#endif
+
+        { migrations::hostname, deprecated_ids::hostname },
+        { migrations::loaded_filament_type, deprecated_ids::loaded_filament_type },
 };
 
 // Span of migration versions to simplify passing it around

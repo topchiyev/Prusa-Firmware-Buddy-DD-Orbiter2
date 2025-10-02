@@ -1,12 +1,13 @@
 #include "touchscreen_common.hpp"
-
+#include "touchscreen.hpp"
 #include <option/has_side_leds.h>
+#include <logging/log.hpp>
 
 #if HAS_SIDE_LEDS()
     #include <leds/side_strip_control.hpp>
 #endif
 
-LOG_COMPONENT_DEF(Touch, LOG_SEVERITY_INFO);
+LOG_COMPONENT_DEF(Touch, logging::Severity::info);
 
 METRIC_DEF(metric_touch_event_, "touch_evt", METRIC_VALUE_STRING, 0, METRIC_HANDLER_ENABLE_ALL);
 METRIC_DEF(metric_touch_pos, "touch_pos", METRIC_VALUE_CUSTOM, 0, METRIC_HANDLER_ENABLE_ALL);
@@ -15,8 +16,16 @@ metric_t *metric_touch_event() {
     return &metric_touch_event_;
 }
 
+Touchscreen_Base::LenientClickGuard::LenientClickGuard() {
+    touchscreen.lenient_click_allowed_++;
+}
+Touchscreen_Base::LenientClickGuard::~LenientClickGuard() {
+    touchscreen.lenient_click_allowed_--;
+}
+
 bool Touchscreen_Base::is_enabled() const {
-    return config_store().touch_enabled.get() && !is_disabled_till_reset_;
+    // !!! is_disabled_till_reset_ check must be before config_store
+    return !is_disabled_till_reset_ && config_store().touch_enabled.get();
 }
 
 void Touchscreen_Base::set_enabled(bool set) {
@@ -97,6 +106,9 @@ void Touchscreen_Base::recognize_gesture() {
     const point_i16_t touch_pos_diff = point_i16_t::from_point(last_touch_pos) - point_i16_t::from_point(gesture_start_pos_);
     const point_i16_t touch_pos_diff_abs(abs(touch_pos_diff.x), abs(touch_pos_diff.y));
 
+    /// Distance from the gesture_start_pos that is still considered a click
+    const int16_t click_max_diff = lenient_click_allowed_ ? 3 : 0;
+
     /// Distance from the gesture_start_pos that starts being considered a swipe gesture
     static constexpr int16_t gesture_min_diff = 10;
 
@@ -110,7 +122,7 @@ void Touchscreen_Base::recognize_gesture() {
 
     log_info(Touch, "abs diff %i %i", touch_pos_diff_abs.x, touch_pos_diff_abs.y);
 
-    if (touch_pos_diff_abs == point_i16_t { 0, 0 }) {
+    if (touch_pos_diff_abs.x <= click_max_diff && touch_pos_diff.y <= click_max_diff) {
         event.type = GUI_event_t::TOUCH_CLICK;
 
     } else if (touch_pos_diff_abs.y >= gesture_min_diff && static_cast<float>(touch_pos_diff_abs.x) / static_cast<float>(touch_pos_diff_abs.y) <= swipe_max_angle_tan) {

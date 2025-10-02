@@ -7,7 +7,7 @@
 #include "window_icon.hpp"
 #include "selftest_sub_state.hpp"
 
-class WindowIcon_OkNg : public AddSuperWindow<window_aligned_t> {
+class WindowIcon_OkNg : public window_aligned_t {
     enum { ANIMATION_STEP_MS = 128 };
 
 public:
@@ -17,7 +17,7 @@ public:
 
 protected:
     virtual void unconditionalDraw() override;
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 
 private:
     SelftestSubtestState_t state;

@@ -45,13 +45,15 @@ private:
 
 struct AxisState {
     AxisState(AxisEnum axis)
-        : axis_index(axis) {}
+        : axis_index(axis)
+        , enabled(false)
+        , active(false) {}
 
     const int axis_index;
+    std::atomic<bool> enabled = false; // Axis enabled for this axis
+    std::atomic<bool> active = false; // Phase stepping interrupt active
 
     CorrectedCurrentLut forward_current, backward_current;
-
-    std::atomic<bool> active = false;
 
     bool inverted = false; // Inverted axis direction flag
     int zero_rotor_phase = 0; // Rotor phase for position 0
@@ -73,7 +75,7 @@ struct AxisState {
     // will dequeue items from pending_targets and set it as the current_target. When the position
     // is reached the cycle repeats, until no more targets are present and current_target is reset.
     std::optional<MoveTarget> current_target; // Current target to move
-    CircularQueue<MoveTarget, 16> pending_targets; // 16 element queue of pre-processed elements
+    AtomicCircularQueue<MoveTarget, unsigned, 16> pending_targets; // 16 element queue of pre-processed elements
     MoveTarget next_target; // Next planned target to move
 
     // current_target_end_time is used to ensure pending_targets is replenished from the move ISR
@@ -179,9 +181,9 @@ step_event_info_t next_step_event_input_shaping(
 void handle_periodic_refresh();
 
 /**
- * Return whether any of the axis is in phase stepping mode
+ * Return whether any axis is in phase stepping mode
  */
-bool any_axis_active();
+bool any_axis_enabled();
 
 /**
  * Given axis state and time in µs ticks from movement start, compute axis
@@ -225,12 +227,37 @@ int logical_ustep(AxisEnum axis);
 void synchronize();
 
 /**
+ * Check phase stepping internal state
+ * NOTE: To be called while idle!
+ */
+    #ifndef _DEBUG
+static constexpr void check_state() {}
+    #else
+void check_state();
+    #endif
+
+/**
  * This array keeps axis state (and LUT tables) for each axis
  **/
-extern std::array<
-    std::unique_ptr<AxisState>,
-    opts::SUPPORTED_AXIS_COUNT>
-    axis_states;
+extern std::array<AxisState, opts::SUPPORTED_AXIS_COUNT> axis_states;
+
+    /**
+     * Ensure init() has been called
+     */
+    #ifndef _DEBUG
+static constexpr void assert_initialized() {}
+    #else
+void assert_initialized();
+    #endif
+
+    /**
+     * Ensure phase stepping is fully disabled on all axes
+     */
+    #ifndef _DEBUG
+static constexpr void assert_disabled() {}
+    #else
+void assert_disabled();
+    #endif
 
 /**
  * Check if given axis is being used for phase stepping or not.
@@ -238,8 +265,9 @@ extern std::array<
  * Note: This is an in-line definition so this short function can be in-lined
  */
 inline bool is_enabled(AxisEnum axis_num) {
+    assert_initialized();
     if (axis_num < opts::SUPPORTED_AXIS_COUNT) {
-        return axis_states[axis_num]->active;
+        return axis_states[axis_num].enabled;
     }
     return false;
 }
@@ -264,67 +292,47 @@ public:
 };
 
 /**
- * Check wether init() has been called
- */
-static inline bool initialized() {
-    return std::ranges::all_of(axis_states, [](const auto &state) { return state != nullptr; });
-}
-
-    /**
-     * Ensure init() has been called
-     */
-    #ifndef _DEBUG
-static constexpr void assert_initialized() {}
-    #else
-void assert_initialized();
-    #endif
-
-/**
- * RAII guard for temporary disabling/enabling phase stepping with planner synchronization.
+ * RAII guard for temporary setting phase stepping state with planner synchronization.
  **/
-template <bool ENABLED>
-class EnsureState {
-    bool released = false;
+class StateRestorer {
+    bool released = true;
     bool any_axis_change = false;
     std::array<bool, opts::SUPPORTED_AXIS_COUNT> _prev_active = {};
 
 public:
-    EnsureState() {
+    StateRestorer() {}
+    StateRestorer(bool new_state) {
+        set_state(new_state);
+    }
+
+    StateRestorer(const StateRestorer &) = delete;
+    StateRestorer &operator=(const StateRestorer &) = delete;
+    StateRestorer(StateRestorer &&) = delete;
+
+    ~StateRestorer() {
+        release();
+    }
+
+    void set_state(bool new_state) {
         assert_initialized();
 
-        any_axis_change = std::ranges::any_of(axis_states, [](const auto &state) -> bool {
-            return state->active != ENABLED;
+        any_axis_change = std::ranges::any_of(axis_states, [&](const auto &state) -> bool {
+            return state.enabled != new_state;
         });
 
         if (any_axis_change) {
             synchronize();
 
             for (std::size_t i = 0; i != axis_states.size(); i++) {
-                _prev_active[i] = axis_states[i]->active;
-                phase_stepping::enable(AxisEnum(i), ENABLED);
+                if (released) {
+                    // save original state on first change
+                    _prev_active[i] = axis_states[i].enabled;
+                }
+                phase_stepping::enable(AxisEnum(i), new_state);
             }
+
+            released = false;
         }
-    }
-
-    EnsureState(const EnsureState &) = delete;
-    EnsureState(EnsureState &&other) {
-        *this = std::move(other);
-    };
-    EnsureState &operator=(const EnsureState &) = delete;
-    EnsureState &operator=(EnsureState &&other) {
-        released = other.released;
-        any_axis_change = other.any_axis_change;
-        _prev_active = other._prev_active;
-
-        // Invalidate the previous object so it doesn't reset the settings
-        other.released = true;
-        other.any_axis_change = false;
-
-        return *this;
-    };
-
-    ~EnsureState() {
-        release();
     }
 
     void release() {
@@ -341,8 +349,18 @@ public:
     }
 };
 
-using EnsureEnabled = EnsureState<true>;
-using EnsureDisabled = EnsureState<false>;
+class EnsureEnabled : public StateRestorer {
+public:
+    EnsureEnabled()
+        : StateRestorer(true) {}
+};
+
+class EnsureDisabled : public StateRestorer {
+public:
+    EnsureDisabled()
+        : StateRestorer(false) {}
+};
+
 using EnsureSuitableForHoming = std::conditional_t<
     option::has_burst_stepping,
     EnsureNoChange, EnsureDisabled>;

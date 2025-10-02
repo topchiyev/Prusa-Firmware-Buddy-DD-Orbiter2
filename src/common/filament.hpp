@@ -1,120 +1,171 @@
 #pragma once
-#include <stdio.h>
-#include "general_response.hpp"
-#include "printers.h"
+
+#include <cstdio>
 #include <cstring>
+#include <cstdint>
+#include <variant>
 
-namespace filament {
+#include <str_utils.hpp>
 
-struct Description {
-    uint16_t nozzle;
-    uint16_t nozzle_preheat;
-    uint16_t heatbed;
-    Response response;
+// !!! DO NOT CHANGE - this is used in config store
+/// Maximum length of a filament name, including the terminating zero
+constexpr size_t filament_name_buffer_size = 8;
+
+/// Maximum ever expected preset filament type count
+constexpr size_t max_preset_filament_type_count = 32;
+
+/// Maximum ever expected user filament type count
+constexpr size_t max_user_filament_type_count = 32;
+
+/// Maximum ever expected count of  all filament types
+constexpr size_t max_total_filament_count = max_user_filament_type_count + max_preset_filament_type_count;
+
+/// Actually defined user filament type count
+constexpr size_t user_filament_type_count = 8;
+
+/// Should match extruder count (or be higher), one for each extruder
+/// Hardcoded to prevent dependency pollution
+constexpr size_t adhoc_filament_type_count = 6;
+
+// !!! DO NOT CHANGE - this is used in config store
+struct __attribute__((packed)) FilamentTypeParameters {
+
+public:
+    /// Name of the filament (zero terminated).
+    /// Keeping this as not array for ease of assignment and reading using snprintf
+    char name[filament_name_buffer_size] = "";
+
+    /// Nozzle temperature for the filament, in degrees Celsius
+    uint16_t nozzle_temperature;
+
+    /// Nozzle preheat temperature for the filament, in degrees Celsius
+    uint16_t nozzle_preheat_temperature = 170;
+
+    /// Bed temperature for the filament, in degrees Celsius
+    uint8_t heatbed_temperature;
+
+    /// Whether the filament requires filtration (used in XL enclosure)
+    bool requires_filtration : 1 = false;
+
+    /// Whether the filament is abrasive and requires hardened (abrasive-resistant) nozzle
+    bool is_abrasive : 1 = false;
+
+    // Keeping the remaining bits of the bitfield unused, but zero initizliazed, for future proofing
+    uint8_t _unused : 6 = 0;
+
+public:
+    constexpr bool operator==(const FilamentTypeParameters &) const = default;
+    constexpr bool operator!=(const FilamentTypeParameters &) const = default;
 };
 
-enum class Type : uint8_t {
-    NONE = 0,
-    PLA,
-    PETG,
-    ASA,
-    PC,
-    PVB,
-    ABS,
-    HIPS,
-    PP,
-    FLEX,
-    PA,
-    _last = PA
+// !!! DO NOT REORDER, DO NOT CHANGE - this is used in config store
+enum class PresetFilamentType : uint8_t {
+    PLA = 0,
+    PETG = 1,
+    ASA = 2,
+    PC = 3,
+    PVB = 4,
+    ABS = 5,
+    HIPS = 6,
+    PP = 7,
+    FLEX = 8,
+    PA = 9,
+
+    _count
 };
 
-struct ColorIndex {
-    const char *name;
-    uint32_t color;
+static constexpr size_t preset_filament_type_count = static_cast<size_t>(PresetFilamentType::_count);
+
+/// User-configurable "presets" for filaments
+struct UserFilamentType {
+    uint8_t index = 0;
+
+    inline constexpr bool operator==(const UserFilamentType &) const = default;
+    inline constexpr bool operator!=(const UserFilamentType &) const = default;
 };
 
-enum class ColorName : uint32_t {
-    NONE = 0,
-    BLACK,
-    BLUE,
-    GREEN,
-    BROWN,
-    PURPLE,
-    GRAY,
-    TERRACOTTA,
-    SILVER,
-    GOLD,
-    RED,
-    PINK,
-    ORANGE,
-    TRANSPARENT,
-    YELLOW,
-    WHITE,
-    _last = WHITE
+/// Ad-hoc filament type, adjustable, one for each toolhead.
+/// Not listed in all_filament_types.
+/// The parameters can be entered directly during preheat by selecting a special option in the preheat menu.
+struct AdHocFilamentType {
+    uint8_t tool = 0;
+
+    inline constexpr bool operator==(const AdHocFilamentType &) const = default;
+    inline constexpr bool operator!=(const AdHocFilamentType &) const = default;
 };
 
-const ColorIndex colortable[size_t(filament::ColorName::_last) + 1] = {
-    { "NONE", 0 },
-    { "BLACK", 0x000000 },
-    { "BLUE", 0x0000FF },
-    { "GREEN", 0x00FF00 },
-    { "BROWN", 0x800000 },
-    { "PURPLE", 0x800080 },
-    { "GRAY", 0x999999 },
-    { "TERRACOTTA", 0xB87F6A },
-    { "SILVER", 0xC0C0C0 },
-    { "GOLD", 0xD4AF37 },
-    { "RED", 0xFF0000 },
-    { "PINK", 0xFF007F },
-    { "ORANGE", 0xFF8000 },
-    { "TRANSPARENT", 0xF0F0F0 },
-    { "YELLOW", 0xFFFF00 },
-    { "WHITE", 0xFFFFFF }
+struct NoFilamentType {
+    inline constexpr bool operator==(const NoFilamentType &) const = default;
+    inline constexpr bool operator!=(const NoFilamentType &) const = default;
 };
 
-constexpr Type default_type = Type::PLA;
-constexpr float cold_nozzle = 50.f;
-constexpr float cold_bed = 45.f;
+using FilamentType_ = std::variant<NoFilamentType, PresetFilamentType, UserFilamentType, AdHocFilamentType>;
 
-Type get_type(Response resp);
-Type get_type(const char *name, size_t name_len);
+/// Count of all filament types
+constexpr size_t total_filament_type_count = preset_filament_type_count + user_filament_type_count;
 
-const Description &get_description(Type type);
-const char *get_name(Type type);
+struct FilamentType : public FilamentType_ {
 
-Type get_type_to_load();
-void set_type_to_load(Type filament);
+public:
+    // For FilamentType::none
+    static constexpr NoFilamentType none = {};
 
-// TODO: unify with the one in gcode_info
-struct Colour {
-    uint8_t red;
-    uint8_t green;
-    uint8_t blue;
+public:
+    // * Constructors
 
-    int to_int() const {
-        return red << 16 | green << 8 | blue;
+    // Inherit parent constructors
+    using FilamentType_::FilamentType_;
+
+    constexpr FilamentType()
+        : variant(NoFilamentType {}) {}
+
+public:
+    // * Name/parameters
+
+    /// \returns filament type with the corresponding name
+    /// !!! This disregards ad-hoc filament types
+    static FilamentType from_name(const std::string_view &name);
+
+    /// \returns whether the filament type is of the specified name.
+    /// !!! Prefer using "loaded_filament.matches(b_name)" over "loaded_filament == FilamentType::from_name(b_name)" where it makes sense.
+    /// !!! This is because "loaded_filament" could be an ad-hoc filament, which is never returned from FilamentType::from_name.
+    bool matches(const std::string_view &name) const;
+
+    /// Appends name of the filament to the builder
+    /// If the filament type is non-preset, it visually distincts it (for example by appending PLA (Custom))
+    void build_name_with_info(StringBuilder &builder) const;
+
+    /// \returns parameters of the filament type
+    FilamentTypeParameters parameters() const;
+
+    /// Sets parameters of the filament type, provided that the filament type is customizable
+    void set_parameters(const FilamentTypeParameters &set) const;
+
+    /// \returns Modified parameters of the filament type (calls \p f(params) and stores the modified data)
+    template <class F>
+    void modify_parameters(F &&f) const {
+        FilamentTypeParameters params = parameters();
+        f(params);
+        set_parameters(params);
     }
 
-    static Colour from_string(char *name) {
-        // first name is not valid ("---")
-        size_t name_len = strlen(name);
-        for (size_t i = size_t(ColorName::NONE) + 1; i <= size_t(ColorName::_last); ++i) {
-            if ((strlen(colortable[i].name) == name_len) && (!strncmp(name, colortable[i].name, name_len))) {
-                return from_int(colortable[i].color);
-            }
-        }
-        return from_int(atoi(name));
+    /// \returns whether the filaments parameters can be adjusted by the user
+    inline bool is_customizable() const {
+        return std::holds_alternative<UserFilamentType>(*this) || std::holds_alternative<AdHocFilamentType>(*this);
     }
 
-    static Colour from_int(int value) {
-        return Colour {
-            .red = static_cast<uint8_t>((value >> 16) & 0xFF),
-            .green = static_cast<uint8_t>((value >> 8) & 0xFF),
-            .blue = static_cast<uint8_t>(value & 0xFF),
-        };
+    /// \returns whether the filament is visible - shown in standard filament lists
+    bool is_visible() const;
+
+    void set_visible(bool set) const;
+
+public:
+    // * Operators
+
+    explicit operator bool() const {
+        return !std::holds_alternative<NoFilamentType>(*this);
     }
+
+    inline constexpr bool operator==(const FilamentType &) const = default;
+    inline constexpr bool operator!=(const FilamentType &) const = default;
 };
-
-std::optional<Colour> get_color_to_load();
-void set_color_to_load(std::optional<Colour> color);
-}; // namespace filament

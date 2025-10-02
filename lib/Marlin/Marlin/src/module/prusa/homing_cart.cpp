@@ -50,6 +50,10 @@ static int calibrated_offset_mscnt(const AxisEnum axis, const int mscnt, bool &c
  * \returns offset [mm] to be subtracted from the current axis position to have correct position
  */
 float calibrated_home_offset(const AxisEnum axis) {
+    if (axis >= config_store_ns::CurrentStore::precise_homing_axis_count) {
+        return 0;
+    }
+
     bool calibrated;
     const int cal = get_calibrated_home(axis, calibrated);
     if (!calibrated) {
@@ -88,7 +92,7 @@ static int32_t home_and_get_calibration_offset(AxisEnum axis, int axis_home_dir,
         if ((probe_offset >= axis_home_min_diff(axis))
             && (probe_offset <= axis_home_max_diff(axis))
             && store_samples) {
-            PersistentStorage::pushHomeSample(mscnt, 255, axis); // todo board_temp
+            PersistentStorage::pushHomeSample(mscnt, axis);
         } else {
             break_loop = true;
         }
@@ -147,7 +151,7 @@ static void save_divisor_to_eeprom(int try_nr, AxisEnum axis) {
     }
 }
 
-#if PRINTER_IS_PRUSA_MK4 || PRINTER_IS_PRUSA_MK3_5
+#if PRINTER_IS_PRUSA_MK4() || PRINTER_IS_PRUSA_MK3_5()
 inline constexpr uint8_t HOMING_SENSITIVITY_CALIBRATION_TRIES = 4;
 
 static void store_homing_sensitivity(AxisEnum axis, int16_t value) {
@@ -332,7 +336,7 @@ float home_axis_precise(AxisEnum axis, int axis_home_dir, bool can_calibrate, fl
         SERIAL_ECHOPAIR(" try ", try_nr);
         SERIAL_ECHOLN(" ==");
 
-#if PRINTER_IS_PRUSA_MK4
+#if PRINTER_IS_PRUSA_MK4()
         // If homing is failing, try to recalibrate sensitivity. We do this
         // after we couldn't home perfectly, and increase the perfect only
         // tries so that we still try to home perfectly after recalibrating

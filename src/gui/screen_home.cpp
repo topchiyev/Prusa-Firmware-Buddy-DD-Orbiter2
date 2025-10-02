@@ -10,8 +10,8 @@
 #include "print_utils.hpp"
 #include "filename_type.hpp"
 #include "settings_ini.hpp"
+#include <str_utils.hpp>
 #include <wui_api.h>
-#include <espif.h>
 
 #if ENABLED(POWER_PANIC)
     #include "power_panic.hpp"
@@ -45,6 +45,7 @@
 #include "screen_menu_settings.hpp"
 #include "screen_menu_filament.hpp"
 #include "screen_menu_control.hpp"
+#include <screen_menu_info.hpp>
 
 #if HAS_MMU2()
     #include "screen_menu_filament_mmu.hpp"
@@ -61,17 +62,15 @@
 bool __attribute__((weak)) netdev_is_enabled([[maybe_unused]] const uint32_t netdev_id) { return true; }
 
 bool screen_home_data_t::ever_been_opened = false;
-bool screen_home_data_t::try_esp_flash = true;
-bool screen_home_data_t::touch_broken_during_run = false;
 
-#ifdef USE_ST7789
+#if HAS_MINI_DISPLAY()
     #define GEN_ICON_NAMES(ICON) \
         { img::ICON##_64x64, img::ICON##_64x64_focused, img::ICON##_64x64_disabled }
-#endif // USE_ST7789
-#ifdef USE_ILI9488
+#endif
+#if HAS_LARGE_DISPLAY()
     #define GEN_ICON_NAMES(ICON) \
         { img::ICON##_80x80, img::ICON##_80x80_focused, img::ICON##_80x80_disabled }
-#endif // USE_ILI9488
+#endif
 
 static constexpr const WindowMultiIconButton::Pngs icons[] = {
     GEN_ICON_NAMES(print),
@@ -89,7 +88,7 @@ constexpr size_t iconNonMMUId = 2;
 constexpr size_t iconMMUId = 6;
 constexpr size_t buttonFilamentIndex = 2;
 
-#ifdef USE_ST7789
+#if HAS_MINI_DISPLAY()
 constexpr size_t buttonsXSpacing = 15;
 constexpr size_t buttonTextWidth = 80;
 constexpr size_t buttonTextHeight = 13; // font_regular_7x13
@@ -98,16 +97,16 @@ constexpr size_t buttonTopOffset = 88;
 constexpr size_t buttonTextTopOffset = 155;
 
 constexpr Rect16 logoRect = Rect16(41, 31, 158, 40);
-#endif // USE_ST7789
+#endif
 
-#ifdef USE_ILI9488
+#if HAS_LARGE_DISPLAY()
 constexpr size_t buttonsXSpacing = 40;
-constexpr size_t buttonTextWidth = 94;
+constexpr size_t buttonTextWidth = 99;
 constexpr size_t buttonTextHeight = 23;
 
 constexpr size_t buttonTopOffset = 53;
 constexpr size_t buttonTextTopOffset = buttonTopOffset + GuiDefaults::ButtonIconSize + 5;
-#endif // USE_ILI9488
+#endif
 
 constexpr size_t buttonTextSpacing = GuiDefaults::ButtonIconSize + buttonsXSpacing - buttonTextWidth;
 constexpr size_t buttonsLeftOffset = (GuiDefaults::ScreenWidth - 3 * GuiDefaults::ButtonIconSize - 2 * buttonsXSpacing) / 2;
@@ -142,32 +141,34 @@ const char *labels[] = {
 bool screen_home_data_t::usbWasAlreadyInserted = false;
 bool screen_home_data_t::need_check_wifi_credentials = true;
 
-static void FilamentBtn_cb() {
+static bool find_latest_gcode(char *fpath, int fpath_len);
+
+static void FilamentBtn_cb(window_t &) {
     Screens::Access()->Open(ScreenFactory::Screen<ScreenMenuFilament>);
 }
 
 #if HAS_MMU2()
-static void FilamentBtnMMU_cb() {
+static void FilamentBtnMMU_cb(window_t &) {
     Screens::Access()->Open(ScreenFactory::Screen<ScreenMenuFilamentMMU>);
 }
 #endif
 
 // clang-format off
 screen_home_data_t::screen_home_data_t()
-    : AddSuperWindow<screen_t>()
-    , usbInserted(marlin_vars()->media_inserted)
+    : screen_t()
+    , usbInserted(marlin_vars().media_inserted)
     , header(this)
     , footer(this)
-#ifdef USE_ST7789
-    , logo(this, logoRect, &img::printer_logo)
-#endif // USE_ST7789
+#if HAS_MINI_DISPLAY()
+    , logo(this, logoRect, &img::prusa_mini_logo_153x40)
+#endif
     , w_buttons {
-        { this, Rect16(), nullptr, []() { Screens::Access()->Open(ScreenFactory::Screen<screen_filebrowser_data_t>); } },
-        { this, Rect16(), nullptr, []() { marlin_client::gcode_printf("M1700 T-1"); } },
+        { this, Rect16(), nullptr, [](window_t&) { Screens::Access()->Open(ScreenFactory::Screen<screen_filebrowser_data_t>); } },
+        { this, Rect16(), nullptr, [](window_t&) { marlin_client::gcode_printf("M1700 T-1"); } },
         { this, Rect16(), nullptr, FilamentBtn_cb },
-        { this, Rect16(), nullptr, []() { Screens::Access()->Open(ScreenFactory::Screen<ScreenMenuControl>); } },
-        { this, Rect16(), nullptr, []() { Screens::Access()->Open(ScreenFactory::Screen<ScreenMenuSettings>); } },
-        { this, Rect16(), nullptr, []() { Screens::Access()->Open(ScreenFactory::Screen<ScreenMenuInfo>); }}
+        { this, Rect16(), nullptr, [](window_t&) { Screens::Access()->Open(ScreenFactory::Screen<ScreenMenuControl>); } },
+        { this, Rect16(), nullptr, [](window_t&) { Screens::Access()->Open(ScreenFactory::Screen<ScreenMenuSettings>); } },
+        { this, Rect16(), nullptr, [](window_t&) { Screens::Access()->Open(ScreenFactory::Screen<ScreenMenuInfo>); }}
     },
     w_labels {
         { this, Rect16(), is_multiline::no },
@@ -182,9 +183,8 @@ screen_home_data_t::screen_home_data_t()
     EnableLongHoldScreenAction();
     window_frame_t::ClrMenuTimeoutClose();
     window_frame_t::ClrOnSerialClose(); // don't close on Serial print
-    WindowFileBrowser::SetRoot("/usb");
 
-#ifndef USE_ST7789
+#if !HAS_MINI_DISPLAY()
     header.SetIcon(&img::home_shape_16x16);
 #endif
 #if !defined(_DEBUG) && !DEVELOPER_MODE()
@@ -223,9 +223,21 @@ screen_home_data_t::~screen_home_data_t() {
     GuiMediaEventsHandler::ConsumeOneClickPrinting();
 }
 
+#if HAS_NFC()
+void screen_home_data_t::update_nfc_state() {
+    if (GetLastDialog()) {
+        nfc_enable.reset();
+    } else {
+        if (!nfc_enable) {
+            nfc_enable.emplace();
+        }
+    }
+}
+#endif
+
 void screen_home_data_t::filamentBtnSetState() {
 #if HAS_MMU2()
-    const MMU2::xState new_state = MMU2::xState(marlin_vars()->mmu2_state.get());
+    const MMU2::xState new_state = MMU2::xState(marlin_vars().mmu2_state.get());
     if (new_state != mmu_state) {
         mmu_state = new_state;
 
@@ -271,7 +283,7 @@ void screen_home_data_t::handle_crash_dump() {
                         " Send it to: reports@prusa3d.com"),
             Responses_YesNo)
         == Response::Yes) {
-        auto do_stage = [&](string_view_utf8 msg, std::invocable<const ::crash_dump::DumpHandler *> auto fp) {
+        auto do_stage = [&](const string_view_utf8 &msg, std::invocable<const ::crash_dump::DumpHandler *> auto fp) {
             MsgBoxIconned box(GuiDefaults::DialogFrameRect, Responses_NONE, 0, nullptr, std::move(msg), is_multiline::yes, &img::info_58x58);
             box.Show();
             draw();
@@ -295,41 +307,14 @@ void screen_home_data_t::on_enter() {
     }
     first_event = false;
 
-#if !DEVELOPER_MODE()
-    #if HAS_SELFTEST_SNAKE()
     static bool first_time_check_st { true };
     if (first_time_check_st) {
         first_time_check_st = false;
         warn_unfinished_selftest_msgbox();
     }
-    #endif
 
+#if !DEVELOPER_MODE()
     handle_crash_dump();
-
-    if (touch_broken_during_run) {
-        static bool already_shown = false;
-        if (!already_shown) {
-            already_shown = true;
-            MsgBoxWarning(_("Touch disabled. This feature is work-in-progress and is going to be fully available in a future update."), Responses_Ok);
-        }
-    }
-
-    #if 0 /// disable the warning for now but let's keep it around as we might want to reenable it for the public release
-    static bool input_shaper_warning_shown = false;
-    if (!input_shaper_warning_shown) {
-        input_shaper_warning_shown = true;
-        MsgBoxISWarning(_(
-        #ifdef USE_ST7789
-                            "This firmware is still\nin development.\n\n"
-                            "Do not leave the printer unattended.\n\n"
-        #else
-                            "This firmware is still in development and is for testing purposes only.\n\n"
-                            "Do not leave the printer unattended.\n\n"
-        #endif
-                            "More info at prusa.io/input-shaper"),
-            Responses_Ok, 0, GuiDefaults::RectScreen);
-    }
-    #endif
 #endif
 }
 namespace {
@@ -400,19 +385,13 @@ void screen_home_data_t::handle_wifi_credentials() {
     if (has_wifi_credentials && (name_and_psk_status() == Config::Status::not_equal) && !option::developer_mode) {
         if (MsgBoxInfo(_("Wi-Fi credentials (SSID and password) discovered on the USB flash drive. Would you like to connect your printer to Wi-Fi now?"), Responses_YesNo, 1)
             == Response::Yes) {
-            const auto fw_state = esp_fw_state();
-            const bool esp_need_flash = fw_state == EspFwState::WrongVersion || fw_state == EspFwState::NoFirmware;
-            if (esp_need_flash) {
-                marlin_client::gcode("M997 S1"); // update esp, do not force update older fw
-            } else {
-                marlin_client::gcode("M1587"); // update esp credentials only
-            }
+            marlin_client::gcode("M1703 I");
             return;
         }
     }
 }
 
-void screen_home_data_t::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void screen_home_data_t::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     // TODO: This easily freezes home screen when flash action fails to start.
     // There are several places in the code where executing a flash gcode can
     // result in no-op and home screen stays active with events disabled.
@@ -457,7 +436,7 @@ void screen_home_data_t::windowEvent(EventLock /*has private ctor*/, window_t *s
         filamentBtnSetState();
 
 #if ENABLED(POWER_PANIC)
-        if (TaskDeps::check(TaskDeps::Dependency::usb_and_temp_ready) && !power_panic::is_power_panic_resuming())
+        if (TaskDeps::check(TaskDeps::Dependency::usb_temp_gui_ready) && !power_panic::is_power_panic_resuming())
 #endif // ENABLED(POWER_PANIC)
         { // every time usb is inserted we check wifi credentials
             if (usbInserted) {
@@ -472,29 +451,17 @@ void screen_home_data_t::windowEvent(EventLock /*has private ctor*/, window_t *s
 
 #if HAS_SELFTEST()
         if (!DialogHandler::Access().IsOpen()) {
-            // esp update has bigger priority tha one click print
-            const auto fw_state = esp_fw_state();
-            const bool esp_need_flash = fw_state == EspFwState::WrongVersion || fw_state == EspFwState::NoFirmware;
-            if (try_esp_flash && esp_need_flash && netdev_is_enabled(NETDEV_ESP_ID) && !option::developer_mode) {
-                try_esp_flash = false; // do esp flash only once (user can press abort)
-                marlin_client::gcode("M997 S1 O");
-                return;
-            } else {
-                // on esp update, can use one click print
-                if (HAS_HUMAN_INTERACTIONS() &&
+            if (HAS_HUMAN_INTERACTIONS() &&
     #if ENABLED(POWER_PANIC)
-                    TaskDeps::check(TaskDeps::Dependency::usb_and_temp_ready) && !power_panic::is_power_panic_resuming() &&
+                TaskDeps::check(TaskDeps::Dependency::usb_temp_gui_ready) && !power_panic::is_power_panic_resuming() &&
     #endif // ENABLED(POWER_PANIC)
-                    GuiMediaEventsHandler::ConsumeOneClickPrinting() && !usbh_power_cycle::block_one_click_print()) {
-                    // TODO this should be done in main thread before Event::MediaInserted is generated
-                    // if it is not the latest gcode might not be selected
-                    if (find_latest_gcode(
-                            gui_media_SFN_path,
-                            FILE_PATH_BUFFER_LEN,
-                            gui_media_LFN,
-                            FILE_NAME_BUFFER_LEN)) {
-                        print_begin(gui_media_SFN_path);
-                    }
+                GuiMediaEventsHandler::ConsumeOneClickPrinting() && !usbh_power_cycle::block_one_click_print()) {
+                // TODO this should be done in main thread before Event::MediaInserted is generated
+                // if it is not the latest gcode might not be selected
+
+                std::array<char, FILE_PATH_BUFFER_LEN> filepath;
+                if (find_latest_gcode(filepath.data(), filepath.size())) {
+                    print_begin(filepath.data());
                 }
             }
         }
@@ -508,11 +475,18 @@ void screen_home_data_t::windowEvent(EventLock /*has private ctor*/, window_t *s
     }
 #endif
 
-    SuperWindowEvent(sender, event, param);
+    screen_t::windowEvent(sender, event, param);
+
+#if HAS_NFC()
+    // This is to handle the Preheat dialog, that is put above this screen
+    // instead of replacing it, leaving NFC enabled.
+    update_nfc_state();
+#endif
 }
 
-bool screen_home_data_t::find_latest_gcode(char *fpath, int fpath_len, char *fname, int fname_len) {
-    strlcpy(fpath, "/usb", fpath_len);
+static bool find_latest_gcode(char *fpath, int fpath_len) {
+    auto sb = StringBuilder::from_ptr(fpath, fpath_len);
+    sb.append_string("/usb/");
 
     F_DIR_RAII_Iterator dir(fpath);
     if (dir.result == ResType::NOK) {
@@ -540,10 +514,8 @@ bool screen_home_data_t::find_latest_gcode(char *fpath, int fpath_len, char *fna
         return false;
     }
 
-    fpath[4] = '/';
-    strlcpy(fpath + 5, entry.sfn, fpath_len - 5);
-    strlcpy(fname, entry.lfn, fname_len);
-    return true;
+    sb.append_string(entry.sfn);
+    return sb.is_ok();
 }
 
 void screen_home_data_t::printBtnEna() {

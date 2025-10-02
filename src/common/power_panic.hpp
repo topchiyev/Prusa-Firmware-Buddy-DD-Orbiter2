@@ -14,10 +14,6 @@ void panic_loop();
 // Return true if print state has been stored
 bool state_stored();
 
-/// Load the powerpanic state and setup print progress
-/// @returns True if print can auto-recover
-bool setup_auto_recover_check();
-
 // Return the SFN media path of the print to be resumed
 const char *stored_media_path();
 
@@ -29,7 +25,7 @@ void reset();
 void prepare();
 
 // Start resuming a stored print
-void resume_print(bool start_paused);
+void resume_print();
 
 // Actually resume the print after starting paused
 void resume_continue();

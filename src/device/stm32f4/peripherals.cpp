@@ -10,18 +10,20 @@
 #include "adc.hpp"
 #include "timer_defaults.h"
 #include "PCA9557.hpp"
-#include "log.h"
+#include "TCA6408A.hpp"
+#include <logging/log.hpp>
 #include "timing_precise.hpp"
 #include "data_exchange.hpp"
 #include <option/has_puppies.h>
 #include <option/has_burst_stepping.h>
+#include <option/has_i2c_expander.h>
 #include <printers.h>
 
 // breakpoint
 #include "FreeRTOS.h"
 #include "task.h"
 
-#if (BOARD_IS_XBUDDY || BOARD_IS_XLBUDDY)
+#if (BOARD_IS_XBUDDY() || BOARD_IS_XLBUDDY())
     #include "hw_configuration.hpp"
 #endif
 
@@ -100,11 +102,14 @@ TIM_HandleTypeDef htim14;
 RTC_HandleTypeDef hrtc;
 RNG_HandleTypeDef hrng;
 
-#if BOARD_IS_XLBUDDY
 namespace buddy::hw {
-PCA9557 io_expander1(I2C_HANDLE_FOR(io_extender), 0x1);
-}
-#endif
+#if HAS_I2C_EXPANDER() // HAS_I2C_EXPANDER corresponds to FDM-MK4-GPIO, not io_expander1 which connects DWARFs
+TCA6408A io_expander2(I2C_HANDLE_FOR(io_expander2));
+#endif // HAS_I2C_EXPANDER()
+#if BOARD_IS_XLBUDDY()
+PCA9557 io_expander1(I2C_HANDLE_FOR(io_expander1), 0x1);
+#endif // BOARD_IS_XLBUDDY()
+} // namespace buddy::hw
 
 //
 // Initialization
@@ -161,7 +166,7 @@ void hw_gpio_init() {
 
     // Configure ESP GPIO0 (PROG, High for ESP module boot from Flash)
     GPIO_InitStruct.Pin =
-#if (BOARD_IS_XBUDDY || BOARD_IS_XLBUDDY)
+#if (BOARD_IS_XBUDDY() || BOARD_IS_XLBUDDY())
         GPIO_PIN_15
 #else
         GPIO_PIN_6
@@ -171,7 +176,7 @@ void hw_gpio_init() {
     GPIO_InitStruct.Pull = GPIO_PULLUP;
     GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_WritePin(GPIOE,
-#if (BOARD_IS_XBUDDY || BOARD_IS_XLBUDDY)
+#if (BOARD_IS_XBUDDY() || BOARD_IS_XLBUDDY())
         GPIO_PIN_15
 #else
         GPIO_PIN_6
@@ -207,9 +212,9 @@ void hw_dma_init() {
     __HAL_RCC_DMA1_CLK_ENABLE();
     __HAL_RCC_DMA2_CLK_ENABLE();
 
-#if (!PRINTER_IS_PRUSA_MINI)
+#if (!PRINTER_IS_PRUSA_MINI())
     // DMA1_Stream3_IRQn interrupt configuration
-    #if PRINTER_IS_PRUSA_XL
+    #if PRINTER_IS_PRUSA_XL()
     HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, ISR_PRIORITY_PUPPIES_USART, 0);
     #else
     HAL_NVIC_SetPriority(DMA1_Stream3_IRQn, ISR_PRIORITY_DEFAULT, 0);
@@ -217,7 +222,7 @@ void hw_dma_init() {
     HAL_NVIC_EnableIRQ(DMA1_Stream3_IRQn);
 #endif
 
-#if (BOARD_IS_XBUDDY || BOARD_IS_XLBUDDY)
+#if (BOARD_IS_XBUDDY() || BOARD_IS_XLBUDDY())
     // DMA1_Stream0_IRQn interrupt configuration
     HAL_NVIC_SetPriority(DMA1_Stream0_IRQn, ISR_PRIORITY_DEFAULT, 0);
     HAL_NVIC_EnableIRQ(DMA1_Stream0_IRQn);
@@ -237,7 +242,7 @@ void hw_dma_init() {
     HAL_NVIC_SetPriority(DMA2_Stream5_IRQn, ISR_PRIORITY_DEFAULT, 0);
     HAL_NVIC_EnableIRQ(DMA2_Stream5_IRQn);
     // DMA2_Stream7_IRQn interrupt configuration
-    #if PRINTER_IS_PRUSA_iX
+    #if PRINTER_IS_PRUSA_iX()
     HAL_NVIC_SetPriority(DMA2_Stream7_IRQn, ISR_PRIORITY_PUPPIES_USART, 0);
     #else
     HAL_NVIC_SetPriority(DMA2_Stream7_IRQn, ISR_PRIORITY_DEFAULT, 0);
@@ -248,7 +253,7 @@ void hw_dma_init() {
     HAL_NVIC_SetPriority(DMA1_Stream0_IRQn, ISR_PRIORITY_DEFAULT, 0);
     HAL_NVIC_EnableIRQ(DMA1_Stream0_IRQn);
 
-#if BOARD_IS_XLBUDDY
+#if BOARD_IS_XLBUDDY()
     // DMA1_Stream1_IRQn interrupt configuration
     HAL_NVIC_SetPriority(DMA1_Stream1_IRQn, ISR_PRIORITY_PUPPIES_USART, 0);
     HAL_NVIC_EnableIRQ(DMA1_Stream1_IRQn);
@@ -271,7 +276,7 @@ void hw_dma_init() {
     HAL_NVIC_SetPriority(DMA2_Stream1_IRQn, ISR_PRIORITY_DEFAULT, 0);
     HAL_NVIC_EnableIRQ(DMA2_Stream1_IRQn);
 // DMA2_Stream2_IRQn interrupt configuration
-#if (PRINTER_IS_PRUSA_iX)
+#if (PRINTER_IS_PRUSA_iX())
     HAL_NVIC_SetPriority(DMA2_Stream2_IRQn, ISR_PRIORITY_PUPPIES_USART, 0);
 #else
     HAL_NVIC_SetPriority(DMA2_Stream2_IRQn, ISR_PRIORITY_DEFAULT, 0);
@@ -316,7 +321,7 @@ void hw_adc1_init() {
     config_adc(&hadc1, ADC1, AdcChannel::ADC1_CH_CNT);
 
     // Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
-#if (BOARD_IS_BUDDY)
+#if (BOARD_IS_BUDDY())
     config_adc_ch(&hadc1, ADC_CHANNEL_10, AdcChannel::hotend_T);
     config_adc_ch(&hadc1, ADC_CHANNEL_4, AdcChannel::heatbed_T);
     config_adc_ch(&hadc1, ADC_CHANNEL_5, AdcChannel::board_T);
@@ -324,14 +329,14 @@ void hw_adc1_init() {
     config_adc_ch(&hadc1, ADC_CHANNEL_3, AdcChannel::heatbed_U);
     config_adc_ch(&hadc1, ADC_CHANNEL_TEMPSENSOR, AdcChannel::mcu_temperature);
     config_adc_ch(&hadc1, ADC_CHANNEL_VREFINT, AdcChannel::vref);
-#elif (BOARD_IS_XBUDDY && PRINTER_IS_PRUSA_MK3_5)
+#elif (BOARD_IS_XBUDDY() && PRINTER_IS_PRUSA_MK3_5())
     config_adc_ch(&hadc1, ADC_CHANNEL_10, AdcChannel::hotend_T);
     config_adc_ch(&hadc1, ADC_CHANNEL_4, AdcChannel::heatbed_T);
     config_adc_ch(&hadc1, ADC_CHANNEL_5, AdcChannel::heatbed_U);
     config_adc_ch(&hadc1, ADC_CHANNEL_3, AdcChannel::hotend_U);
     config_adc_ch(&hadc1, ADC_CHANNEL_VREFINT, AdcChannel::vref);
     config_adc_ch(&hadc1, ADC_CHANNEL_TEMPSENSOR, AdcChannel::mcu_temperature);
-#elif (BOARD_IS_XBUDDY)
+#elif (BOARD_IS_XBUDDY())
     config_adc_ch(&hadc1, ADC_CHANNEL_10, AdcChannel::hotend_T);
     config_adc_ch(&hadc1, ADC_CHANNEL_4, AdcChannel::heatbed_T);
     config_adc_ch(&hadc1, ADC_CHANNEL_5, AdcChannel::heatbed_U);
@@ -339,7 +344,7 @@ void hw_adc1_init() {
     config_adc_ch(&hadc1, ADC_CHANNEL_3, AdcChannel::hotend_U);
     config_adc_ch(&hadc1, ADC_CHANNEL_VREFINT, AdcChannel::vref);
     config_adc_ch(&hadc1, ADC_CHANNEL_TEMPSENSOR, AdcChannel::mcu_temperature);
-#elif BOARD_IS_XLBUDDY
+#elif BOARD_IS_XLBUDDY()
     config_adc_ch(&hadc1, ADC_CHANNEL_4, AdcChannel::dwarf_I);
     config_adc_ch(&hadc1, ADC_CHANNEL_5, AdcChannel::mux1_y);
     config_adc_ch(&hadc1, ADC_CHANNEL_8, AdcChannel::mux1_x);
@@ -359,13 +364,16 @@ void hw_adc3_init() {
     config_adc(&hadc3, ADC3, AdcChannel::ADC3_CH_CNT);
 
     // Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
-    #if BOARD_IS_XBUDDY
+    #if BOARD_IS_XBUDDY()
     config_adc_ch(&hadc3, ADC_CHANNEL_4, AdcChannel::MMU_I);
     config_adc_ch(&hadc3, ADC_CHANNEL_8, AdcChannel::board_T);
     config_adc_ch(&hadc3, ADC_CHANNEL_9, AdcChannel::hotend_I);
     config_adc_ch(&hadc3, ADC_CHANNEL_14, AdcChannel::board_I);
     config_adc_ch(&hadc3, ADC_CHANNEL_15, AdcChannel::case_T);
-    #elif BOARD_IS_XLBUDDY
+        #if PRINTER_IS_PRUSA_MK4()
+    config_adc_ch(&hadc3, ADC_CHANNEL_15, AdcChannel::door_sensor);
+        #endif
+    #elif BOARD_IS_XLBUDDY()
     config_adc_ch(&hadc3, ADC_CHANNEL_8, AdcChannel::board_T);
     config_adc_ch(&hadc3, ADC_CHANNEL_4, AdcChannel::mux2_y);
     config_adc_ch(&hadc3, ADC_CHANNEL_10, AdcChannel::mux2_x);
@@ -430,7 +438,7 @@ void hw_uart6_init() {
 #if HAS_PUPPIES() && (uart_puppies == 6)
     huart6.Init.BaudRate = 230400;
 #elif uart_esp == 6
-    huart6.Init.BaudRate = get_auto_update_flag() == FwAutoUpdate::tester_mode ? tester_uart_speed : uart6_default_speed;
+    huart6.Init.BaudRate = running_in_tester_mode() ? tester_uart_speed : uart6_default_speed;
 #else
     huart6.Init.BaudRate = uart6_default_speed;
 #endif
@@ -625,7 +633,7 @@ void hw_i2c1_init() {
 
 #if HAS_I2CN(2)
 
-// speed must be 400k, to speedup PersistentStorage erase (mk3.9/4 switch)
+// speed must be 400k, maybe, for reasons lost in time
 static constexpr uint32_t i2c2_speed = 400'000;
 
 void hw_i2c2_pins_init() {
@@ -735,14 +743,15 @@ void hw_spi2_init() {
     hspi2.Init.Mode = SPI_MODE_MASTER;
     hspi2.Init.Direction = SPI_DIRECTION_2LINES;
     hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
+    hspi2.Init.NSS = SPI_NSS_SOFT;
+#if spi_accelerometer == 2
+    hspi2.Init.CLKPolarity = SPI_POLARITY_HIGH;
+    hspi2.Init.CLKPhase = SPI_PHASE_2EDGE;
+    hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8
+#elif spi_lcd == 2
     hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
     hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
-    hspi2.Init.NSS = SPI_NSS_SOFT;
-    hspi2.Init.BaudRatePrescaler =
-#if spi_accelerometer == 2
-        SPI_BAUDRATEPRESCALER_8
-#elif spi_lcd == 2
-        SPI_BAUDRATEPRESCALER_2
+    hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2
 #endif
         ;
     hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
@@ -762,7 +771,7 @@ void hw_spi3_init() {
     hspi3.Init.CLKPolarity = SPI_POLARITY_LOW;
     hspi3.Init.CLKPhase = SPI_PHASE_1EDGE;
     hspi3.Init.NSS = SPI_NSS_SOFT;
-#if (BOARD_IS_BUDDY)
+#if (BOARD_IS_BUDDY())
     hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
 #else
     hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_8;
@@ -927,7 +936,7 @@ void hw_tim3_init() {
     TIM_OC_InitTypeDef sConfigOC {};
 
     htim3.Instance = TIM3;
-#if (PRINTER_IS_PRUSA_MK4 || PRINTER_IS_PRUSA_MK3_5 || PRINTER_IS_PRUSA_iX)
+#if (PRINTER_IS_PRUSA_MK4() || PRINTER_IS_PRUSA_MK3_5() || PRINTER_IS_PRUSA_iX())
     htim3.Init.Prescaler = 11; // 36us, 33.0kHz
 #else
     htim3.Init.Prescaler = TIM3_default_Prescaler; // 49ms, 20.3Hz

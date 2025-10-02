@@ -1,5 +1,7 @@
 #include <serial_printing.hpp>
 #include <state/printer_state.hpp>
+#include <option/developer_mode.h>
+#include <config_store/store_instance.hpp>
 
 uint32_t SerialPrinting::last_serial_indicator_ms = 0;
 
@@ -75,9 +77,18 @@ bool print_indicating_gcode(const char *command) {
 }
 
 void SerialPrinting::serial_command_hook(const char *command) {
+    // never enter serial printing in developer mode as it breaks live debugging
+    if (option::developer_mode) {
+        return;
+    }
+
     // if marlin server already printing, or is not able to start print, do not enter serial printing state
     // command will be still queued for execution regardless of this.
     if (!printer_state::remote_print_ready(true)) {
+        return;
+    }
+
+    if (!config_store().serial_print_screen_enabled.get()) {
         return;
     }
 

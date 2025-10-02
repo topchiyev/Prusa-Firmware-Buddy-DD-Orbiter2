@@ -20,62 +20,94 @@
  */
 
 class IWiInfo : public IWindowMenuItem {
-    static constexpr Font InfoFont = GuiDefaults::FontMenuSpecial;
-    static constexpr uint16_t icon_width = 16;
+    static constexpr Font font = GuiDefaults::FontMenuSpecial;
+
+public:
+    IWiInfo(const string_view_utf8 &value, const string_view_utf8 &label, const img::Resource *id_icon = nullptr, is_enabled_t enabled = is_enabled_t::yes, is_hidden_t hidden = is_hidden_t::no);
+
+    inline const string_view_utf8 &value() const {
+        return value_;
+    }
+
+    /// Updates extension width to match the info value
+    void update_extension_width();
+
+    void printExtension(Rect16 extension_rect, Color color_text, Color color_back, ropfn raster_op) const override;
 
 protected:
-    void printInfo(Rect16 extension_rect, color_t color_back, string_view_utf8 info_str) const;
-    static uint16_t calculate_extension_width(ExtensionLikeLabel extension_like_label, size_t max_characters) {
-        return max_characters * (extension_like_label == ExtensionLikeLabel::yes ? width(GuiDefaults::FontMenuItems) : width(InfoFont));
-    }
-
-public:
-    IWiInfo(string_view_utf8 label, const img::Resource *id_icon, size_t info_len, is_enabled_t enabled, is_hidden_t hidden, ExtensionLikeLabel extension_like_label = ExtensionLikeLabel::no);
-    IWiInfo(uint32_t num_to_print, string_view_utf8 label, is_hidden_t hidden = is_hidden_t::no, const img::Resource *id_icon = nullptr);
-
-    virtual void click([[maybe_unused]] IWindowMenu &window_menu) {}
+    string_view_utf8 value_;
 };
 
-template <size_t INFO_LEN>
-class WiInfo : public IWiInfo {
-    char information[INFO_LEN] = "";
+/// IWiInfo with rebindable string view value
+class WiInfoString : public IWiInfo {
 
 public:
-    WiInfo(string_view_utf8 label, const img::Resource *id_icon, is_enabled_t enabled, is_hidden_t hidden, ExtensionLikeLabel extension_like_label = ExtensionLikeLabel::no)
-        : IWiInfo(label, id_icon, INFO_LEN, enabled, hidden, extension_like_label) {}
+    using IWiInfo::IWiInfo;
 
-    WiInfo(uint32_t num_to_print, string_view_utf8 label, is_hidden_t hidden = is_hidden_t::no, const img::Resource *id_icon = nullptr)
-        : WiInfo(label, id_icon, is_enabled_t::yes, hidden) {
-        itoa(num_to_print, information, 10);
-    }
+    void set_value(const string_view_utf8 &set);
+};
 
+/// IWiInfo working over a non-rebindable mutable string buffer
+class WiInfoArray : public IWiInfo {
+
+public:
+    WiInfoArray(std::span<char> value_span, const string_view_utf8 &label, const img::Resource *id_icon = nullptr, is_enabled_t enabled = is_enabled_t::yes, is_hidden_t hidden = is_hidden_t::no)
+        : IWiInfo({}, label, id_icon, enabled, hidden)
+        , value_span_(value_span) {}
+
+public:
     void ChangeInformation(const char *str) {
-        if (strncmp(information, str, INFO_LEN)) {
-            strlcpy(information, str, INFO_LEN);
-            information[INFO_LEN - 1] = 0;
-            InValidateExtension();
+        // -1 because value_span_ last char is always terminating \0 (would cause mismatch when cropped)
+        if (strncmp(value_span_.data(), str, value_span_.size() - 1) == 0) {
+            return;
         }
+
+        strlcpy(value_span_.data(), str, value_span_.size());
+        value_ = string_view_utf8::MakeRAM(value_span_.data()); // Force update to reset cached string size
+        update_extension_width();
+        InValidateExtension();
     }
 
-    void ChangeInformation(string_view_utf8 str) {
-        char buffer[INFO_LEN];
-        str.copyToRAM(buffer, INFO_LEN - 1);
-        ChangeInformation(buffer);
+private:
+    std::span<char> value_span_;
+};
+
+/// WiInfoArray, including the buffer
+template <size_t INFO_LEN>
+class WiInfo : public WiInfoArray {
+
+public:
+    WiInfo(const string_view_utf8 &label, const img::Resource *id_icon = nullptr, is_enabled_t enabled = is_enabled_t::yes, is_hidden_t hidden = is_hidden_t::no)
+        : WiInfoArray(value_array_, label, id_icon, enabled, hidden) {}
+
+    WiInfo(uint32_t num_to_print, const string_view_utf8 &label, is_hidden_t hidden = is_hidden_t::no, const img::Resource *id_icon = nullptr)
+        : WiInfo(label, id_icon, is_enabled_t::yes, hidden) {
+        decltype(value_array_) buf;
+        itoa(num_to_print, buf.data(), 10);
+        ChangeInformation(buf.data());
     }
 
-    virtual void printExtension(Rect16 extension_rect, [[maybe_unused]] color_t color_text, color_t color_back, [[maybe_unused]] ropfn raster_op) const override {
-        printInfo(extension_rect, color_back, string_view_utf8::MakeRAM(information));
+    using WiInfoArray::ChangeInformation;
+
+    void ChangeInformation(const string_view_utf8 &str) {
+        decltype(value_array_) buf;
+        str.copyToRAM(buf.data(), buf.size());
+        ChangeInformation(buf.data());
     }
+
     static constexpr size_t GetInfoLen() { return INFO_LEN; }
+
+protected:
+    std::array<char, INFO_LEN> value_array_ { 0 };
 };
 
 // Dev version of info
 template <size_t INFO_LEN>
 class WiInfoDev : public WiInfo<INFO_LEN> {
 public:
-    WiInfoDev(string_view_utf8 label, const img::Resource *id_icon, is_enabled_t enabled = is_enabled_t::yes)
+    WiInfoDev(const string_view_utf8 &label, const img::Resource *id_icon, is_enabled_t enabled = is_enabled_t::yes)
         : WiInfo<INFO_LEN>(label, id_icon, enabled, is_hidden_t::dev) {}
-    WiInfoDev(uint32_t num_to_print, string_view_utf8 label, const img::Resource *id_icon = nullptr)
+    WiInfoDev(uint32_t num_to_print, const string_view_utf8 &label, const img::Resource *id_icon = nullptr)
         : WiInfo<INFO_LEN>(num_to_print, label, is_hidden_t::dev, id_icon) {}
 };
 

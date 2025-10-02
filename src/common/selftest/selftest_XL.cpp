@@ -26,17 +26,21 @@
 #include "selftest_netstatus_interface.hpp"
 #include "selftest_dock_interface.hpp"
 #include "selftest_tool_offsets_interface.hpp"
-#include "selftest_nozzle_diameter_interface.hpp"
 #include "selftest_axis_config.hpp"
 #include "selftest_heater_config.hpp"
 #include "selftest_loadcell_config.hpp"
 #include "selftest_fsensor_config.hpp"
+#include "selftest_revise_printer_setup.hpp"
 #include "calibration_z.hpp"
 #include "fanctl.hpp"
 #include "timing.h"
 #include "selftest_result_type.hpp"
 #include <config_store/store_instance.hpp>
 #include "common/selftest/selftest_data.hpp"
+#include "i_selftest.hpp"
+#include "i_selftest_part.hpp"
+#include "selftest_result_type.hpp"
+#include <option/has_switched_fan_test.h>
 
 using namespace selftest;
 
@@ -61,15 +65,25 @@ static consteval SelftestFansConfig make_fan_config(uint8_t index) {
             ///  Blocked fan increases its RPMs over 7000.
             ///  With XL shroud the values can be 6200 - 6600 depending on fan shroud version.
             .rpm_min = 5300,
-            .rpm_max = 6799,
+            .rpm_max = 7000,
+        },
+        ///@note In order to distinguish between Black and Silver fan types,
+        // the limit is a bit strict at high range to distinguish Black fan with wrong setting.
+        // In the low range the Silver should not pass selftest with wrong setting, this limit should be safe.
+        .print_fan_40pct = {
+            .rpm_min = 2300,
+            .rpm_max = 5000,
         },
         .heatbreak_fan = {
-            .rpm_min = 6800,
+            .rpm_min = 6500,
             .rpm_max = 8700,
         },
     };
 }
+
+#if HAS_SWITCHED_FAN_TEST()
 static_assert(make_fan_config(0).print_fan.rpm_max < make_fan_config(0).heatbreak_fan.rpm_min, "These cannot overlap for switched fan detection.");
+#endif /* HAS_SWITCHED_FAN_TEST() */
 
 static constexpr SelftestFansConfig fans_configs[] = {
     make_fan_config(0),
@@ -246,6 +260,44 @@ static constexpr std::array<const DockConfig_t, HOTENDS> Config_Docks = { { make
 
 static constexpr ToolOffsetsConfig_t Config_ToolOffsets = {};
 
+// class representing whole self-test
+class CSelftest : public ISelftest {
+public:
+    CSelftest();
+
+public:
+    virtual bool IsInProgress() const override;
+    virtual bool IsAborted() const override;
+    virtual bool Start(const uint64_t test_mask, const selftest::TestData test_data) override; // parent has no clue about SelftestMask_t
+    virtual void Loop() override;
+    virtual bool Abort() override;
+
+protected:
+    void phaseSelftestStart();
+    void restoreAfterSelftest();
+    virtual void next() override;
+    void phaseShowResult();
+    void phaseDidSelftestPass();
+
+protected:
+    SelftestState_t m_State;
+    SelftestMask_t m_Mask;
+    ToolMask tool_mask = ToolMask::AllTools;
+    std::array<selftest::IPartHandler *, HOTENDS> pFans;
+    selftest::IPartHandler *pXAxis;
+    selftest::IPartHandler *pYAxis;
+    selftest::IPartHandler *pZAxis;
+    std::array<selftest::IPartHandler *, HOTENDS> pNozzles;
+    selftest::IPartHandler *pBed;
+    std::array<selftest::IPartHandler *, HOTENDS> m_pLoadcell;
+    std::array<selftest::IPartHandler *, HOTENDS> pDocks;
+    selftest::IPartHandler *pToolOffsets;
+    std::array<selftest::IPartHandler *, HOTENDS> pFSensor;
+    selftest::IPartHandler *pPhaseStepping;
+
+    SelftestResult m_result;
+};
+
 CSelftest::CSelftest()
     : m_State(stsIdle)
     , m_Mask(stmNone)
@@ -322,9 +374,6 @@ void CSelftest::Loop() {
             return;
         }
         break;
-    case stsPhaseStepping:
-        bsod("this should be gcode not selftest");
-        break;
     case stsFans:
         if (selftest::phaseFans(pFans, fans_configs)) {
             return;
@@ -335,6 +384,37 @@ void CSelftest::Loop() {
             return;
         }
         break;
+    case stsReviseSetupAfterFans: {
+        m_result = config_store().selftest_result.get();
+        bool fans_test_failed = false;
+
+        for (auto tool : m_result.tools) {
+            if (tool.printFan == TestResult_Failed) {
+                fans_test_failed = true;
+            }
+        }
+
+        if (fans_test_failed) {
+            switch (phase_revise_printer_setup()) {
+
+            case RevisePrinterSetupResult::running:
+                return;
+
+            case RevisePrinterSetupResult::do_not_retry:
+                break;
+
+            case RevisePrinterSetupResult::retry:
+                for (auto tool : m_result.tools) {
+                    tool.reset_fan_tests();
+                }
+                config_store().selftest_result.set(m_result);
+
+                m_State = stsFans;
+                return;
+            }
+        }
+        break;
+    }
     case stsLoadcell:
         if ((ret = selftest::phaseLoadcell(tool_mask, m_pLoadcell, Config_Loadcell))) {
             return;
@@ -342,11 +422,6 @@ void CSelftest::Loop() {
         break;
     case stsWait_loadcell:
         if (phaseWait()) {
-            return;
-        }
-        break;
-    case stsNozzleDiameter:
-        if ((ret = selftest::phaseNozzleDiameter(pNozzleDiameter))) {
             return;
         }
         break;
@@ -398,11 +473,33 @@ void CSelftest::Loop() {
             return;
         }
         break;
+
     case stsWait_heaters:
         if (phaseWait()) {
             return;
         }
         break;
+
+    case stsReviseSetupAfterHeaters:
+        m_result = config_store().selftest_result.get();
+
+        if (m_result.bed == TestResult_Failed) {
+            marlin_server::fsm_change(PhasesSelftest::Heaters_AskBedSheetAfterFail, {});
+            switch (marlin_server::get_response_from_phase(PhasesSelftest::Heaters_AskBedSheetAfterFail)) {
+
+            case Response::Retry:
+                m_State = stsHeaters_noz_ena;
+                return;
+
+            case Response::Ok:
+                break;
+
+            default:
+                return;
+            }
+        }
+        break;
+
     case stsFSensor_calibration:
         if ((ret = selftest::phaseFSensor(tool_mask, pFSensor, Config_FSensor))) {
             return;
@@ -428,7 +525,7 @@ void CSelftest::Loop() {
 
 void CSelftest::phaseShowResult() {
     m_result = config_store().selftest_result.get();
-    FSM_CHANGE_WITH_DATA__LOGGING(PhasesSelftest::Result, FsmSelftestResult().Serialize());
+    marlin_server::fsm_change(PhasesSelftest::Result, FsmSelftestResult().Serialize());
 }
 
 void CSelftest::phaseDidSelftestPass() {
@@ -437,9 +534,9 @@ void CSelftest::phaseDidSelftestPass() {
 
     // dont run wizard again
     if (SelftestResult_Passed_All(m_result)) {
-        config_store().run_selftest.set(false); // clear selftest flag
-        config_store().run_xyz_calib.set(false); // clear XYZ calib flag
-        config_store().run_first_layer.set(false); // clear first layer flag
+        auto &store = config_store();
+        auto transaction = store.get_backend().transaction_guard();
+        store.run_selftest.set(false); // clear selftest flag
     }
 }
 
@@ -460,7 +557,6 @@ bool CSelftest::Abort() {
     for (auto &loadcell : m_pLoadcell) {
         abort_part(&loadcell);
     }
-    abort_part((selftest::IPartHandler **)&pNozzleDiameter);
     abort_part((selftest::IPartHandler **)&pFSensor);
     for (auto &dock : pDocks) {
         abort_part(&dock);
@@ -494,9 +590,7 @@ void CSelftest::phaseSelftestStart() {
     m_result = config_store().selftest_result.get(); // read previous result
     if (m_Mask & stmFans) {
         HOTEND_LOOP() {
-            m_result.tools[e].printFan = TestResult_Unknown;
-            m_result.tools[e].heatBreakFan = TestResult_Unknown;
-            m_result.tools[e].fansSwitched = TestResult_Unknown;
+            m_result.tools[e].reset_fan_tests();
         }
     }
     if (m_Mask & stmXAxis) {
@@ -510,9 +604,6 @@ void CSelftest::phaseSelftestStart() {
     }
     if (m_Mask & stmZcalib) {
         m_result.zalign = TestResult_Unknown;
-    }
-    if (m_Mask & stmNozzleDiameter) {
-        config_store().selftest_result_nozzle_diameter.set(TestResult_Unknown);
     }
     if (m_Mask & to_one_hot(stsHeaters_bed_ena)) {
         m_result.bed = TestResult_Unknown;

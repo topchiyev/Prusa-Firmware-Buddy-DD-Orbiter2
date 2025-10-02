@@ -223,9 +223,11 @@ private:
     /// Slot of the transfer
     Monitor::Slot slot;
 
+public:
     /// Active download (if any)
     std::optional<Download> download;
 
+private:
     /// Path helper to be able to retrieve paths to different files of the transfer.
     Path path;
 
@@ -239,6 +241,11 @@ private:
     ///
     /// Prevents from going to "orange" error when it's just seeking.
     bool restart_requested_by_jump = false;
+
+    /// Force an update at reaching some initial size.
+    ///
+    /// In an effort to speed up print start / preview. The size is just a guess.
+    bool initial_part_done = false;
 
     /// Timestamp of the last time the backup file was updated (used to throttle the updates)
     std::optional<uint32_t> last_backup_update_ms;

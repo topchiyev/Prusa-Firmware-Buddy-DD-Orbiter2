@@ -7,6 +7,7 @@
 
 #pragma once
 #include "WindowMenuItems.hpp"
+#include "feature/tmc_util.h"
 #include "i18n.h"
 #include "config_features.h"
 
@@ -19,7 +20,7 @@ public:
     virtual void OnChange(size_t old_index) override;
 };
 
-class MI_CRASH_SENSITIVITY_X : public WiSpinInt {
+class MI_CRASH_SENSITIVITY_X : public WiSpin {
 private:
     constexpr static const char *const label = "Crash Sensitivity X";
 
@@ -28,7 +29,7 @@ public:
     virtual void OnClick() override;
 };
 
-class MI_CRASH_SENSITIVITY_Y : public WiSpinInt {
+class MI_CRASH_SENSITIVITY_Y : public WiSpin {
 private:
     constexpr static const char *const label = "Crash Sensitivity Y";
 
@@ -37,7 +38,7 @@ public:
     virtual void OnClick() override;
 };
 
-#if PRINTER_IS_PRUSA_XL
+#if PRINTER_IS_PRUSA_XL()
 // XL set Crash Sensitivity in user friendly was (Low/Medium/High), whereas other printers set integer directly and its development menu only
 
 class MI_CRASH_SENSITIVITY_XY : public WI_SWITCH_t<3> {
@@ -61,7 +62,7 @@ public:
     virtual void OnChange(size_t old_index) override;
 };
 #else
-class MI_CRASH_SENSITIVITY_XY : public WiSpinInt {
+class MI_CRASH_SENSITIVITY_XY : public WiSpin {
 private:
     constexpr static const char *const label = N_("Crash Sensitivity XY");
 
@@ -72,18 +73,19 @@ public:
 #endif
 
 #if ANY(CRASH_RECOVERY, POWER_PANIC)
-class MI_CRASH_MAX_PERIOD_X : public WI_SPIN_CRASH_PERIOD_t {
+
+class MI_CRASH_MAX_PERIOD_X : public WiSpin {
 private:
-    constexpr static const char *const label = "Crash Min. Speed X";
+    constexpr static const char *const label = "Crash Max. Period X";
 
 public:
     MI_CRASH_MAX_PERIOD_X();
     virtual void OnClick() override;
 };
 
-class MI_CRASH_MAX_PERIOD_Y : public WI_SPIN_CRASH_PERIOD_t {
+class MI_CRASH_MAX_PERIOD_Y : public WiSpin {
 private:
-    constexpr static const char *const label = "Crash Min. Speed Y";
+    constexpr static const char *const label = "Crash Max. Period Y";
 
 public:
     MI_CRASH_MAX_PERIOD_Y();

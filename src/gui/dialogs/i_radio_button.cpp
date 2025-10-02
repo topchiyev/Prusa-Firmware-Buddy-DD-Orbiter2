@@ -3,6 +3,7 @@
 #include "sound.hpp"
 #include "fonts.hpp"
 #include "gui.hpp"
+#include "display.hpp"
 
 #include <algorithm> //find
 
@@ -38,7 +39,7 @@ size_t IRadioButton::cnt_buttons(const PhaseTexts *labels, Responses_t resp) {
 // nonstatic variables and methods
 
 IRadioButton::IRadioButton(window_t *parent, Rect16 rect, size_t count)
-    : AddSuperWindow<window_t>(parent, rect) {
+    : window_t(parent, rect) {
     SetBackColor(COLOR_ORANGE);
     SetBtnCount(count);
     SetBtnIndex(0);
@@ -69,7 +70,7 @@ IRadioButton &IRadioButton::operator--() {
     return *this;
 }
 
-void IRadioButton::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void IRadioButton::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     if (!GetParent()) {
         return;
     }
@@ -133,7 +134,7 @@ void IRadioButton::windowEvent(EventLock /*has private ctor*/, window_t *sender,
     }
         return;
     default:
-        SuperWindowEvent(sender, event, param);
+        window_t::windowEvent(sender, event, param);
     }
 }
 
@@ -143,34 +144,10 @@ void IRadioButton::screenEvent(window_t *sender, GUI_event_t event, void *const 
         // Touch swipe left/right = selecting the "back" response
     case GUI_event_t::TOUCH_SWIPE_LEFT:
     case GUI_event_t::TOUCH_SWIPE_RIGHT: {
-        static constexpr std::array candidate_responses = {
-            Response::Back,
-            Response::Abort,
-            Response::Stop,
-        };
-
-        Response selected_response = Response::_none;
-        int selected_response_index = 0;
-        for (Response r : candidate_responses) {
-            const auto ix = IndexFromResponse(r);
-            if (!ix) {
-                continue;
-            } else if (selected_response != Response::_none) {
-                // Mark that there are multiple candidate responses
-                selected_response = Response::_count;
-            } else {
-                selected_response_index = *ix;
-                selected_response = r;
-            }
+        if (const auto i = IndexFromResponse(Response::Back); i.has_value()) {
+            SetBtnIndex(*i);
+            WindowEvent(this, GUI_event_t::CLICK, 0);
         }
-
-        // There must be exactly one candidate response in the dialog
-        if (selected_response == Response::_none || selected_response == Response::_count) {
-            break;
-        }
-
-        SetBtnIndex(selected_response_index);
-        WindowEvent(this, GUI_event_t::CLICK, 0);
         return;
     }
 
@@ -202,13 +179,13 @@ Response IRadioButton::Click() const {
 
 void IRadioButton::draw_0_btn() {
     if (GetParent()) {
-        display::FillRect(GetRect(), GetParent()->GetBackColor());
+        display::fill_rect(GetRect(), GetParent()->GetBackColor());
     }
 }
 
 static constexpr auto ButtonFont = Font::big;
 
-static void button_draw(Rect16 rc_btn, color_t back_color, color_t parent_color, string_view_utf8 text, bool is_selected);
+static void button_draw(Rect16 rc_btn, Color back_color, Color parent_color, const string_view_utf8 &text, bool is_selected);
 
 // called internally, responses must exist
 void IRadioButton::draw_1_btn() {
@@ -237,9 +214,9 @@ void IRadioButton::draw_n_btns(size_t btn_count) {
                 GetBtnIndex() == i && IsEnabled(i) && !disabled_drawing_selected);
         }
     }
-    color_t spaces_clr = (GetBackColor() == COLOR_ORANGE) ? COLOR_BLACK : COLOR_ORANGE;
+    Color spaces_clr = (GetBackColor() == COLOR_ORANGE) ? COLOR_BLACK : COLOR_ORANGE;
     for (size_t i = 0; i < btn_count - 1; ++i) {
-        display::FillRect(layout.spaces[i], spaces_clr);
+        display::fill_rect(layout.spaces[i], spaces_clr);
     }
 }
 
@@ -257,7 +234,7 @@ IRadioButton::Layout IRadioButton::getNormalBtnRects(size_t btn_count) const {
 
     for (size_t index = 0; index < btn_count; index++) {
         string_view_utf8 txt = _(ret.txts_to_print[index]);
-        ret.text_widths[index] = width(ButtonFont) * static_cast<uint8_t>(txt.computeNumUtf8CharsAndRewind());
+        ret.text_widths[index] = width(ButtonFont) * static_cast<uint8_t>(txt.computeNumUtf8Chars());
     }
     GetRect().HorizontalSplit(
         ret.splits,
@@ -284,11 +261,11 @@ void IRadioButton::EnableDrawingSelected() {
     disabled_drawing_selected = false;
 }
 
-static void button_draw(Rect16 rc_btn, color_t back_color, color_t parent_color, string_view_utf8 text, bool is_selected) {
-    color_t button_cl = is_selected ? back_color : COLOR_GRAY;
-    color_t text_cl = is_selected ? COLOR_BLACK : COLOR_WHITE;
+static void button_draw(Rect16 rc_btn, Color back_color, Color parent_color, const string_view_utf8 &text, bool is_selected) {
+    Color button_cl = is_selected ? back_color : COLOR_GRAY;
+    Color text_cl = is_selected ? COLOR_BLACK : COLOR_WHITE;
     if (GuiDefaults::RadioButtonCornerRadius) {
-        display::DrawRoundedRect(rc_btn, parent_color, button_cl, GuiDefaults::RadioButtonCornerRadius, MIC_ALL_CORNERS);
+        display::draw_rounded_rect(rc_btn, parent_color, button_cl, GuiDefaults::RadioButtonCornerRadius, MIC_ALL_CORNERS);
         rc_btn += Rect16::Left_t(GuiDefaults::RadioButtonCornerRadius);
         rc_btn -= Rect16::Width_t(2 * GuiDefaults::RadioButtonCornerRadius);
     }
@@ -352,8 +329,8 @@ void IRadioButton::invalidateWhatIsNeeded() {
 
 void IRadioButton::SetBtnIndex(uint8_t index) {
     uint8_t idx = (index < GetBtnCount()) ? index : 0;
-    if (idx != flags.button_index) {
-        flags.button_index = idx;
+    if (idx != flags.class_specific.button_index) {
+        flags.class_specific.button_index = idx;
         invalidateWhatIsNeeded();
     }
 }
@@ -370,6 +347,7 @@ size_t IRadioButton::maxSize() const {
 }
 
 // 4th response for iconned layout is ensured to be _none
+// TODO: REMOVEME BFW-6028
 IRadioButton::Responses_t IRadioButton::generateResponses(const PhaseResponses &resp) {
     Responses_t newResponses;
     newResponses[3] = Response::_none;

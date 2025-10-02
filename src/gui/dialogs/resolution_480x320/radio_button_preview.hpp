@@ -11,7 +11,7 @@
  * responses are generated from it at run time
  * this behavior allows to handle click automatically
  */
-class RadioButtonPreview : public AddSuperWindow<RadioButtonFsm<PhasesPrintPreview>> {
+class RadioButtonPreview : public RadioButtonFsm<PhasesPrintPreview> {
 public:
     /**
      * @brief Construct a new Radio Button object
@@ -29,5 +29,5 @@ private:
 
 protected:
     virtual void unconditionalDraw() override;
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 };

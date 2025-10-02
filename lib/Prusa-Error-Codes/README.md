@@ -19,7 +19,13 @@ Example: 12201
 * 13 `MK4` - Original Prusa MK4
 * 16 `iX` - AFS IX
 * 17 `XL` - Original Prusa XL
+* 21 `MK3.9` - Original Prusa MK3.9
 * 23 `MK3.5` - Original Prusa MK3.5
+* 26 `MK4S` - Original Prusa MK4S
+* 27 `MK3.9S` - Original Prusa MK3.9S
+* 28 `MK3.5S` - Original Prusa MK3.5S
+* 29 `M1` - Original Medical One
+* 31 `COREONE` - Prusa Core One
 
 ## Error categories
 1. Mechanical - XYZ motors, tower, axis range
@@ -53,3 +59,4 @@ The `.yaml` format structure is as follows:
       * `id` [string]: Error identifier used for referencing the error in the code
          * For example `BED_MINTEMP_ERROR`
       * `approved` [bool]: Not really good for anything
+      * `deprecated` (optional) [bool]: Errors that are no longer used in main development branches are marked deprecated

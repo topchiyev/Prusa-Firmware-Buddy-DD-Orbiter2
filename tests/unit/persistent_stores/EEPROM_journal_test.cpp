@@ -55,7 +55,7 @@ size_t create_last_item(std::span<uint8_t> data) {
     return sizeof(Backend::LAST_ITEM_STOP) + sizeof(crc);
 }
 
-TEST_CASE("Test transaction validation") {
+TEST_CASE("journal::EEPROM::Test transaction validation") {
     DummyEepromChip storage;
     size_t pos = create_transaction(3, storage.get(0, 1024));
     Backend journal(0, 1024, storage);
@@ -85,7 +85,7 @@ TEST_CASE("Test transaction validation") {
     }
 }
 
-TEST_CASE("Test multiple transactions validation") {
+TEST_CASE("journal::EEPROM::Test multiple transactions validation") {
     DummyEepromChip storage;
     size_t pos = 0;
     Backend journal(0, 1024, storage);
@@ -153,7 +153,7 @@ TEST_CASE("Test multiple transactions validation") {
     }
 }
 
-TEST_CASE("Test item loading") {
+TEST_CASE("journal::EEPROM::Test item loading") {
     DummyEepromChip storage;
     size_t pos = 0;
     Backend journal(0, 1024, storage);
@@ -179,7 +179,7 @@ TEST_CASE("Test item loading") {
     }
 }
 
-TEST_CASE("Test Bank choosing") {
+TEST_CASE("journal::EEPROM::Test Bank choosing") {
     eeprom_chip.clear();
     Backend config_store(0, 8096, EEPROMInstance());
 
@@ -278,7 +278,7 @@ uint32_t calculate_crc(uint32_t crc, uint16_t id, bool last_item, std::span<uint
     return Backend::calculate_crc(header, data, crc);
 }
 
-TEST_CASE("Test transaction creation") {
+TEST_CASE("journal::EEPROM::Test transaction creation") {
     DummyEepromChip storage;
     static constexpr uint16_t bank_size = 8096 / 2;
     Backend journal(0, bank_size, storage);
@@ -345,10 +345,10 @@ static_assert(journal::has_unique_items<TestEEPROMJournalConfigV0>(), "Just adde
 inline constexpr std::array<journal::Backend::MigrationFunction, 0> test_migration_functions_v0 {};
 inline constexpr std::span<const journal::Backend::MigrationFunction> test_migration_functions_span_v0 { test_migration_functions_v0 };
 
-TEST_CASE("Config Store") {
+TEST_CASE("journal::EEPROM::Config Store") {
     eeprom_chip.clear();
     reinit_journal();
-    auto local_store = new Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+    auto local_store = std::make_unique<Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
     local_store->init();
     local_store->load_all();
     REQUIRE(Test_EEPROM_journal().journal_state == Backend::JournalState::ColdStart);
@@ -357,9 +357,8 @@ TEST_CASE("Config Store") {
     SECTION("Basic ops") {
         local_store->int_item.set(10);
 
-        delete local_store;
         reinit_journal();
-        local_store = new Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+        local_store = std::make_unique<Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
 
         local_store->init();
         local_store->load_all();
@@ -369,9 +368,8 @@ TEST_CASE("Config Store") {
         local_store->int_item.set(12);
         REQUIRE(Test_EEPROM_journal().current_address == Test_EEPROM_journal().start_address + 32);
 
-        delete local_store;
         reinit_journal();
-        local_store = new Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+        local_store = std::make_unique<Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
 
         local_store->init();
         local_store->load_all();
@@ -380,9 +378,8 @@ TEST_CASE("Config Store") {
         REQUIRE(local_store->int_item.get() == 12);
         local_store->int_item.set(13);
 
-        delete local_store;
         reinit_journal();
-        local_store = new Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+        local_store = std::make_unique<Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
 
         local_store->init();
         local_store->load_all();
@@ -402,9 +399,8 @@ TEST_CASE("Config Store") {
         local_store->struct_item.set(test_struct);
         local_store->nested_struct_item.set(nested_struct);
 
-        delete local_store;
         reinit_journal();
-        local_store = new Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+        local_store = std::make_unique<Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
 
         local_store->init();
         local_store->load_all();
@@ -415,8 +411,7 @@ TEST_CASE("Config Store") {
         REQUIRE(local_store->nested_struct_item.get() == nested_struct);
         local_store->int_item.set(14);
 
-        delete local_store;
-        local_store = new Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+        local_store = std::make_unique<Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
         reinit_journal();
         local_store->init();
         local_store->load_all();
@@ -428,11 +423,11 @@ TEST_CASE("Config Store") {
         REQUIRE(local_store->nested_struct_item.get() == nested_struct);
     }
 }
-TEST_CASE("Config store - cold start") {
+TEST_CASE("journal::EEPROM::Config store - cold start") {
     eeprom_chip.clear();
     reinit_journal();
 
-    auto local_store = new Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+    auto local_store = std::make_unique<Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
     local_store->init();
     local_store->load_all();
     REQUIRE(Test_EEPROM_journal().current_address == Test_EEPROM_journal().start_address + 10);
@@ -440,19 +435,18 @@ TEST_CASE("Config store - cold start") {
     local_store->int_item.set(42);
     local_store->int_item.set(43);
 
-    delete local_store;
     reinit_journal();
-    local_store = new Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+    local_store = std::make_unique<Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
     local_store->init();
     local_store->load_all();
     REQUIRE(Test_EEPROM_journal().journal_state == Backend::JournalState::ValidStart);
     REQUIRE(local_store->int_item.get() == 43);
 }
 
-TEST_CASE("Config store - error states") {
+TEST_CASE("journal::EEPROM::Config store - error states") {
     eeprom_chip.clear();
     reinit_journal();
-    auto local_store = new Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+    auto local_store = std::make_unique<Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
     local_store->init();
     local_store->load_all();
 
@@ -462,18 +456,16 @@ TEST_CASE("Config store - error states") {
             // break end item
             eeprom_chip.set(Test_EEPROM_journal().current_address + 1, eeprom_chip.get(Test_EEPROM_journal().current_address + 1) + 2);
 
-            delete local_store;
             reinit_journal();
-            local_store = new Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+            local_store = std::make_unique<Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
             local_store->init();
             local_store->load_all();
 
             REQUIRE(Test_EEPROM_journal().journal_state == Backend::JournalState::CorruptedBank);
             REQUIRE(Test_EEPROM_journal().current_address == Test_EEPROM_journal().start_address + 10);
 
-            delete local_store;
             reinit_journal();
-            local_store = new Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+            local_store = std::make_unique<Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
             local_store->init();
             local_store->load_all();
 
@@ -485,9 +477,8 @@ TEST_CASE("Config store - error states") {
             local_store->int_item.set(10);
             eeprom_chip.set(Test_EEPROM_journal().current_address + 1, eeprom_chip.get(Test_EEPROM_journal().current_address + 1) + 2);
 
-            delete local_store;
             reinit_journal();
-            local_store = new Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+            local_store = std::make_unique<Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
             local_store->init();
             local_store->load_all();
             REQUIRE(Test_EEPROM_journal().journal_state == Backend::JournalState::MissingEndItem);
@@ -500,9 +491,8 @@ TEST_CASE("Config store - error states") {
         local_store->int_item.set(11);
 
         REQUIRE(Test_EEPROM_journal().get_current_bank_start_address() == Test_EEPROM_journal().start_address);
-        delete local_store;
         reinit_journal();
-        local_store = new Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+        local_store = std::make_unique<Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
         local_store->init();
         local_store->load_all();
         REQUIRE(Test_EEPROM_journal().get_current_bank_start_address() == Test_EEPROM_journal().start_address + Test_EEPROM_journal().bank_size);
@@ -511,9 +501,8 @@ TEST_CASE("Config store - error states") {
         SECTION("Missing end item, one transaction in bank") {
             eeprom_chip.set(Test_EEPROM_journal().current_address + 1, eeprom_chip.get(Test_EEPROM_journal().current_address + 1) + 2);
 
-            delete local_store;
             reinit_journal();
-            local_store = new Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+            local_store = std::make_unique<Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
             local_store->init();
             local_store->load_all();
 
@@ -525,9 +514,9 @@ TEST_CASE("Config store - error states") {
 
             local_store->int_item.set(12);
 
-            delete local_store;
+            local_store.reset();
             reinit_journal();
-            local_store = new Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+            local_store = std::make_unique<Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
             local_store->init();
             local_store->load_all();
 
@@ -539,9 +528,8 @@ TEST_CASE("Config store - error states") {
             local_store->int_item.set(12);
             eeprom_chip.set(Test_EEPROM_journal().current_address + 1, eeprom_chip.get(Test_EEPROM_journal().current_address + 1) + 2);
 
-            delete local_store;
             reinit_journal();
-            local_store = new Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+            local_store = std::make_unique<Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
             local_store->init();
             local_store->load_all();
 
@@ -552,9 +540,8 @@ TEST_CASE("Config store - error states") {
 
             local_store->int_item.set(13);
 
-            delete local_store;
             reinit_journal();
-            local_store = new Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+            local_store = std::make_unique<Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
             local_store->init();
             local_store->load_all();
 
@@ -575,11 +562,11 @@ struct TestEEPROMJournalConfigBigItem : public CurrentStoreConfig<Backend, Small
     StoreItem<std::array<int32_t, 64>, default_array, 1> random_data;
 };
 
-TEST_CASE("Bank migration during transaction") {
+TEST_CASE("journal::EEPROM::Bank migration during transaction") {
     eeprom_chip.clear();
     new (&Small_Test_EEPROM_journal()) Backend(100, 768, EEPROMInstance());
 
-    auto local_store = new Store<TestEEPROMJournalConfigBigItem, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+    auto local_store = std::make_unique<Store<TestEEPROMJournalConfigBigItem, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
     auto data = default_array;
     data[1] = 10;
     local_store->init();
@@ -594,10 +581,9 @@ TEST_CASE("Bank migration during transaction") {
     REQUIRE(Small_Test_EEPROM_journal().current_address == 757);
     Small_Test_EEPROM_journal().transaction_end();
     REQUIRE(Small_Test_EEPROM_journal().current_address == 757);
-    delete local_store;
 
     new (&Small_Test_EEPROM_journal()) Backend(100, 768, EEPROMInstance());
-    local_store = new Store<TestEEPROMJournalConfigBigItem, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+    local_store = std::make_unique<Store<TestEEPROMJournalConfigBigItem, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
     local_store->init();
     local_store->load_all();
     REQUIRE(Small_Test_EEPROM_journal().current_address == 757);
@@ -652,7 +638,7 @@ void int_item_migration(journal::Backend &backend, uint16_t new_id) {
 
     typename IntItemT::value_type new_int_item { old_int_item };
 
-    backend.save_migration_item(new_id, new_int_item);
+    backend.save_migration_item<typename IntItemT::value_type>(new_id, new_int_item);
 }
 
 namespace V1_deprecated_ids {
@@ -751,10 +737,10 @@ std::string print_chip() {
     return str;
 }
 
-TEST_CASE("Item migration") {
+TEST_CASE("journal::EEPROM::Item migration") {
     eeprom_chip.clear();
     reinit_journal();
-    auto old_store = new Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>;
+    auto old_store = std::make_unique<Store<TestEEPROMJournalConfigV0, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
     old_store->init();
     old_store->load_all();
     REQUIRE(Test_EEPROM_journal().journal_state == Backend::JournalState::ColdStart);
@@ -764,11 +750,10 @@ TEST_CASE("Item migration") {
     REQUIRE(old_store->int_item.get() == 10);
     REQUIRE(Test_EEPROM_journal().current_address == Test_EEPROM_journal().start_address + 21);
 
-    delete old_store;
     reinit_journal();
 
     SECTION("First migration") {
-        auto v1_store = new Store<TestEEPROMJournalConfigV1, TestDeprecatedEEPROMJournalItemsV1, test_migration_functions_span_v1>;
+        auto v1_store = std::make_unique<Store<TestEEPROMJournalConfigV1, TestDeprecatedEEPROMJournalItemsV1, test_migration_functions_span_v1>>();
         v1_store->init();
         REQUIRE(Test_EEPROM_journal().journal_state != Backend::JournalState::ColdStart);
         v1_store->load_all();
@@ -778,7 +763,7 @@ TEST_CASE("Item migration") {
         REQUIRE(v1_store->int_item.get() == 10);
 
         SECTION("Second migration") {
-            auto v2_store = new Store<TestEEPROMJournalConfigV2, TestDeprecatedEEPROMJournalItemsV2, test_migration_functions_span_v2>;
+            auto v2_store = std::make_unique<Store<TestEEPROMJournalConfigV2, TestDeprecatedEEPROMJournalItemsV2, test_migration_functions_span_v2>>();
             v2_store->init();
             v2_store->load_all();
 
@@ -787,7 +772,7 @@ TEST_CASE("Item migration") {
             REQUIRE(v2_store->int_item.get() == 10);
 
             SECTION("Third migration") {
-                auto v3_store = new Store<TestEEPROMJournalConfigV3, TestDeprecatedEEPROMJournalItemsV3, test_migration_functions_span_v3>;
+                auto v3_store = std::make_unique<Store<TestEEPROMJournalConfigV3, TestDeprecatedEEPROMJournalItemsV3, test_migration_functions_span_v3>>();
                 v3_store->init();
                 v3_store->load_all();
 
@@ -799,15 +784,16 @@ TEST_CASE("Item migration") {
     }
 }
 
+struct StoreConfig_BFW3553 : public CurrentStoreConfig<Backend, Test_EEPROM_journal> {
+    StoreItem<int32_t, default_int32_t, 0> int_item;
+};
+
 TEST_CASE("journal::EEPROM::Regression BFW-3553") {
     eeprom_chip.clear();
     reinit_journal();
     auto &backend = Test_EEPROM_journal();
 
-    struct StoreConfig : public CurrentStoreConfig<Backend, Test_EEPROM_journal> {
-        StoreItem<int32_t, default_int32_t, 0> int_item;
-    };
-    auto store = std::make_unique<Store<StoreConfig, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
+    auto store = std::make_unique<Store<StoreConfig_BFW3553, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
     store->init();
     store->load_all();
 
@@ -842,7 +828,7 @@ TEST_CASE("journal::EEPROM::Regression BFW-3553") {
     const auto reinit_store = [&] {
         store.reset();
         reinit_journal();
-        store = std::make_unique<Store<StoreConfig, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
+        store = std::make_unique<Store<StoreConfig_BFW3553, TestDeprecatedEEPROMJournalItemsV0, test_migration_functions_span_v0>>();
         store->init();
         store->load_all();
     };

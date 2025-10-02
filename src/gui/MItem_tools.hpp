@@ -8,11 +8,40 @@
 #include "WindowItemFanLabel.hpp"
 #include "WindowItemTempLabel.hpp"
 #include "config.h"
+#include <common/filament_sensor.hpp>
+#include <common/filament_sensor_states.hpp>
 #include <utility_extensions.hpp>
 #include <option/has_dwarf.h>
 #include <option/has_side_fsensor.h>
 #include <option/has_filament_sensors_menu.h>
+#include <option/has_file_log.h>
 #include <option/has_coldpull.h>
+#include <option/has_leds.h>
+#include <option/has_side_leds.h>
+#include <option/buddy_enable_connect.h>
+#include <option/has_belt_tuning.h>
+#include <trinamic.h>
+#include <meta_utils.hpp>
+#include <str_utils.hpp>
+#include <gui/menu_item/menu_item_gcode_action.hpp>
+
+/// \returns tool name for tool menu item purposes
+inline constexpr const char *tool_name(uint8_t tool_index) {
+    switch (tool_index) {
+    case 0:
+        return N_("Tool 1");
+    case 1:
+        return N_("Tool 2");
+    case 2:
+        return N_("Tool 3");
+    case 3:
+        return N_("Tool 4");
+    case 4:
+        return N_("Tool 5");
+    default:
+        return "";
+    }
+}
 
 /// Checks if there is space in the gcode queue for inserting further commands.
 /// If there's not, \returns false and shows a message box
@@ -89,16 +118,6 @@ protected:
     virtual void click(IWindowMenu &window_menu) override;
 };
 
-class MI_CALIB_Z : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Calibrate Z");
-
-public:
-    MI_CALIB_Z();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
-
 class MI_DISABLE_STEP : public IWindowMenuItem {
     static constexpr const char *const label = N_("Disable Motors");
 
@@ -128,6 +147,18 @@ public:
 protected:
     virtual void click(IWindowMenu &window_menu) override;
 };
+
+#if PRINTER_IS_PRUSA_MK4()
+class MI_FACTORY_SHIPPING_PREP : public IWindowMenuItem {
+    static constexpr const char *const label = N_("Shipping Preparation");
+
+public:
+    MI_FACTORY_SHIPPING_PREP();
+
+protected:
+    virtual void click(IWindowMenu &window_menu) override;
+};
+#endif
 
 #ifdef BUDDY_ENABLE_DFU_ENTRY
 class MI_ENTER_DFU : public IWindowMenuItem {
@@ -183,12 +214,23 @@ protected:
 
 class MI_M600 : public IWindowMenuItem {
     static constexpr const char *const label = N_("Change Filament");
-
+    bool enqueued = false; // Used to avoid multiple M600 enqueue
 public:
     MI_M600();
+    void resetEnqueued() { enqueued = false; }
 
 protected:
     virtual void click(IWindowMenu &window_menu) override;
+};
+
+class MI_DRYRUN : public WI_ICON_SWITCH_OFF_ON_t {
+    constexpr static const char *const label = N_("Dry run (no extrusion)");
+
+public:
+    MI_DRYRUN();
+
+protected:
+    virtual void OnChange(size_t old_index) override;
 };
 
 class MI_TIMEOUT : public WI_ICON_SWITCH_OFF_ON_t {
@@ -248,7 +290,7 @@ public:
     virtual void OnChange(size_t old_index) override;
 };
 
-class MI_SOUND_VOLUME : public WiSpinInt {
+class MI_SOUND_VOLUME : public WiSpin {
     constexpr static const char *const label = N_("Sound Volume");
 
 public:
@@ -257,7 +299,7 @@ public:
     /* virtual void Change() override; */
 };
 
-class MI_TIMEZONE : public WiSpinInt {
+class MI_TIMEZONE : public WiSpin {
     constexpr static const char *const label = N_("Time Zone Hour Offset");
 
 public:
@@ -306,145 +348,6 @@ class MI_TIME_NOW : public WI_SWITCH_t<1> {
 
 public:
     MI_TIME_NOW();
-};
-
-// TODO move to different files (filament sensor adc related ones ...)
-class IMI_FS_SPAN : public WiSpinInt {
-#if HAS_SIDE_FSENSOR()
-    bool is_side;
-#endif
-    size_t index;
-
-public:
-    IMI_FS_SPAN(bool is_side_, size_t index, const char *label);
-    virtual void OnClick() override;
-};
-
-template <size_t Index, bool IsSide>
-class MI_FS_SPAN : public IMI_FS_SPAN {
-    static_assert(Index < 6, "Index out of range");
-#if not HAS_SIDE_FSENSOR()
-    static_assert(IsSide == false, "Invalid configuration");
-#endif
-
-    struct index_data {
-        const char *label;
-        size_t extruder_index;
-    };
-
-    static consteval const char *get_label() {
-        // gui counts sensors from 1, but internally they are counted from 0
-        if (IsSide) {
-            switch (Index) {
-            case 0:
-                return N_("Side FS span 1");
-            case 1:
-                return N_("Side FS span 2");
-            case 2:
-                return N_("Side FS span 3");
-            case 3:
-                return N_("Side FS span 4");
-            case 4:
-                return N_("Side FS span 5");
-            case 5:
-                return N_("Side FS span 6");
-            default:
-                consteval_assert_false();
-                return ""; // cannot happen
-            }
-        } else {
-            switch (Index) {
-            case 0:
-                return N_("FS span 1");
-            case 1:
-                return N_("FS span 2");
-            case 2:
-                return N_("FS span 3");
-            case 3:
-                return N_("FS span 4");
-            case 4:
-                return N_("FS span 5");
-            case 5:
-                return N_("FS span 6");
-            default:
-                consteval_assert_false();
-                return ""; // cannot happen
-            }
-        }
-    }
-
-public:
-    MI_FS_SPAN()
-        : IMI_FS_SPAN(IsSide, Index, get_label()) {}
-};
-
-class IMI_FS_REF : public WiSpinInt {
-#if HAS_SIDE_FSENSOR()
-    bool is_side;
-#endif
-    size_t index;
-
-public:
-    IMI_FS_REF(bool is_side_, size_t index, const char *label);
-    virtual void OnClick() override;
-};
-
-template <size_t Index, bool IsSide>
-class MI_FS_REF : public IMI_FS_REF {
-    static_assert(Index < 6, "Index out of range");
-#if not HAS_SIDE_FSENSOR()
-    static_assert(IsSide == false, "Invalid configuration");
-#endif
-
-    struct index_data {
-        const char *label;
-        size_t extruder_index;
-    };
-
-    static consteval const char *get_label() {
-        // gui counts sensors from 1, but internally they are counted from 0
-        if (IsSide) {
-            switch (Index) {
-            case 0:
-                return N_("Side FS not inserted ref 1");
-            case 1:
-                return N_("Side FS not inserted ref 2");
-            case 2:
-                return N_("Side FS not inserted ref 3");
-            case 3:
-                return N_("Side FS not inserted ref 4");
-            case 4:
-                return N_("Side FS not inserted ref 5");
-            case 5:
-                return N_("Side FS not inserted ref 6");
-            default:
-                consteval_assert_false();
-                return ""; // cannot happen
-            }
-        } else {
-            switch (Index) {
-            case 0:
-                return N_("FS not inserted ref 1");
-            case 1:
-                return N_("FS not inserted ref 2");
-            case 2:
-                return N_("FS not inserted ref 3");
-            case 3:
-                return N_("FS not inserted ref 4");
-            case 4:
-                return N_("FS not inserted ref 5");
-            case 5:
-                return N_("FS not inserted ref 6");
-            default:
-                consteval_assert_false();
-                return ""; // cannot happen
-            }
-        }
-    }
-
-public:
-    MI_FS_REF()
-        : IMI_FS_REF(IsSide, Index, get_label()) {}
 };
 
 class MI_FAN_CHECK : public WI_ICON_SWITCH_OFF_ON_t {
@@ -508,14 +411,23 @@ public:
     MI_INFO_BED_TEMP();
 };
 
-class MI_INFO_FILL_SENSOR : public WI_FORMATABLE_LABEL_t<std::pair<SensorData::Value, SensorData::Value>> {
+class MI_INFO_FILL_SENSOR : public WI_LAMBDA_LABEL_t {
+private:
+    FilamentSensorState state;
+    int32_t value;
+
+protected:
+    virtual void click([[maybe_unused]] IWindowMenu &window_menu) {}
+
 public:
-    MI_INFO_FILL_SENSOR(string_view_utf8 label);
+    MI_INFO_FILL_SENSOR(const string_view_utf8 &label);
+
+    void UpdateValue(IFSensor *fsensor);
 };
 
 class MI_INFO_PRINTER_FILL_SENSOR : public MI_INFO_FILL_SENSOR {
     static constexpr const char *label =
-#if PRINTER_IS_PRUSA_XL
+#if PRINTER_IS_PRUSA_XL()
         N_("Tool Filament sensor");
 #else
         N_("Filament Sensor");
@@ -540,7 +452,7 @@ public:
 };
 
 class MI_INFO_HBR_FAN : public WI_FAN_LABEL_t {
-#if PRINTER_IS_PRUSA_MK3_5
+#if PRINTER_IS_PRUSA_MK3_5()
     static constexpr const char *const label = N_("Hotend Fan");
 #else
     static constexpr const char *const label = N_("Heatbreak Fan");
@@ -550,16 +462,27 @@ public:
     MI_INFO_HBR_FAN();
 };
 
-class MI_PRINT_PROGRESS_TIME : public WiSpinInt {
+class MI_PRINT_PROGRESS_TIME : public WiSpin {
+
+public:
     constexpr static const char *label = N_("Print Progress Screen");
+
+    static constexpr NumericInputConfig config {
+        .min_value = 30,
+        .max_value = 200,
+        .special_value = 29,
+        .unit = Unit::second,
+    };
 
 public:
     MI_PRINT_PROGRESS_TIME();
+
+protected:
     virtual void OnClick() override;
 };
 class MI_ODOMETER_DIST : public WI_FORMATABLE_LABEL_t<float> {
 public:
-    MI_ODOMETER_DIST(string_view_utf8 label, const img::Resource *icon, is_enabled_t enabled, is_hidden_t hidden, float initVal);
+    MI_ODOMETER_DIST(const string_view_utf8 &label, const img::Resource *icon, is_enabled_t enabled, is_hidden_t hidden, float initVal);
 };
 
 class MI_ODOMETER_DIST_X : public MI_ODOMETER_DIST {
@@ -614,63 +537,63 @@ public:
     MI_ODOMETER_TIME();
 };
 
-class MI_INFO_HEATER_VOLTAGE : public WI_FORMATABLE_LABEL_t<SensorData::Value> {
+class MI_INFO_HEATER_VOLTAGE : public WI_FORMATABLE_LABEL_t<float> {
     static constexpr const char *const label = N_("Heater Voltage");
 
 public:
     MI_INFO_HEATER_VOLTAGE();
 };
 
-class MI_INFO_INPUT_VOLTAGE : public WI_FORMATABLE_LABEL_t<SensorData::Value> {
+class MI_INFO_INPUT_VOLTAGE : public WI_FORMATABLE_LABEL_t<float> {
     static constexpr const char *const label = N_("Input Voltage");
 
 public:
     MI_INFO_INPUT_VOLTAGE();
 };
 
-class MI_INFO_5V_VOLTAGE : public WI_FORMATABLE_LABEL_t<SensorData::Value> {
+class MI_INFO_5V_VOLTAGE : public WI_FORMATABLE_LABEL_t<float> {
     static constexpr const char *const label = N_("5V Voltage");
 
 public:
     MI_INFO_5V_VOLTAGE();
 };
 
-class MI_INFO_HEATER_CURRENT : public WI_FORMATABLE_LABEL_t<SensorData::Value> {
+class MI_INFO_HEATER_CURRENT : public WI_FORMATABLE_LABEL_t<float> {
     static constexpr const char *const label = N_("Heater Current");
 
 public:
     MI_INFO_HEATER_CURRENT();
 };
 
-class MI_INFO_INPUT_CURRENT : public WI_FORMATABLE_LABEL_t<SensorData::Value> {
+class MI_INFO_INPUT_CURRENT : public WI_FORMATABLE_LABEL_t<float> {
     static constexpr const char *const label = N_("Input Current");
 
 public:
     MI_INFO_INPUT_CURRENT();
 };
 
-class MI_INFO_MMU_CURRENT : public WI_FORMATABLE_LABEL_t<SensorData::Value> {
+class MI_INFO_MMU_CURRENT : public WI_FORMATABLE_LABEL_t<float> {
     static constexpr const char *const label = N_("MMU Current");
 
 public:
     MI_INFO_MMU_CURRENT();
 };
 
-class MI_INFO_SPLITTER_5V_CURRENT : public WI_FORMATABLE_LABEL_t<SensorData::Value> {
+class MI_INFO_SPLITTER_5V_CURRENT : public WI_FORMATABLE_LABEL_t<float> {
     static constexpr const char *const label = N_("Splitter 5V Current");
 
 public:
     MI_INFO_SPLITTER_5V_CURRENT();
 };
 
-class MI_INFO_SANDWICH_5V_CURRENT : public WI_FORMATABLE_LABEL_t<SensorData::Value> {
+class MI_INFO_SANDWICH_5V_CURRENT : public WI_FORMATABLE_LABEL_t<float> {
     static constexpr const char *const label = N_("Sandwich 5V Current");
 
 public:
     MI_INFO_SANDWICH_5V_CURRENT();
 };
 
-class MI_INFO_BUDDY_5V_CURRENT : public WI_FORMATABLE_LABEL_t<SensorData::Value> {
+class MI_INFO_BUDDY_5V_CURRENT : public WI_FORMATABLE_LABEL_t<float> {
     static constexpr const char *const label = N_("XL Buddy 5V Current");
 
 public:
@@ -759,4 +682,135 @@ protected:
     virtual void click(IWindowMenu &window_menu) override;
 };
 
+#endif
+
+class MI_GCODE_VERIFY : public WI_ICON_SWITCH_OFF_ON_t {
+    constexpr static const char *const label = N_("Verify GCode");
+
+public:
+    MI_GCODE_VERIFY();
+    virtual void OnChange(size_t old_index) override;
+};
+
+class MI_DEVHASH_IN_QR : public WI_ICON_SWITCH_OFF_ON_t {
+    constexpr static const char *const label = N_("Device Hash in QR");
+
+public:
+    MI_DEVHASH_IN_QR();
+    virtual void OnChange(size_t old_index) override;
+};
+
+class MI_WAVETABLE_XYZ : public WI_ICON_SWITCH_OFF_ON_t {
+    static constexpr const char *const label = N_("Change Wave Table XYZ");
+
+public:
+    MI_WAVETABLE_XYZ();
+    virtual void OnChange(size_t old_index) override;
+};
+
+class MI_LOAD_SETTINGS : public IWindowMenuItem {
+    constexpr static const char *const label = N_("Load Settings from File");
+
+public:
+    MI_LOAD_SETTINGS();
+
+    virtual void click(IWindowMenu &) override;
+};
+
+class MI_USB_MSC_ENABLE : public WI_ICON_SWITCH_OFF_ON_t {
+    constexpr static char const *label = "USB MSC";
+
+public:
+    MI_USB_MSC_ENABLE();
+    virtual void OnChange(size_t old_index) override;
+};
+
+#if HAS_LEDS()
+class MI_LEDS_ENABLE : public WI_ICON_SWITCH_OFF_ON_t {
+    static constexpr const char *const label = N_("RGB Status Bar");
+
+public:
+    MI_LEDS_ENABLE();
+    virtual void OnChange(size_t old_index) override;
+};
+#endif
+
+#if HAS_SIDE_LEDS()
+class MI_SIDE_LEDS_ENABLE : public WI_ICON_SWITCH_OFF_ON_t {
+    static constexpr const char *const label = N_("RGB Side Strip");
+
+public:
+    MI_SIDE_LEDS_ENABLE();
+    virtual void OnChange(size_t old_index) override;
+};
+
+class MI_SIDE_LEDS_DIMMING : public WI_ICON_SWITCH_OFF_ON_t {
+    static constexpr const char *const label = N_("RGB Side Strip Dimming");
+
+public:
+    MI_SIDE_LEDS_DIMMING();
+    virtual void OnChange(size_t old_index) override;
+};
+#endif
+
+#if HAS_TOOLCHANGER()
+class MI_TOOL_LEDS_ENABLE : public WI_ICON_SWITCH_OFF_ON_t {
+    static constexpr const char *const label = N_("Tool Light");
+
+public:
+    MI_TOOL_LEDS_ENABLE();
+    virtual void OnChange(size_t old_index) override;
+};
+#endif /*HAS_TOOLCHANGER()*/
+
+class MI_TRIGGER_POWER_PANIC : public IWindowMenuItem {
+    static constexpr const char *const label = N_("Trigger Power Panic");
+
+public:
+    MI_TRIGGER_POWER_PANIC();
+
+protected:
+    virtual void click(IWindowMenu &windowMenu) override;
+};
+
+#if HAS_TOOLCHANGER()
+class MI_PICK_PARK_TOOL : public IWindowMenuItem {
+    static constexpr const char *const label = N_("Pick/Park Tool");
+
+public:
+    MI_PICK_PARK_TOOL();
+
+protected:
+    virtual void click(IWindowMenu &window_menu) override;
+};
+
+class MI_CALIBRATE_DOCK : public IWindowMenuItem {
+    static constexpr const char *const label = N_("Calibrate Dock Position");
+
+public:
+    MI_CALIBRATE_DOCK();
+
+protected:
+    virtual void click(IWindowMenu &window_menu) override;
+};
+#endif
+
+#if HAS_BELT_TUNING()
+using MI_BELT_TUNING = WithConstructorArgs<MenuItemGcodeAction, N_("Belt Tuning"), "M960 W"_tstr>;
+#endif
+
+#if HAS_ILI9488_DISPLAY()
+class MI_DISPLAY_BAUDRATE : public WI_SWITCH_t<2> {
+public:
+    MI_DISPLAY_BAUDRATE();
+    virtual void OnChange(size_t old_index) override;
+};
+#endif
+
+#if HAS_FILE_LOG()
+class MI_LOG_TO_TXT : public WI_ICON_SWITCH_OFF_ON_t {
+public:
+    MI_LOG_TO_TXT();
+    void OnChange(size_t) final;
+};
 #endif

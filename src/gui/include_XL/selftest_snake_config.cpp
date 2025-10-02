@@ -20,7 +20,7 @@ TestResult get_test_result(Action action, Tool tool) {
     case Action::Fans:
         return merge_hotends_evaluations(
             [&](int8_t e) {
-                return evaluate_results(sr.tools[e].printFan, sr.tools[e].heatBreakFan, sr.tools[e].fansSwitched);
+                return evaluate_results(sr.tools[e].evaluate_fans());
             });
     case Action::ZAlign:
         return evaluate_results(sr.zalign);
@@ -72,8 +72,6 @@ TestResult get_test_result(Action action, Tool tool) {
         } else {
             return evaluate_results(sr.tools[ftrstd::to_underlying(tool)].fsensor);
         }
-    case Action::NozzleDiameter:
-        return evaluate_results(config_store().selftest_result_nozzle_diameter.get());
     case Action::PhaseSteppingCalibration:
         return evaluate_results(config_store().selftest_result_phase_stepping.get());
     case Action::_count:
@@ -86,7 +84,7 @@ ToolMask get_tool_mask(Tool tool) {
 #if HAS_TOOLCHANGER()
     switch (tool) {
     case Tool::Tool1:
-        return ToolMask::ToolO;
+        return ToolMask::Tool0;
     case Tool::Tool2:
         return ToolMask::Tool1;
     case Tool::Tool3:
@@ -130,10 +128,9 @@ uint64_t get_test_mask(Action action) {
         return stmDocks;
     case Action::ToolOffsetsCalibration:
         return stmToolOffsets;
-    case Action::NozzleDiameter:
-        return stmNozzleDiameter;
     case Action::PhaseSteppingCalibration:
-        return stmPhaseStepping;
+        bsod("get_test_mask");
+        break;
     case Action::_count:
         break;
     }

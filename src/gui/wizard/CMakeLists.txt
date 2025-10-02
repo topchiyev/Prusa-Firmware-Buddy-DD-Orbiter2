@@ -7,8 +7,8 @@ target_sources(
           selftest_frame_fans.cpp
           selftest_frame_firstlayer.cpp
           selftest_frame_firstlayer_questions.cpp
-          selftest_frame_hotend_specify.cpp
           selftest_frame_result.cpp
+          selftest_frame_revise_printer_setup.cpp
           selftest_frame_temp.cpp
           selftest_frame_wizard_epilogue.cpp
           selftest_frame_wizard_prologue.cpp
@@ -25,6 +25,7 @@ target_sources(
           test_of_selftest_result.cpp
           window_wizard_icon.cpp
   )
+
 if(NOT (${PRINTER} STREQUAL "MINI"))
   target_sources(
     firmware PRIVATE selftest_frame_fsensor.cpp selftest_frame_loadcell.cpp
@@ -37,8 +38,9 @@ if(PRINTER STREQUAL "MK4")
 endif()
 
 if(${PRINTER} STREQUAL "XL")
-  target_sources(
-    firmware PRIVATE selftest_frame_dock.cpp selftest_frame_nozzle_diameter.cpp
-                     selftest_frame_tool_offsets.cpp
-    )
+  target_sources(firmware PRIVATE selftest_frame_dock.cpp selftest_frame_tool_offsets.cpp)
+endif()
+
+if(HAS_BELT_TUNING)
+  target_sources(firmware PRIVATE screen_belt_tuning_wizard.cpp)
 endif()

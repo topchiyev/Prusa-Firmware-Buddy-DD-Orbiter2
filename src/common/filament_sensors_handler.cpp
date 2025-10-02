@@ -6,16 +6,15 @@
  */
 
 #include "filament_sensors_handler.hpp"
-#include "rtos_api.hpp"
 #include "bsod.h"
+#include <tasks.hpp>
 #include "window_msgbox.hpp"
-#include <log.h>
-#include <option/has_selftest_snake.h>
+#include <logging/log.hpp>
+#include <option/has_selftest.h>
 #include <option/has_mmu2.h>
-#include <option/has_human_interactions.h>
 #include <option/has_toolchanger.h>
 
-#if HAS_SELFTEST_SNAKE()
+#if HAS_SELFTEST()
     #include <ScreenHandler.hpp>
     #include "screen_menu_selftest_snake.hpp"
 #endif
@@ -24,7 +23,7 @@
     #include "../../lib/Marlin/Marlin/src/feature/prusa/MMU2/mmu2_mk4.h"
 #endif
 
-LOG_COMPONENT_DEF(FSensor, LOG_SEVERITY_INFO);
+LOG_COMPONENT_DEF(FSensor, logging::Severity::info);
 
 using namespace MMU2;
 
@@ -97,7 +96,7 @@ bool FilamentSensors::gui_wait_for_init_with_msg() {
     return true;
 }
 
-void FilamentSensors::for_all_sensors(const std::function<void(IFSensor &sensor, uint8_t index, bool is_side)> &f) {
+void FilamentSensors::for_all_sensors(const stdext::inplace_function<void(IFSensor &sensor, uint8_t index, bool is_side)> &f) {
     HOTEND_LOOP() {
         if (IFSensor *s = GetExtruderFSensor(e)) {
             f(*s, e, false);
@@ -110,14 +109,13 @@ void FilamentSensors::for_all_sensors(const std::function<void(IFSensor &sensor,
 
 void FilamentSensors::task_init() {
     marlin_client::init();
-    marlin_client::wait_for_start_processing();
 }
 
 void FilamentSensors::task_cycle() {
     marlin_client::loop();
 
     static bool old_state = false;
-    const bool new_state = marlin_vars_t().get_fsm_states().is_active(ClientFSM::Load_unload);
+    const bool new_state = marlin_vars().get_fsm_states().is_active(ClientFSM::Load_unload);
 
     if (old_state && !new_state) {
         FSensors_instance().DecEvLock(); // ClientFSM::Load_unload destroy
@@ -203,11 +201,7 @@ void FilamentSensors::process_events() {
 
         m600_sent = true;
 
-        if constexpr (option::has_human_interactions) {
-            marlin_client::gcode_push_front("M600 A"); // change filament
-        } else {
-            marlin_client::gcode_push_front("M25 U"); // pause and unload filament
-        }
+        marlin_client::inject("M600 A"); // change filament
 
         log_info(FSensor, "Injected runout");
         return true;
@@ -221,18 +215,18 @@ void FilamentSensors::process_events() {
             || has_mmu
             || autoload_sent
             || isAutoloadLocked()
-            || !marlin_vars()->fs_autoload_enabled //
-#if HAS_SELFTEST_SNAKE()
+            || !marlin_vars().fs_autoload_enabled //
+#if HAS_SELFTEST()
             // We're accessing screens from the filamentsensors thread here. This looks quite unsafe.
             || Screens::Access()->IsScreenOnStack<ScreenMenuSTSWizard>()
             || Screens::Access()->IsScreenOnStack<ScreenMenuSTSCalibrations>()
-#endif /*PRINTER_IS_PRUSA_XL*/
+#endif
         ) {
             return false;
         }
 
         autoload_sent = true;
-        marlin_client::gcode_push_front("M1701 Z40"); // autoload with return option and minimal Z value of 40mm
+        marlin_client::inject("M1701 Z40"); // autoload with return option and minimal Z value of 40mm
         log_info(FSensor, "Injected autoload");
 
         return true;
@@ -248,17 +242,23 @@ void FilamentSensors::process_events() {
             return;
         }
 
-#if PRINTER_IS_PRUSA_iX
+#if PRINTER_IS_PRUSA_iX()
         // On filament runout on iX, the filament gets unloaded and the printer paused.
         // So when the user inserts a filament during a pause, we want the autoload to trigger,
         // because it's part of the filament change sequence.
         // BFW-5106
-        if (marlin_vars()->print_state.get() == marlin_server::State::Paused && check_autoload()) {
+        if (marlin_vars().print_state.get() == marlin_server::State::Paused && check_autoload()) {
             return;
         }
 #endif
 
     } else {
+        // During MMU standard operation, there is no filament loaded to the nozzle when not printing.
+        // So it's not a good idea to reset what filament types we have stored.
+        if (!has_mmu && sensor(LogicalFilamentSensor::current_extruder)->get_state() == FilamentSensorState::NoFilament) {
+            config_store().set_filament_type(tool_index, FilamentType::none);
+        }
+
         if (check_autoload()) {
             return;
         }
@@ -316,7 +316,7 @@ bool FilamentSensors::ToolHasFilament(uint8_t tool_nr) {
     FilamentSensorState extruder_state = GetExtruderFSensor(tool_nr) ? GetExtruderFSensor(tool_nr)->get_state() : FilamentSensorState::Disabled;
     FilamentSensorState side_state = GetSideFSensor(tool_nr) ? GetSideFSensor(tool_nr)->get_state() : FilamentSensorState::Disabled;
 
-    return (extruder_state == FilamentSensorState::HasFilament || extruder_state == FilamentSensorState::Disabled) && (side_state == FilamentSensorState::HasFilament || side_state == FilamentSensorState::Disabled);
+    return (extruder_state == FilamentSensorState::HasFilament || extruder_state == FilamentSensorState::Disabled) && (side_state == FilamentSensorState::HasFilament || side_state == FilamentSensorState::Disabled || side_state == FilamentSensorState::NotConnected);
 }
 
 /**

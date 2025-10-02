@@ -23,87 +23,88 @@ unichar UniChar(const char *ss) {
     return ord;
 }
 
-bool TheYellowHorse(string_view_utf8 sf) {
-    REQUIRE(sf.getUtf8Char() == UniChar("p"));
-    REQUIRE(sf.getUtf8Char() == UniChar("ř"));
-    REQUIRE(sf.getUtf8Char() == UniChar("í"));
-    REQUIRE(sf.getUtf8Char() == UniChar("l"));
-    REQUIRE(sf.getUtf8Char() == UniChar("i"));
-    REQUIRE(sf.getUtf8Char() == UniChar("š"));
-    REQUIRE(sf.getUtf8Char() == UniChar(" "));
-    REQUIRE(sf.getUtf8Char() == UniChar("ž"));
-    REQUIRE(sf.getUtf8Char() == UniChar("l"));
-    REQUIRE(sf.getUtf8Char() == UniChar("u"));
-    REQUIRE(sf.getUtf8Char() == UniChar("ť"));
-    REQUIRE(sf.getUtf8Char() == UniChar("o"));
-    REQUIRE(sf.getUtf8Char() == UniChar("u"));
-    REQUIRE(sf.getUtf8Char() == UniChar("č"));
-    REQUIRE(sf.getUtf8Char() == UniChar("k"));
-    REQUIRE(sf.getUtf8Char() == UniChar("ý"));
-    REQUIRE(sf.getUtf8Char() == UniChar(" "));
-    REQUIRE(sf.getUtf8Char() == UniChar("k"));
-    REQUIRE(sf.getUtf8Char() == UniChar("ů"));
-    REQUIRE(sf.getUtf8Char() == UniChar("ň"));
-    REQUIRE(sf.getUtf8Char() == UniChar(" "));
-    REQUIRE(sf.getUtf8Char() == UniChar("ú"));
-    REQUIRE(sf.getUtf8Char() == UniChar("p"));
-    REQUIRE(sf.getUtf8Char() == UniChar("ě"));
-    REQUIRE(sf.getUtf8Char() == UniChar("l"));
-    REQUIRE(sf.getUtf8Char() == UniChar(" "));
-    REQUIRE(sf.getUtf8Char() == UniChar("ď"));
-    REQUIRE(sf.getUtf8Char() == UniChar("á"));
-    REQUIRE(sf.getUtf8Char() == UniChar("b"));
-    REQUIRE(sf.getUtf8Char() == UniChar("e"));
-    REQUIRE(sf.getUtf8Char() == UniChar("l"));
-    REQUIRE(sf.getUtf8Char() == UniChar("s"));
-    REQUIRE(sf.getUtf8Char() == UniChar("k"));
-    REQUIRE(sf.getUtf8Char() == UniChar("é"));
-    REQUIRE(sf.getUtf8Char() == UniChar(" "));
-    REQUIRE(sf.getUtf8Char() == UniChar("ó"));
-    REQUIRE(sf.getUtf8Char() == UniChar("d"));
-    REQUIRE(sf.getUtf8Char() == UniChar("y"));
-    REQUIRE(sf.getUtf8Char() == UniChar(" "));
-    REQUIRE(sf.getUtf8Char() == UniChar(":"));
-    REQUIRE(sf.getUtf8Char() == UniChar(" "));
-    REQUIRE(sf.getUtf8Char() == UniChar("P"));
-    REQUIRE(sf.getUtf8Char() == UniChar("Ř"));
-    REQUIRE(sf.getUtf8Char() == UniChar("Í"));
-    REQUIRE(sf.getUtf8Char() == UniChar("L"));
-    REQUIRE(sf.getUtf8Char() == UniChar("I"));
-    REQUIRE(sf.getUtf8Char() == UniChar("Š"));
-    REQUIRE(sf.getUtf8Char() == UniChar(" "));
-    REQUIRE(sf.getUtf8Char() == UniChar("Ž"));
-    REQUIRE(sf.getUtf8Char() == UniChar("L"));
-    REQUIRE(sf.getUtf8Char() == UniChar("U"));
-    REQUIRE(sf.getUtf8Char() == UniChar("Ť"));
-    REQUIRE(sf.getUtf8Char() == UniChar("O"));
-    REQUIRE(sf.getUtf8Char() == UniChar("U"));
-    REQUIRE(sf.getUtf8Char() == UniChar("Č"));
-    REQUIRE(sf.getUtf8Char() == UniChar("K"));
-    REQUIRE(sf.getUtf8Char() == UniChar("Ý"));
-    REQUIRE(sf.getUtf8Char() == UniChar(" "));
-    REQUIRE(sf.getUtf8Char() == UniChar("K"));
-    REQUIRE(sf.getUtf8Char() == UniChar("Ů"));
-    REQUIRE(sf.getUtf8Char() == UniChar("Ň"));
-    REQUIRE(sf.getUtf8Char() == UniChar(" "));
-    REQUIRE(sf.getUtf8Char() == UniChar("Ú"));
-    REQUIRE(sf.getUtf8Char() == UniChar("P"));
-    REQUIRE(sf.getUtf8Char() == UniChar("Ě"));
-    REQUIRE(sf.getUtf8Char() == UniChar("L"));
-    REQUIRE(sf.getUtf8Char() == UniChar(" "));
-    REQUIRE(sf.getUtf8Char() == UniChar("Ď"));
-    REQUIRE(sf.getUtf8Char() == UniChar("Á"));
-    REQUIRE(sf.getUtf8Char() == UniChar("B"));
-    REQUIRE(sf.getUtf8Char() == UniChar("E"));
-    REQUIRE(sf.getUtf8Char() == UniChar("L"));
-    REQUIRE(sf.getUtf8Char() == UniChar("S"));
-    REQUIRE(sf.getUtf8Char() == UniChar("K"));
-    REQUIRE(sf.getUtf8Char() == UniChar("É"));
-    REQUIRE(sf.getUtf8Char() == UniChar(" "));
-    REQUIRE(sf.getUtf8Char() == UniChar("Ó"));
-    REQUIRE(sf.getUtf8Char() == UniChar("D"));
-    REQUIRE(sf.getUtf8Char() == UniChar("Y"));
-    REQUIRE(sf.getUtf8Char() == 0);
+bool TheYellowHorse(const string_view_utf8 &sf) {
+    StringReaderUtf8 reader(sf);
+    REQUIRE(reader.getUtf8Char() == UniChar("p"));
+    REQUIRE(reader.getUtf8Char() == UniChar("ř"));
+    REQUIRE(reader.getUtf8Char() == UniChar("í"));
+    REQUIRE(reader.getUtf8Char() == UniChar("l"));
+    REQUIRE(reader.getUtf8Char() == UniChar("i"));
+    REQUIRE(reader.getUtf8Char() == UniChar("š"));
+    REQUIRE(reader.getUtf8Char() == UniChar(" "));
+    REQUIRE(reader.getUtf8Char() == UniChar("ž"));
+    REQUIRE(reader.getUtf8Char() == UniChar("l"));
+    REQUIRE(reader.getUtf8Char() == UniChar("u"));
+    REQUIRE(reader.getUtf8Char() == UniChar("ť"));
+    REQUIRE(reader.getUtf8Char() == UniChar("o"));
+    REQUIRE(reader.getUtf8Char() == UniChar("u"));
+    REQUIRE(reader.getUtf8Char() == UniChar("č"));
+    REQUIRE(reader.getUtf8Char() == UniChar("k"));
+    REQUIRE(reader.getUtf8Char() == UniChar("ý"));
+    REQUIRE(reader.getUtf8Char() == UniChar(" "));
+    REQUIRE(reader.getUtf8Char() == UniChar("k"));
+    REQUIRE(reader.getUtf8Char() == UniChar("ů"));
+    REQUIRE(reader.getUtf8Char() == UniChar("ň"));
+    REQUIRE(reader.getUtf8Char() == UniChar(" "));
+    REQUIRE(reader.getUtf8Char() == UniChar("ú"));
+    REQUIRE(reader.getUtf8Char() == UniChar("p"));
+    REQUIRE(reader.getUtf8Char() == UniChar("ě"));
+    REQUIRE(reader.getUtf8Char() == UniChar("l"));
+    REQUIRE(reader.getUtf8Char() == UniChar(" "));
+    REQUIRE(reader.getUtf8Char() == UniChar("ď"));
+    REQUIRE(reader.getUtf8Char() == UniChar("á"));
+    REQUIRE(reader.getUtf8Char() == UniChar("b"));
+    REQUIRE(reader.getUtf8Char() == UniChar("e"));
+    REQUIRE(reader.getUtf8Char() == UniChar("l"));
+    REQUIRE(reader.getUtf8Char() == UniChar("s"));
+    REQUIRE(reader.getUtf8Char() == UniChar("k"));
+    REQUIRE(reader.getUtf8Char() == UniChar("é"));
+    REQUIRE(reader.getUtf8Char() == UniChar(" "));
+    REQUIRE(reader.getUtf8Char() == UniChar("ó"));
+    REQUIRE(reader.getUtf8Char() == UniChar("d"));
+    REQUIRE(reader.getUtf8Char() == UniChar("y"));
+    REQUIRE(reader.getUtf8Char() == UniChar(" "));
+    REQUIRE(reader.getUtf8Char() == UniChar(":"));
+    REQUIRE(reader.getUtf8Char() == UniChar(" "));
+    REQUIRE(reader.getUtf8Char() == UniChar("P"));
+    REQUIRE(reader.getUtf8Char() == UniChar("Ř"));
+    REQUIRE(reader.getUtf8Char() == UniChar("Í"));
+    REQUIRE(reader.getUtf8Char() == UniChar("L"));
+    REQUIRE(reader.getUtf8Char() == UniChar("I"));
+    REQUIRE(reader.getUtf8Char() == UniChar("Š"));
+    REQUIRE(reader.getUtf8Char() == UniChar(" "));
+    REQUIRE(reader.getUtf8Char() == UniChar("Ž"));
+    REQUIRE(reader.getUtf8Char() == UniChar("L"));
+    REQUIRE(reader.getUtf8Char() == UniChar("U"));
+    REQUIRE(reader.getUtf8Char() == UniChar("Ť"));
+    REQUIRE(reader.getUtf8Char() == UniChar("O"));
+    REQUIRE(reader.getUtf8Char() == UniChar("U"));
+    REQUIRE(reader.getUtf8Char() == UniChar("Č"));
+    REQUIRE(reader.getUtf8Char() == UniChar("K"));
+    REQUIRE(reader.getUtf8Char() == UniChar("Ý"));
+    REQUIRE(reader.getUtf8Char() == UniChar(" "));
+    REQUIRE(reader.getUtf8Char() == UniChar("K"));
+    REQUIRE(reader.getUtf8Char() == UniChar("Ů"));
+    REQUIRE(reader.getUtf8Char() == UniChar("Ň"));
+    REQUIRE(reader.getUtf8Char() == UniChar(" "));
+    REQUIRE(reader.getUtf8Char() == UniChar("Ú"));
+    REQUIRE(reader.getUtf8Char() == UniChar("P"));
+    REQUIRE(reader.getUtf8Char() == UniChar("Ě"));
+    REQUIRE(reader.getUtf8Char() == UniChar("L"));
+    REQUIRE(reader.getUtf8Char() == UniChar(" "));
+    REQUIRE(reader.getUtf8Char() == UniChar("Ď"));
+    REQUIRE(reader.getUtf8Char() == UniChar("Á"));
+    REQUIRE(reader.getUtf8Char() == UniChar("B"));
+    REQUIRE(reader.getUtf8Char() == UniChar("E"));
+    REQUIRE(reader.getUtf8Char() == UniChar("L"));
+    REQUIRE(reader.getUtf8Char() == UniChar("S"));
+    REQUIRE(reader.getUtf8Char() == UniChar("K"));
+    REQUIRE(reader.getUtf8Char() == UniChar("É"));
+    REQUIRE(reader.getUtf8Char() == UniChar(" "));
+    REQUIRE(reader.getUtf8Char() == UniChar("Ó"));
+    REQUIRE(reader.getUtf8Char() == UniChar("D"));
+    REQUIRE(reader.getUtf8Char() == UniChar("Y"));
+    REQUIRE(reader.getUtf8Char() == 0);
     return true;
 }
 
@@ -130,36 +131,38 @@ TEST_CASE("string_view_utf8::CreateFromFILE test", "[string_view_utf8]") {
     fclose(f);
 }
 
-bool Cooldown(string_view_utf8 sf) {
-    REQUIRE(sf.getUtf8Char() == UniChar("O"));
-    REQUIRE(sf.getUtf8Char() == UniChar("c"));
-    REQUIRE(sf.getUtf8Char() == UniChar("h"));
-    REQUIRE(sf.getUtf8Char() == UniChar("l"));
-    REQUIRE(sf.getUtf8Char() == UniChar("a"));
-    REQUIRE(sf.getUtf8Char() == UniChar("z"));
-    REQUIRE(sf.getUtf8Char() == UniChar("e"));
-    REQUIRE(sf.getUtf8Char() == UniChar("n"));
-    REQUIRE(sf.getUtf8Char() == UniChar("í"));
-    REQUIRE(sf.getUtf8Char() == 0);
+bool Cooldown(const string_view_utf8 &sf) {
+    StringReaderUtf8 reader(sf);
+    REQUIRE(reader.getUtf8Char() == UniChar("O"));
+    REQUIRE(reader.getUtf8Char() == UniChar("c"));
+    REQUIRE(reader.getUtf8Char() == UniChar("h"));
+    REQUIRE(reader.getUtf8Char() == UniChar("l"));
+    REQUIRE(reader.getUtf8Char() == UniChar("a"));
+    REQUIRE(reader.getUtf8Char() == UniChar("z"));
+    REQUIRE(reader.getUtf8Char() == UniChar("e"));
+    REQUIRE(reader.getUtf8Char() == UniChar("n"));
+    REQUIRE(reader.getUtf8Char() == UniChar("í"));
+    REQUIRE(reader.getUtf8Char() == 0);
     return true;
 }
 
 TEST_CASE("string_view_utf8::Cooldown test", "[string_view_utf8]") {
     static const uint8_t utf8str[] = "Ochlazení";
-    string_view_utf8 sf = string_view_utf8::MakeRAM(utf8str);
+    const string_view_utf8 &sf = string_view_utf8::MakeRAM(utf8str);
     REQUIRE(Cooldown(sf));
 }
 
 bool Filament(string_view_utf8 sf) {
-    REQUIRE(sf.getUtf8Char() == UniChar("F"));
-    REQUIRE(sf.getUtf8Char() == UniChar("i"));
-    REQUIRE(sf.getUtf8Char() == UniChar("l"));
-    REQUIRE(sf.getUtf8Char() == UniChar("a"));
-    REQUIRE(sf.getUtf8Char() == UniChar("m"));
-    REQUIRE(sf.getUtf8Char() == UniChar("e"));
-    REQUIRE(sf.getUtf8Char() == UniChar("n"));
-    REQUIRE(sf.getUtf8Char() == UniChar("t"));
-    REQUIRE(sf.getUtf8Char() == 0);
+    StringReaderUtf8 reader(sf);
+    REQUIRE(reader.getUtf8Char() == UniChar("F"));
+    REQUIRE(reader.getUtf8Char() == UniChar("i"));
+    REQUIRE(reader.getUtf8Char() == UniChar("l"));
+    REQUIRE(reader.getUtf8Char() == UniChar("a"));
+    REQUIRE(reader.getUtf8Char() == UniChar("m"));
+    REQUIRE(reader.getUtf8Char() == UniChar("e"));
+    REQUIRE(reader.getUtf8Char() == UniChar("n"));
+    REQUIRE(reader.getUtf8Char() == UniChar("t"));
+    REQUIRE(reader.getUtf8Char() == 0);
     return true;
 }
 
@@ -173,22 +176,22 @@ TEST_CASE("string_view_utf8::Compute num of chars", "[string_view_utf8]") {
     {
         static const uint8_t utf8str[] = "";
         string_view_utf8 sf = string_view_utf8::MakeRAM(utf8str);
-        REQUIRE(sf.computeNumUtf8CharsAndRewind() == 0);
+        REQUIRE(sf.computeNumUtf8Chars() == 0);
     }
     {
         static const uint8_t utf8str[] = "1";
         string_view_utf8 sf = string_view_utf8::MakeRAM(utf8str);
-        REQUIRE(sf.computeNumUtf8CharsAndRewind() == 1);
+        REQUIRE(sf.computeNumUtf8Chars() == 1);
     }
     {
         static const uint8_t utf8str[] = "12";
         string_view_utf8 sf = string_view_utf8::MakeRAM(utf8str);
-        REQUIRE(sf.computeNumUtf8CharsAndRewind() == 2);
+        REQUIRE(sf.computeNumUtf8Chars() == 2);
     }
     {
         static const uint8_t utf8str[] = "ěščř";
         string_view_utf8 sf = string_view_utf8::MakeRAM(utf8str);
-        REQUIRE(sf.computeNumUtf8CharsAndRewind() == 4);
+        REQUIRE(sf.computeNumUtf8Chars() == 4);
     }
 }
 
@@ -229,4 +232,63 @@ TEST_CASE("string_view_utf8::CopyToRAM dst buffer too small + multibyte chars", 
     size_t copied_bytes = orig.copyToRAM(dst, sizeof(dst));
     REQUIRE_THAT(dst, Equals(ref));
     REQUIRE(copied_bytes == sizeof(ref) - 1); // -1 because we don't count copying null at the end
+
+    copied_bytes = orig.copyBytesToRAM(dst, sizeof(dst));
+    REQUIRE(copied_bytes == sizeof(dst) - 1);
+}
+
+TEST_CASE("string_view_utf8::string_build", "[string_view_utf8]") {
+    using Catch::Matchers::Equals;
+    char compare_buff[60] = { 0 };
+
+    static constexpr char fmt_test[] = "%s%d%s%.2f%%%ld%s";
+    static constexpr char ref_test[] = "MK4236.2.010.50%1000000money";
+    StringViewUtf8Parameters<33> params_test;
+    string_view_utf8 str = string_view_utf8::MakeRAM(fmt_test).formatted(params_test, "MK4", 23, "6.2.0", 10.5, 1000000, "money");
+    size_t copied_bytes = str.copyToRAM(compare_buff, sizeof(compare_buff));
+    REQUIRE_THAT(compare_buff, Equals(ref_test));
+    REQUIRE(copied_bytes == strlen(ref_test));
+
+    static constexpr char fmt_one_char[] = "%d";
+    static constexpr char ref_one_char[] = "3";
+    StringViewUtf8Parameters<2> params_one_char;
+    str = string_view_utf8::MakeRAM(fmt_one_char).formatted(params_one_char, 3);
+    copied_bytes = str.copyToRAM(compare_buff, sizeof(compare_buff));
+    REQUIRE_THAT(compare_buff, Equals(ref_one_char));
+    REQUIRE(copied_bytes == strlen(ref_one_char));
+
+    static const char fmt_truncate[] = "%d インプットシェーパーキャリブレーション";
+    static const char ref_truncate[] = "9 インプットシェーパーキャリ";
+    char buffer_too_small[44] = {};
+    StringViewUtf8Parameters<2> params_truncate;
+    str = string_view_utf8::MakeRAM(fmt_truncate).formatted(params_truncate, 9);
+    copied_bytes = str.copyToRAM(buffer_too_small, sizeof(buffer_too_small));
+    REQUIRE_THAT(buffer_too_small, Equals(ref_truncate));
+    REQUIRE(copied_bytes == strlen(ref_truncate));
+
+    static const char fmt_escape[] = "%%%s%%%d%%%.1f%%%%";
+    static const char ref_escape[] = "%heh%0%0.0%%";
+    StringViewUtf8Parameters<10> params_escape;
+    str = string_view_utf8::MakeRAM(fmt_escape).formatted(params_escape, "heh", 0, 0.0f);
+    copied_bytes = str.copyToRAM(compare_buff, sizeof(compare_buff));
+    REQUIRE_THAT(compare_buff, Equals(ref_escape));
+    REQUIRE(copied_bytes == strlen(ref_escape));
+
+    /*
+    static const char fmt_empty_str[] = "%s%s%s";
+    StringViewUtf8Parameters<1> params_empty_str;
+    str = string_view_utf8::MakeRAM(fmt_empty_str).formatted(params_empty_str, "", "", "");
+    copied_bytes = str.copyToRAM(compare_buff, sizeof(compare_buff));
+    REQUIRE_THAT(compare_buff, Equals(""));
+    REQUIRE(copied_bytes == 0);
+    */
+
+    static const char pra[] = "pra";
+    static const char fmt_text_in_between[] = "%s%s%sbabicka rekla \"%s%s%sdedo, ty si ale %sse\"";
+    static const char ref_text_in_between[] = "prapraprababicka rekla \"praprapradedo, ty si ale prase\"";
+    StringViewUtf8Parameters<28> params_text_in_between;
+    str = string_view_utf8::MakeRAM(fmt_text_in_between).formatted(params_text_in_between, pra, pra, pra, pra, pra, pra, pra);
+    copied_bytes = str.copyToRAM(compare_buff, sizeof(compare_buff));
+    REQUIRE_THAT(compare_buff, Equals(ref_text_in_between));
+    REQUIRE(copied_bytes == strlen(ref_text_in_between));
 }

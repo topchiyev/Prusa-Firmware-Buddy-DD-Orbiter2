@@ -3,6 +3,7 @@ info_16x16.png
 arrow_right_10x16.png
 question_16x16.png
 wifi_16x16.png
+wifi_insecure_16x16.png
 lan_16x16.png
 speed_16x16.png
 folder_up_16x16.png
@@ -104,6 +105,7 @@ spool_16x16.png
 stealth_20x16.png
 switch_off_36x18.png
 switch_on_36x18.png
+switch_mid_36x18.png
 temperature_16x16.png
 transfer_icon_16x16.png
 turn_knob_81x55.png
@@ -124,3 +126,17 @@ language_white_16x16.png
 ok_color_16x16.png
 na_color_16x16.png
 nok_color_16x16.png
+cancel_44x33.png
+cancel_16x16.png
+space_44x33.png
+ok_44x33.png
+backspace_44x33.png
+clear_44x33.png
+ok_16x16.png
+metrics_16x16.png
+user_filament_16x16.png
+set_ready_16x16.png
+set_ready_64x64.png
+set_ready_64x64_focused.png
+set_ready_64x64_disabled.png
+connect_16x16.png

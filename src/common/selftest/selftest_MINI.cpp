@@ -28,8 +28,8 @@
 #include "timing.h"
 #include "selftest_result_type.hpp"
 #include <config_store/store_instance.hpp>
-#include <printers.h>
 #include "SteelSheets.hpp"
+#include "i_selftest.hpp"
 
 using namespace selftest;
 
@@ -65,17 +65,18 @@ static const uint16_t Fan1max_rpm_table[] = { 3750, 5850, 7050, 8050, 8950 };
 static constexpr SelftestFansConfig fans_configs[] = {
     {
         .print_fan = benevolent_fan_config,
+        .print_fan_40pct = benevolent_fan_config,
         .heatbreak_fan = benevolent_fan_config,
     },
 };
 
 const AxisConfig_t selftest::Config_XAxis = {
     .partname = "X-Axis",
-    .length = 186,
+    .length = X_MAX_LENGTH,
     .fr_table_fw = XYfr_table,
     .fr_table_bw = XYfr_table,
-    .length_min = 178,
-    .length_max = 188,
+    .length_min = X_MAX_LENGTH,
+    .length_max = X_MAX_LENGTH + X_END_GAP,
     .axis = X_AXIS,
     .steps = xy_fr_table_size * 2,
     .movement_dir = -1,
@@ -85,11 +86,11 @@ const AxisConfig_t selftest::Config_XAxis = {
 
 const AxisConfig_t selftest::Config_YAxis = {
     .partname = "Y-Axis",
-    .length = 185,
+    .length = Y_MAX_LENGTH,
     .fr_table_fw = XYfr_table,
     .fr_table_bw = XYfr_table,
-    .length_min = 179,
-    .length_max = 189,
+    .length_min = Y_MAX_LENGTH - 2, // add slight tolerance due to construction imperfection
+    .length_max = Y_MAX_LENGTH + Y_END_GAP,
     .axis = Y_AXIS,
     .steps = xy_fr_table_size * 2,
     .movement_dir = 1,
@@ -147,6 +148,41 @@ static const HeaterConfig_t Config_HeaterBed = {
     .target_temp = 110,
     .heat_min_temp = 50,
     .heat_max_temp = 65,
+};
+
+// class representing whole self-test
+class CSelftest : public ISelftest {
+public:
+    CSelftest();
+
+public:
+    virtual bool IsInProgress() const override;
+    virtual bool IsAborted() const override;
+    virtual bool Start(const uint64_t test_mask, const selftest::TestData test_data) override; // parent has no clue about SelftestMask_t
+    virtual void Loop() override;
+    virtual bool Abort() override;
+
+protected:
+    void phaseSelftestStart();
+    void restoreAfterSelftest();
+    virtual void next() override;
+    void phaseShowResult();
+    bool phaseWaitUser(PhasesSelftest phase);
+    void phaseDidSelftestPass();
+
+protected:
+    uint8_t previous_sheet_index {};
+    SelftestState_t m_State;
+    SelftestMask_t m_Mask;
+    std::array<selftest::IPartHandler *, HOTENDS> pFans;
+    selftest::IPartHandler *pXAxis;
+    selftest::IPartHandler *pYAxis;
+    selftest::IPartHandler *pZAxis;
+    std::array<selftest::IPartHandler *, HOTENDS> pNozzles;
+    selftest::IPartHandler *pBed;
+    selftest::IPartHandler *pFirstLayer;
+
+    SelftestResult m_result;
 };
 
 CSelftest::CSelftest()
@@ -215,7 +251,7 @@ void CSelftest::Loop() {
         phaseStart();
         break;
     case stsPrologueAskRun:
-        FSM_CHANGE__LOGGING(GuiDefaults::ShowDevelopmentTools ? PhasesSelftest::WizardPrologue_ask_run_dev : PhasesSelftest::WizardPrologue_ask_run);
+        marlin_server::fsm_change(GuiDefaults::ShowDevelopmentTools ? PhasesSelftest::WizardPrologue_ask_run_dev : PhasesSelftest::WizardPrologue_ask_run);
         break;
     case stsPrologueAskRun_wait_user:
         if (phaseWaitUser(GuiDefaults::ShowDevelopmentTools ? PhasesSelftest::WizardPrologue_ask_run_dev : PhasesSelftest::WizardPrologue_ask_run)) {
@@ -226,7 +262,7 @@ void CSelftest::Loop() {
         phaseSelftestStart();
         break;
     case stsPrologueInfo:
-        FSM_CHANGE__LOGGING(PhasesSelftest::WizardPrologue_info);
+        marlin_server::fsm_change(PhasesSelftest::WizardPrologue_info);
         break;
     case stsPrologueInfo_wait_user:
         if (phaseWaitUser(PhasesSelftest::WizardPrologue_info)) {
@@ -234,7 +270,7 @@ void CSelftest::Loop() {
         }
         break;
     case stsPrologueInfoDetailed:
-        FSM_CHANGE__LOGGING(PhasesSelftest::WizardPrologue_info_detailed);
+        marlin_server::fsm_change(PhasesSelftest::WizardPrologue_info_detailed);
         break;
     case stsPrologueInfoDetailed_wait_user:
         if (phaseWaitUser(PhasesSelftest::WizardPrologue_info_detailed)) {
@@ -296,6 +332,27 @@ void CSelftest::Loop() {
             return;
         }
         break;
+
+    case stsReviseSetupAfterHeaters:
+        m_result = config_store().selftest_result.get();
+
+        if (m_result.bed == TestResult_Failed) {
+            marlin_server::fsm_change(PhasesSelftest::Heaters_AskBedSheetAfterFail, {});
+            switch (marlin_server::get_response_from_phase(PhasesSelftest::Heaters_AskBedSheetAfterFail)) {
+
+            case Response::Retry:
+                m_State = stsHeaters_noz_ena;
+                return;
+
+            case Response::Ok:
+                break;
+
+            default:
+                return;
+            }
+        }
+        break;
+
     case stsSelftestStop:
         restoreAfterSelftest();
         break;
@@ -307,7 +364,7 @@ void CSelftest::Loop() {
         break;
     case stsEpilogue_nok:
         if (SelftestResult_Failed(m_result)) {
-            FSM_CHANGE__LOGGING(PhasesSelftest::WizardEpilogue_nok);
+            marlin_server::fsm_change(PhasesSelftest::WizardEpilogue_nok);
         }
         break;
     case stsEpilogue_nok_wait_user:
@@ -332,7 +389,7 @@ void CSelftest::Loop() {
         break;
     case stsEpilogue_ok:
         if (SelftestResult_Passed_All(m_result)) {
-            FSM_CHANGE__LOGGING(PhasesSelftest::WizardEpilogue_ok);
+            marlin_server::fsm_change(PhasesSelftest::WizardEpilogue_ok);
         }
         break;
     case stsEpilogue_ok_wait_user:
@@ -354,7 +411,7 @@ void CSelftest::Loop() {
 
 void CSelftest::phaseShowResult() {
     m_result = config_store().selftest_result.get();
-    FSM_CHANGE_WITH_DATA__LOGGING(PhasesSelftest::Result, FsmSelftestResult().Serialize());
+    marlin_server::fsm_change(PhasesSelftest::Result, FsmSelftestResult().Serialize());
 }
 
 void CSelftest::phaseDidSelftestPass() {
@@ -363,9 +420,9 @@ void CSelftest::phaseDidSelftestPass() {
 
     // dont run wizard again
     if (SelftestResult_Passed_All(m_result)) {
-        config_store().run_selftest.set(false); // clear selftest flag
-        config_store().run_xyz_calib.set(false); // clear XYZ calib flag
-        config_store().run_first_layer.set(false); // clear first layer flag
+        auto &store = config_store();
+        auto transaction = store.get_backend().transaction_guard();
+        store.run_selftest.set(false); // clear selftest flag
     }
 }
 
@@ -375,9 +432,11 @@ bool CSelftest::phaseWaitUser(PhasesSelftest phase) {
         Abort();
     }
     if (response == Response::Ignore) {
-        config_store().run_selftest.set(false); // clear selftest flag
-        config_store().run_xyz_calib.set(false); // clear XYZ calib flag
-        config_store().run_first_layer.set(false); // clear first layer flag
+        {
+            auto &store = config_store();
+            auto transaction = store.get_backend().transaction_guard();
+            store.run_selftest.set(false); // clear selftest flag
+        }
         Abort();
     }
     return response == Response::_none;
@@ -418,12 +477,7 @@ void CSelftest::phaseSelftestStart() {
 
     m_result = config_store().selftest_result.get(); // read previous result
     if (m_Mask & stmFans) {
-        m_result.tools[0].printFan = TestResult_Unknown;
-        m_result.tools[0].heatBreakFan = TestResult_Unknown;
-
-#if not PRINTER_IS_PRUSA_MINI
-        m_result.tools[0].fansSwitched = TestResult_Unknown;
-#endif
+        m_result.tools[0].reset_fan_tests();
     }
     if (m_Mask & stmXAxis) {
         m_result.xaxis = TestResult_Unknown;

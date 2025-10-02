@@ -5,7 +5,7 @@
 #include "window_header.hpp"
 #include "status_footer.hpp"
 
-class IScreenPrinting : public AddSuperWindow<screen_t> {
+class IScreenPrinting : public screen_t {
 protected:
     window_header_t header;
     StatusFooter footer;
@@ -19,7 +19,7 @@ protected:
     virtual void tuneAction() = 0;
 
 public:
-    IScreenPrinting(string_view_utf8 caption);
+    IScreenPrinting(const string_view_utf8 &caption);
     ~IScreenPrinting();
     static IScreenPrinting *GetInstance();
     static void NotifyMarlinStart();

@@ -5,14 +5,14 @@
 #include <ScreenHandler.hpp>
 
 ScreenTouchPlayground::ScreenTouchPlayground()
-    : text(this, Rect16(4, 4, display::GetW() - 8, 64), is_multiline::yes)
+    : text(this, Rect16(4, 4, GuiDefaults::ScreenWidth - 8, 64), is_multiline::yes)
     , touch_rect(this, {}) {
 
     text.set_font(Font::normal);
     text.SetText(string_view_utf8::MakeRAM(reinterpret_cast<const uint8_t *>(text_content.data())));
 }
 
-void ScreenTouchPlayground::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void ScreenTouchPlayground::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     if (event == GUI_event_t::LOOP) {
         auto last_event = touchscreen.get_last_event();
 
@@ -47,5 +47,5 @@ void ScreenTouchPlayground::windowEvent(EventLock /*has private ctor*/, window_t
         return;
     }
 
-    SuperWindowEvent(sender, event, param);
+    screen_t::windowEvent(sender, event, param);
 }

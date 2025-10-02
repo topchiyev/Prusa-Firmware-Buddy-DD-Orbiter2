@@ -26,14 +26,14 @@ public:
         unknown
     };
 
-    WI_SWITCH_0_1_NA_t(state_t index, string_view_utf8 label, const img::Resource *id_icon, is_enabled_t enabled, is_hidden_t hidden)
+    WI_SWITCH_0_1_NA_t(state_t index, const string_view_utf8 &label, const img::Resource *id_icon, is_enabled_t enabled, is_hidden_t hidden)
         : WI_SWITCH_t(size_t(index), label, id_icon, enabled, hidden, string_view_utf8::MakeCPUFLASH((const uint8_t *)str_0), string_view_utf8::MakeCPUFLASH((const uint8_t *)str_1), string_view_utf8::MakeCPUFLASH((const uint8_t *)str_NA)) {}
 };
 
 class WI_ICON_SWITCH_OFF_ON_t : public IWindowMenuItem {
 
 public:
-    WI_ICON_SWITCH_OFF_ON_t(bool value, string_view_utf8 label, const img::Resource *id_icon, is_enabled_t enabled, is_hidden_t hidden);
+    WI_ICON_SWITCH_OFF_ON_t(bool value, const string_view_utf8 &label, const img::Resource *id_icon = nullptr, is_enabled_t enabled = is_enabled_t::yes, is_hidden_t hidden = is_hidden_t::no);
 
 public:
     void set_value(bool set, bool emit_change);
@@ -57,8 +57,7 @@ protected:
     virtual void OnChange([[maybe_unused]] size_t old_index) {} // TODO: Remove this ugly legacy parameter
 
     virtual void click(IWindowMenu &window_menu) override;
-    virtual void touch(IWindowMenu &window_menu, point_ui16_t relative_touch_point) override;
-    virtual void printExtension(Rect16 extension_rect, color_t color_text, color_t color_back, ropfn raster_op) const override;
+    virtual void printExtension(Rect16 extension_rect, Color color_text, Color color_back, ropfn raster_op) const override;
 
     /// Legacy reference to value_
     const bool &index; // TODO: Remove this legacy variable
@@ -84,14 +83,4 @@ public:
 
 protected:
     void click(IWindowMenu &window_menu) override;
-};
-
-class MI_TEST_DISABLED_RETURN : public IWindowMenuItem {
-    static constexpr const char *const label = "Disabled RETURN Button";
-
-public:
-    MI_TEST_DISABLED_RETURN();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
 };

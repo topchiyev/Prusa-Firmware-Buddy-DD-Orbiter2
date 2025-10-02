@@ -1,13 +1,9 @@
 # Buddy
-[![Build Status](<https://holly.prusa3d.com/buildStatus/icon?job=Prusa-Firmware-Buddy-Private%2FMultibranch%2Fprivate&subject=private>)](https://holly.prusa3d.com/job/Prusa-Firmware-Buddy-Private/job/Multibranch/job/private/)
-[![Build Status](<https://holly.prusa3d.com/buildStatus/icon?job=Prusa-Firmware-Buddy-Private%2FMultibranch%2Fmaster&subject=master>)](https://holly.prusa3d.com/job/Prusa-Firmware-Buddy-Private/job/Multibranch/job/master/)
-[![Build Status](<https://holly.prusa3d.com/buildStatus/icon?job=Prusa-Firmware-Buddy-Private%2FAuto-Pull-Master&subject=auto-update-master>)](https://holly.prusa3d.com/job/Prusa-Firmware-Buddy-Private/job/Auto-Pull-Master/)
-[![Build Status](<https://holly.prusa3d.com/buildStatus/icon?job=Prusa-Firmware-Buddy-Private%2FMerge-Master-To-Private&subject=merge-master-to-private-daily>)](https://holly.prusa3d.com/job/Prusa-Firmware-Buddy-Private/job/Merge-Master-To-Private/)
-
 This repository includes source code and firmware releases for the Original Prusa 3D printers based on the 32-bit ARM microcontrollers.
 
 The currently supported models are:
 - Original Prusa MINI/MINI+
+- Original Prusa MK3.5
 - Original Prusa MK3.9
 - Original Prusa MK4
 - Original Prusa XL
@@ -17,6 +13,7 @@ The currently supported models are:
 ### Requirements
 
 - Python 3.8 or newer
+- system installation of Python's `requests` package (use either pip or your system package manager)
 
 ### Cloning this repository
 
@@ -27,11 +24,10 @@ Run `git clone https://github.com/prusa3d/Prusa-Firmware-Buddy.git`.
 Run `python utils/build.py`. The binaries are then going to be stored under `./build/products`.
 
 - Without any arguments, it will build a release version of the firmware for all supported printers and bootloader settings.
-- To generate `.bbf` versions of the firmware, use: `./utils/build.py --generate-bbf`.
 - Use `--build-type` to select build configurations to be built (`debug`, `release`).
 - Use `--preset` to select for which printers the firmware should be built.
 - By default, it will build the firmware in "prerelease mode" set to `beta`. You can change the prerelease using `--prerelease alpha`, or use `--final` to build a final version of the firmware.
-- Use `--host-tools` to include host tools in the build (`bin2cc`, `png2font`, ...)
+- Use `--host-tools` to include host tools in the build (`png2font`, ...)
 - Find more options using the `--help` flag!
 
 #### Examples:

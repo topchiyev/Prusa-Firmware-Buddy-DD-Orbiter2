@@ -1,6 +1,6 @@
 #include <marlin_stubs/M1977.hpp>
 
-#include <common/client_response.hpp>
+#include <client_response.hpp>
 #include <common/fsm_base_types.hpp>
 #include <common/marlin_server.hpp>
 #include <Marlin/src/feature/phase_stepping/calibration.hpp>
@@ -90,7 +90,7 @@ public:
     void on_enter_calibration_phase(int calibration_phase) override {
         data[0] = calibration_phase;
         data[2] = 0;
-        FSM_CHANGE_WITH_DATA__LOGGING(phase, data);
+        marlin_server::fsm_change(phase, data);
         current_calibration_phase = calibration_phase;
     }
 
@@ -99,7 +99,7 @@ public:
 
     void on_calibration_phase_progress(int progress) override {
         data[2] = progress;
-        FSM_CHANGE_WITH_DATA__LOGGING(phase, data);
+        marlin_server::fsm_change(phase, data);
     }
 
     void on_calibration_phase_result(float forward_score, float backward_score) override {
@@ -152,7 +152,7 @@ namespace state {
     PhasesPhaseStepping intro() {
         switch (wait_for_response(PhasesPhaseStepping::intro)) {
         case Response::Continue:
-            return PhasesPhaseStepping::pick_tool;
+            return PhasesPhaseStepping::home;
         case Response::Abort:
             // No need to invalidate test result here
             return PhasesPhaseStepping::finish;
@@ -161,8 +161,8 @@ namespace state {
         }
     }
 
-    PhasesPhaseStepping pick_tool() {
-        FSM_CHANGE__LOGGING(PhasesPhaseStepping::pick_tool);
+    PhasesPhaseStepping home() {
+        marlin_server::fsm_change(PhasesPhaseStepping::home);
         GcodeSuite::G28_no_parser( // home
             true, // always_home_all
             true, // home only if needed,
@@ -170,7 +170,9 @@ namespace state {
             false, // S-parameter,
             true, true, false // home X, Y but not Z
         );
+#if HAS_TOOLCHANGER()
         tool_change(/*tool_index=*/0, tool_return_t::no_return, tool_change_lift_t::no_lift, /*z_down=*/false);
+#endif
         Planner::synchronize();
         return PhasesPhaseStepping::calib_x;
     }
@@ -210,7 +212,7 @@ namespace state {
     }
 
     PhasesPhaseStepping calib_ok(Context &context) {
-        FSM_CHANGE_WITH_DATA__LOGGING(PhasesPhaseStepping::calib_ok, serialize_ok(context.scores_x, context.scores_y));
+        marlin_server::fsm_change(PhasesPhaseStepping::calib_ok, serialize_ok(context.scores_x, context.scores_y));
         Planner::synchronize();
         phase_stepping::enable(X_AXIS, true);
         config_store().set_phase_stepping_enabled(X_AXIS, true);
@@ -226,17 +228,17 @@ namespace state {
     }
 
     PhasesPhaseStepping calib_x_nok(Context &context) {
-        FSM_CHANGE_WITH_DATA__LOGGING(PhasesPhaseStepping::calib_x_nok, serialize_axis_nok(context.scores_x));
+        marlin_server::fsm_change(PhasesPhaseStepping::calib_x_nok, serialize_axis_nok(context.scores_x));
         return fail_helper(PhasesPhaseStepping::calib_x_nok);
     }
 
     PhasesPhaseStepping calib_y_nok(Context &context) {
-        FSM_CHANGE_WITH_DATA__LOGGING(PhasesPhaseStepping::calib_y_nok, serialize_axis_nok(context.scores_y));
+        marlin_server::fsm_change(PhasesPhaseStepping::calib_y_nok, serialize_axis_nok(context.scores_y));
         return fail_helper(PhasesPhaseStepping::calib_y_nok);
     }
 
     PhasesPhaseStepping calib_error() {
-        FSM_CHANGE__LOGGING(PhasesPhaseStepping::calib_error);
+        marlin_server::fsm_change(PhasesPhaseStepping::calib_error);
         return fail_helper(PhasesPhaseStepping::calib_error);
     }
 
@@ -246,8 +248,8 @@ PhasesPhaseStepping get_next_phase(Context &context, const PhasesPhaseStepping p
     switch (phase) {
     case PhasesPhaseStepping::intro:
         return state::intro();
-    case PhasesPhaseStepping::pick_tool:
-        return state::pick_tool();
+    case PhasesPhaseStepping::home:
+        return state::home();
     case PhasesPhaseStepping::calib_x:
         return state::calib_x(context);
     case PhasesPhaseStepping::calib_y:
@@ -270,13 +272,22 @@ PhasesPhaseStepping get_next_phase(Context &context, const PhasesPhaseStepping p
 
 namespace PrusaGcodeSuite {
 
+/** \addtogroup G-Codes
+ * @{
+ */
+
+/**
+ *  Phase Stepping Calibration Dialog. Prusa BUDDY FW specific.
+ */
 void M1977() {
     PhasesPhaseStepping phase = PhasesPhaseStepping::intro;
-    Context context;
-    FSM_HOLDER_WITH_DATA__LOGGING(PhaseStepping, phase, {});
+    Context context {};
+    marlin_server::FSM_Holder holder { phase };
     do {
         phase = get_next_phase(context, phase);
     } while (phase != PhasesPhaseStepping::finish);
 }
+
+/** @}*/
 
 } // namespace PrusaGcodeSuite

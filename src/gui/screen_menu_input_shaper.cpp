@@ -17,8 +17,7 @@ void ScreenMenuInputShaper::update_gui() {
 
     // If the "enable editing" button is hiden, enable editing by default
     // Also do not allow IS tuning mid-print
-    // Editing disabled completely for 6.0.0 release - BFW-5297o
-    is_editing_enabled = false && Item<MI_IS_ENABLE_EDITING>().IsHidden() && !marlin_client::is_printing();
+    is_editing_enabled = Item<MI_IS_ENABLE_EDITING>().IsHidden() && !marlin_client::is_printing();
 
     AutoRestore _ar(is_updating_gui, true);
 
@@ -32,7 +31,7 @@ void ScreenMenuInputShaper::update_gui() {
     Item<MI_IS_Y_TYPE>().set_is_enabled(is_editing_enabled && y_enabled);
     Item<MI_IS_Y_FREQUENCY>().set_is_enabled(is_editing_enabled && y_enabled);
     Item<MI_IS_Y_COMPENSATION>().set_is_enabled(is_editing_enabled && y_enabled);
-    Item<MI_IS_RESTORE_DEFAULTS>().set_is_enabled(!marlin_client::is_printing()); // TODO: revert back to is_editing_enabled
+    Item<MI_IS_RESTORE_DEFAULTS>().set_is_enabled(is_editing_enabled);
 
     Item<MI_IS_X_TYPE>().set_show_disabled_extension(x_enabled);
     Item<MI_IS_X_FREQUENCY>().set_show_disabled_extension(x_enabled);
@@ -57,7 +56,7 @@ void ScreenMenuInputShaper::update_gui() {
     }
 }
 
-void ScreenMenuInputShaper::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void ScreenMenuInputShaper::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     if (event == GUI_event_t::CHILD_CLICK) {
         switch (ftrstd::bit_cast<InputShaperMenuItemChildClickParam>(param)) {
 
@@ -77,5 +76,5 @@ void ScreenMenuInputShaper::windowEvent(EventLock /*has private ctor*/, window_t
         return;
     }
 
-    SuperWindowEvent(sender, event, param);
+    ScreenMenu::windowEvent(sender, event, param);
 }

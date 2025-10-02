@@ -11,9 +11,9 @@
 #include "window_icon.hpp"
 #include "window_wizard_progress.hpp"
 #include "status_footer.hpp"
-#include "printers.h"
+#include <option/has_switched_fan_test.h>
 
-class SelftestFrameFans : public AddSuperWindow<SelftestFrameNamedWithRadio> {
+class SelftestFrameFans : public SelftestFrameNamedWithRadio {
     FooterLine footer;
     window_wizard_progress_t progress;
     window_text_t text_info;
@@ -24,19 +24,19 @@ class SelftestFrameFans : public AddSuperWindow<SelftestFrameNamedWithRadio> {
     window_icon_t icon_print_fan;
     window_text_t text_print_fan;
 
-#if not PRINTER_IS_PRUSA_MINI
+#if HAS_SWITCHED_FAN_TEST()
     window_text_t text_fans_switched;
-#endif
-#if PRINTER_IS_PRUSA_MK3_5
+#endif /* HAS_SWITCHED_FAN_TEST() */
+#if PRINTER_IS_PRUSA_MK3_5()
     window_text_t text_question;
 #endif
 
     struct fan_state_t {
         WindowIcon_OkNg icon_heatbreak_fan_state;
         WindowIcon_OkNg icon_print_fan_state;
-#if not PRINTER_IS_PRUSA_MINI
+#if HAS_SWITCHED_FAN_TEST()
         WindowIcon_OkNg icon_fans_switched_state;
-#endif
+#endif /* HAS_SWITCHED_FAN_TEST() */
     };
     std::array<fan_state_t, HOTENDS> fan_states;
 

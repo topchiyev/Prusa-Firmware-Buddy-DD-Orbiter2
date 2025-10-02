@@ -5,9 +5,10 @@
 #include "selftest_frame_firstlayer.hpp"
 #include "i18n.h"
 #include "selftest_firstlayer_type.hpp"
+#include <option/has_sheet_profiles.h>
 
 SelftestFrameFirstLayer::SelftestFrameFirstLayer(window_t *parent, PhasesSelftest ph, fsm::PhaseData data)
-    : AddSuperWindow<SelftestFrame>(parent, ph, data)
+    : SelftestFrame(parent, ph, data)
     , footer(this
 #if FOOTER_LINES__ == 1
           ,
@@ -17,7 +18,7 @@ SelftestFrameFirstLayer::SelftestFrameFirstLayer(window_t *parent, PhasesSelftes
           ,
           footer::Item::live_z
 #endif
-#if defined(FOOTER_HAS_SHEETS)
+#if HAS_SHEET_PROFILES()
           ,
           footer::Item::sheets
 #endif
@@ -32,6 +33,8 @@ SelftestFrameFirstLayer::SelftestFrameFirstLayer(window_t *parent, PhasesSelftes
 }
 
 void SelftestFrameFirstLayer::change() {
+    progress.SetProgressPercent(data_current[0]);
+
     switch (phase_current) {
     case PhasesSelftest::FirstLayer_mbl:
         live_z.Idle();

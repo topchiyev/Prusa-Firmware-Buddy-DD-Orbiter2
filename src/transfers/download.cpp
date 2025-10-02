@@ -1,25 +1,25 @@
 #include "download.hpp"
 #include "files.hpp"
 
+#include <freertos/binary_semaphore.hpp>
 #include <common/http/resp_parser.h>
+#include <common/tcpip_callback_nofail.hpp>
+#include <common/pbuf_deleter.hpp>
+#include <common/random.h>
 #ifndef UNITTESTS
     // Avoid deep transitive dependency hell in unit tests...
     #include <nhttp/server.h>
 #endif
-#include <common/pbuf_deleter.hpp>
 #include <nhttp/splice.h>
 #include <http_lifetime.h>
 #include <timing.h>
 
 #include <atomic>
 #include <cinttypes>
-#include <semphr.h>
 #include <lwip/tcpip.h>
 #include <lwip/altcp.h>
 #include <lwip/altcp_tcp.h>
 #include <lwip/dns.h>
-
-LOG_COMPONENT_REF(transfers);
 
 using automata::ExecutionControl;
 using http::ContentEncryptionMode;
@@ -51,21 +51,17 @@ size_t strlcat(char *, const char *, size_t);
 namespace {
 
 constexpr size_t MAX_REQ_SIZE = 512;
-
-// Even though we are using the „blocking“ variant (eg. not _try), it
-// is, at least by reading the code, possible this would consume the
-// internal buffers for messages because it allocates that message
-// semi-dynamically from a mem pool :-(.
+// We split the request into segments, request each one separately. This
+// prevents the TCP buffers on sender side (or any proxy / middleware thing in
+// the way that is not possible to control directly) from „overfilling“. That
+// would queue up a lot of data and we couldn't process other commands fast
+// enough.
 //
-// We can't afford to ever lose the callback, but we are allowed to
-// block here and the occurence is probably only theoretical, so wait a
-// bit if it happens (so the tcpip thread chews through few of the
-// messages there and frees something) and retry.
-void tcpip_callback_nofail(tcpip_callback_fn function, void *ctx) {
-    while (tcpip_callback(function, ctx) != ERR_OK) {
-        osDelay(10);
-    }
-}
+// By splitting this into smaller requests (256 kB currently), it should
+// "drain" each time and allow the commands to come. We should be able to
+// process this in order of seconds, but won't introduce too much overhead
+// (hopefully).
+constexpr uint32_t INLINE_SEGMENT_SIZE = 512 * 512;
 
 } // namespace
 
@@ -87,7 +83,7 @@ public:
     /* === State variables (yes, we are a "state machine") === */
     Phase phase = Phase::NotStarted;
     bool delete_requested = false;
-    SemaphoreHandle_t delete_allowed;
+    freertos::BinarySemaphore delete_allowed;
     atomic<DownloadStep> last_status = DownloadStep::Continue;
     uint32_t request_started = 0; // Time when we started, to allow timing out
 
@@ -141,8 +137,7 @@ public:
     std::unique_ptr<Decryptor> decryptor;
 
     Async(const char *hostname, uint16_t port, const char *path, PartialFile::Ptr destination, std::unique_ptr<Decryptor> decryptor, uint32_t start_range, optional<uint32_t> end_range)
-        : delete_allowed(xSemaphoreCreateBinary())
-        , phase_payload(Request { {}, port, {}, start_range, end_range, {} })
+        : phase_payload(Request { {}, port, {}, start_range, end_range, {} })
         , destination(move(destination))
         , decryptor(move(decryptor)) {
         auto &request = get<Request>(phase_payload);
@@ -153,9 +148,7 @@ public:
     Async(Async &&oter) = delete;
     Async &operator=(const Async &other) = delete;
     Async &operator=(Async &&other) = delete;
-    ~Async() {
-        vSemaphoreDelete(delete_allowed);
-    }
+    ~Async() = default;
 
     void done(DownloadStep how) {
         if (phase != Phase::Done) {
@@ -169,7 +162,7 @@ public:
             phase = Phase::Done;
         }
         if (delete_requested) {
-            xSemaphoreGive(delete_allowed);
+            delete_allowed.release();
         }
     }
 
@@ -445,25 +438,57 @@ void Download::AsyncDeleter::operator()(Async *a) {
         // work before it can be deleted, so it's not left somewhere as a
         // callback or something like that.
         tcpip_callback_nofail(Async::request_delete_wrap, a);
-        xSemaphoreTake(a->delete_allowed, portMAX_DELAY);
+        a->delete_allowed.acquire();
         delete a;
     }
 }
 
 Download::Download(const Request &request, PartialFile::Ptr destination, uint32_t start_range, optional<uint32_t> end_range) {
-    // Plain downloads are no longer supported, need encryption info
-    assert(request.encryption);
-    size_t file_size = request.encryption->orig_size;
-    auto decryptor = make_unique<Decryptor>(request.encryption->key, request.encryption->nonce, start_range, file_size - start_range);
-    assert(destination);
+    if (const auto *encrypted = get_if<Request::Encrypted>(&request.data); encrypted) {
+        assert(encrypted->encryption);
+        size_t file_size = encrypted->encryption->orig_size;
+        auto decryptor = make_unique<Decryptor>(encrypted->encryption->key, encrypted->encryption->nonce, start_range, file_size - start_range);
+        assert(destination);
 
-    destination->seek(start_range);
-    async.reset(new Async(request.host, request.port, request.url_path, move(destination), move(decryptor), start_range, end_range));
-    tcpip_callback_nofail(Async::start_wrapped, async.get());
+        destination->seek(start_range);
+        AsyncPtr async(new Async(encrypted->host, encrypted->port, encrypted->url_path, move(destination), move(decryptor), start_range, end_range));
+        Async *async_raw = async.get();
+        engine = std::move(async);
+        tcpip_callback_nofail(Async::start_wrapped, async_raw);
+    } else {
+        const auto &in = get<Request::Inline>(request.data);
+        destination->seek(start_range);
+        InlinePtr in_ptr(new Inline {
+            in.team_id,
+            // This is just a safety feature - making sure we don't mix chunks
+            // of different file in ourselves (which _shouldn't_ be possible in
+            // the protocol anyway). The chance of accidentally hitting the
+            // same ID being 1:2^32 is good enough.
+            rand_u(),
+            start_range,
+            end_range.value_or(in.orig_size - 1 /* End is inclusive */),
+            0,
+            destination,
+        });
+        strlcpy(in_ptr->hash, in.hash, sizeof in_ptr->hash);
+        engine = std::move(in_ptr);
+        // We do _nothing_ in here, in this case, the Download is kind of "passive"
+    }
 }
 
 DownloadStep Download::step() {
-    return async->status();
+    if (auto *async = get_if<AsyncPtr>(&engine); async != nullptr) {
+        return (*async)->status();
+    } else {
+        const auto &in = get<InlinePtr>(engine);
+        if (in->status != DownloadStep::Continue) {
+            return in->status;
+        } else if (in->start > in->end /* End is inclusive */) {
+            return DownloadStep::Finished;
+        } else {
+            return DownloadStep::Continue;
+        }
+    }
 }
 
 uint32_t Download::file_size() const {
@@ -471,7 +496,72 @@ uint32_t Download::file_size() const {
 }
 
 PartialFile::Ptr Download::get_partial_file() const {
-    return async->destination;
+    if (auto *async = get_if<AsyncPtr>(&engine); async != nullptr) {
+        return (*async)->destination;
+    } else {
+        return get<InlinePtr>(engine)->destination;
+    }
+}
+
+optional<Download::InlineRequest> Download::inline_request() {
+    // We are in the inline mode and we didn't started yet (didn't ask for our first segment)
+    //
+    // - OR -
+    //
+    // We completed the previous segment and there is no other segment.
+    if (auto *in_p = get_if<InlinePtr>(&engine); in_p != nullptr && (*in_p)->status == DownloadStep::Continue && (((*in_p)->start > (*in_p)->segment_end && (*in_p)->segment_end != (*in_p)->end) || !(*in_p)->started)) {
+        auto &in = *in_p;
+        uint32_t end = std::min(in->start + INLINE_SEGMENT_SIZE - 1 /* end is inclusive */, in->end);
+        in->segment_end = end;
+        InlineRequest request = {
+            in->file_id,
+            in->start,
+            end,
+        };
+        // We send the extended info only on the first request in the given download.
+        if (!in->started) {
+            request.details = InlineRequestDetails {
+                in->team_id,
+                in->hash,
+            };
+            in->started = true;
+        }
+        return request;
+    } else {
+        return nullopt;
+    }
+}
+
+bool Download::inline_chunk(const InlineChunk &chunk) {
+    if (auto *in = get_if<InlinePtr>(&engine); in != nullptr) {
+        if ((*in)->status != DownloadStep::Continue
+            || (*in)->file_id != chunk.file_id /* Different transfer */
+            || chunk.size == 0 /* Error indicated by server */
+            || (*in)->start + chunk.size > (*in)->end + 1 /* end is inclusive */) {
+            (*in)->status = DownloadStep::FailedOther;
+            return false;
+        }
+        if (!(*in)->destination->write(chunk.data, chunk.size)) {
+            (*in)->status = DownloadStep::FailedOther;
+            return false;
+        }
+        (*in)->start += chunk.size;
+        if ((*in)->start > (*in)->end) {
+            (*in)->destination->sync();
+        }
+        return true;
+    } else {
+        return false;
+    }
+}
+
+void Download::network_failed() {
+    if (auto *in = get_if<InlinePtr>(&engine); in != nullptr) {
+        // Only relevant for the inline mode...
+        if ((*in)->started) {
+            (*in)->status = DownloadStep::FailedNetwork;
+        }
+    }
 }
 
 } // namespace transfers

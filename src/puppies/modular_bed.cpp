@@ -1,10 +1,11 @@
 #include "puppies/modular_bed.hpp"
 #include "bsod.h"
-#include "log.h"
+#include <common/sensor_data.hpp>
+#include <logging/log.hpp>
 #include "metric.h"
 #include "puppy/modularbed/PuppyConfig.hpp"
 #include "timing.h"
-#include "puppies/PuppyBootstrap.hpp"
+#include <puppies/PuppyBootstrap.hpp>
 #include "otp.hpp"
 #include "power_panic.hpp"
 #include "printers.h"
@@ -17,10 +18,13 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <tuple>
+#include <freertos/mutex.hpp>
 
 namespace buddy::puppies {
 
-LOG_COMPONENT_DEF(ModularBed, LOG_SEVERITY_INFO);
+using Lock = std::unique_lock<freertos::Mutex>;
+
+LOG_COMPONENT_DEF(ModularBed, logging::Severity::info);
 
 METRIC_DEF(metric_state, "bed_state", METRIC_VALUE_INTEGER, 0, METRIC_HANDLER_DISABLE_ALL);
 METRIC_DEF(metric_currents, "bed_curr", METRIC_VALUE_CUSTOM, 0, METRIC_HANDLER_ENABLE_ALL);
@@ -36,10 +40,12 @@ ModularBed::ModularBed(PuppyModbus &bus, uint8_t modbus_address)
     : ModbusDevice(bus, modbus_address) {}
 
 CommunicationStatus ModularBed::ping() {
+    Lock guard(mutex);
     return bus.read(unit, general_status);
 }
 
 CommunicationStatus ModularBed::initial_scan() {
+    Lock guard(mutex);
     // Update static values
     CommunicationStatus status = bus.read(unit, general_static);
     if (status != CommunicationStatus::ERROR) {
@@ -72,6 +78,7 @@ CommunicationStatus ModularBed::initial_scan() {
 }
 
 CommunicationStatus ModularBed::refresh() {
+    Lock guard(mutex);
     static uint32_t refresh_nr = 0;
 
     typedef CommunicationStatus (ModularBed::*MethodType)();
@@ -216,7 +223,7 @@ CommunicationStatus ModularBed::read_bedlet_data() {
                 fatal_error(ErrCode::ERR_TEMPERATURE_MB_PREHEAT_ERR, bedlet_number);
             } else if (fault_int & ftrstd::to_underlying(HeatbedletError::TestHeatingError)) {
                 fatal_error(ErrCode::ERR_TEMPERATURE_MB_TEST_HEATING_ERR, bedlet_number);
-#if PRINTER_IS_PRUSA_iX
+#if PRINTER_IS_PRUSA_iX()
             } else if (fault_int & ftrstd::to_underlying(HeatbedletError::HeaterConnected)) {
                 fatal_error(ErrCode::ERR_TEMPERATURE_MB_HEATER_CONNECTED, bedlet_number);
 #endif
@@ -286,41 +293,50 @@ CommunicationStatus ModularBed::read_mcu_temperature() {
 
     log_debug(ModularBed, "MCU Temperature: %d", mcu_temperature.value);
     metric_record_float(&metric_mcu_temperature, mcu_temperature.value);
+    sensor_data().mbedMCUTemperature = mcu_temperature.value;
     return status;
 }
 
 void ModularBed::clear_fault() {
+    Lock guard(mutex);
     clear_fault_status.value = true;
     clear_fault_status.dirty = true;
 }
 
 float ModularBed::get_temp(const uint16_t idx) {
+    Lock guard(mutex);
     return static_cast<float>(bedlet_data.value.measured_temperature[idx]) / MODBUS_TEMPERATURE_REGISTERS_SCALE;
 }
 
 void ModularBed::set_print_fan_active(bool value) {
+    Lock guard(mutex);
     print_fan_active.dirty = true;
     print_fan_active.value = value;
 }
 
 float ModularBed::get_temp(const uint8_t column, const uint8_t row) {
+    // Private, not locked.
     return get_temp(idx(column, row));
 }
 
 void ModularBed::set_target(const uint8_t column, const uint8_t row, const float temp) {
+    Lock guard(mutex);
     set_target(idx(column, row), temp);
 }
 
 void ModularBed::set_target(const uint8_t idx, const float temp) {
+    // Private, not locked
     bedlet_target_temp.value[idx] = temp * MODBUS_TEMPERATURE_REGISTERS_SCALE;
     bedlet_target_temp.dirty = true;
 }
 
 float ModularBed::get_target(const uint8_t idx) {
+    // Private, not locked
     return static_cast<float>(bedlet_target_temp.value[idx]) / MODBUS_TEMPERATURE_REGISTERS_SCALE;
 }
 
 float ModularBed::get_target(const uint8_t column, const uint8_t row) {
+    Lock guard(mutex);
     return get_target(idx(column, row));
 }
 
@@ -328,7 +344,7 @@ uint16_t ModularBed::idx(const uint8_t column, const uint8_t row) {
     assert(column < BEDLET_MAX_X);
     assert(row < BEDLET_MAX_Y);
 
-#if PRINTER_IS_PRUSA_XL
+#if PRINTER_IS_PRUSA_XL()
     static_assert(BEDLET_MAX_X == 4);
     static_assert(BEDLET_MAX_Y == 4);
     static constexpr uint8_t map[BEDLET_MAX_Y][BEDLET_MAX_X] = {
@@ -337,7 +353,7 @@ uint16_t ModularBed::idx(const uint8_t column, const uint8_t row) {
         { 3, 4, 13, 14 },
         { 2, 1, 16, 15 },
     };
-#elif PRINTER_IS_PRUSA_iX
+#elif PRINTER_IS_PRUSA_iX()
     static_assert(BEDLET_MAX_X == 3);
     static_assert(BEDLET_MAX_Y == 3);
     static constexpr uint8_t map[BEDLET_MAX_Y][BEDLET_MAX_X] = {
@@ -390,6 +406,7 @@ ModularBed::cost_and_enable_mask_t ModularBed::touch_side(uint16_t enabled_mask,
 }
 
 void ModularBed::update_bedlet_temps(uint16_t enabled_mask, float target_temp) {
+    Lock guard(mutex);
     // first calculate what bedlets to enable so that we heat towards two sides
     // this avoid bed warping, because when heated towards two sides, it can expand without making mountain in the middle
     if (expand_to_sides_enabled) {
@@ -426,7 +443,6 @@ uint16_t ModularBed::expand_to_sides(uint16_t enabled_mask, float target_temp) {
 }
 
 void ModularBed::update_gradients(uint16_t enabled_mask) {
-
     // first reset target of not enabled bedlets to zero
     for (uint8_t i = 0; i < BEDLET_COUNT; i++) {
         if ((enabled_mask & (1 << i)) == 0) {
@@ -463,6 +479,16 @@ void ModularBed::update_gradients(uint16_t enabled_mask) {
             }
         }
     }
+}
+
+float ModularBed::get_heater_current() {
+    Lock guard(mutex);
+    return (currents.value.A_measured + currents.value.B_measured) / 1000.0;
+}
+
+uint16_t ModularBed::get_mcu_temperature() {
+    Lock guard(mutex);
+    return mcu_temperature.value;
 }
 
 ModularBed modular_bed(puppyModbus, PuppyBootstrap::get_modbus_address_for_dock(Dock::MODULAR_BED));

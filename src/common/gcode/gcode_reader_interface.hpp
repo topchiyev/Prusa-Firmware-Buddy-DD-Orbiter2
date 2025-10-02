@@ -9,26 +9,9 @@
 #include <transfers/transfer.hpp>
 
 #include "gcode_reader_restore_info.hpp"
+#include "gcode_reader_result.hpp"
 
-/**
- * @brief This is base class for reading gcode files. This defines interface that alows reading of different gcode formats.
- *        User of this class can stream data from different formats without having to deal with what format they are using
- */
 class IGcodeReader {
-
-protected:
-    // For unittest purposes only.
-    IGcodeReader() {}
-
-    IGcodeReader(FILE &f)
-        : file(&f) {}
-
-    IGcodeReader(IGcodeReader &&other) = default;
-
-    ~IGcodeReader() = default;
-
-    IGcodeReader &operator=(IGcodeReader &&) = default;
-
 public:
     enum class Continuations {
         /// Anything over the limit is discarded.
@@ -40,16 +23,8 @@ public:
         Split,
     };
 
-    Continuations line_continuations = Continuations::Discard;
-
     /// Result type
-    enum class Result_t {
-        RESULT_OK,
-        RESULT_EOF,
-        RESULT_TIMEOUT, // low level USB function might return timeout in case they can't get mutex in time
-        RESULT_ERROR,
-        RESULT_OUT_OF_RANGE, // Outside of the validity range
-    };
+    using Result_t = GCodeReaderResult;
 
     /// Expected image format
     enum class ImgType {
@@ -87,21 +62,25 @@ public:
     };
 
 public:
-    inline StreamMode stream_mode() const {
-        return stream_mode_;
-    }
-
     /**
      * @brief Start streaming metadata from gcode
      */
     virtual bool stream_metadata_start() = 0;
 
     /**
-     * @brief Start streaming gcodes from .gcode file
+     * @brief Start streaming gcodes from .gcode or .bgcode file
+     *
+     * Unlike the other stream_ functions, this checks CRCs on the file -
+     * including the metadata and thumbnails before the actual gcode block.
+     * The other functions are left without checking the CRC, because:
+     * - Performance (they are being called from many places at arbitrary
+     *   times, this one is called at the start of print).
+     * - The damage from a corrupt metadata or thumbnail is significantly
+     *   smaller than a corruption in print instructions.
      *
      * @param offset if non-zero will skip to specified offset (after powerpanic, pause etc)
      */
-    virtual bool stream_gcode_start(uint32_t offset = 0) = 0;
+    virtual Result_t stream_gcode_start(uint32_t offset = 0) = 0;
 
     /**
      * @brief Find thumbnail with specified parameters and strart streaming it.
@@ -111,14 +90,7 @@ public:
     /**
      * @brief Get line from stream specified before by start_xx function
      */
-    virtual Result_t stream_get_line(GcodeBuffer &buffer);
-
-    /**
-     * @brief Get block of data with specified size.
-     * @param out_data buffer where data will be stored
-     * @param size input size to get, output size really gotten, must be set to 0 on error
-     */
-    virtual Result_t stream_get_block(char *out_data, size_t &size) = 0;
+    virtual Result_t stream_get_line(GcodeBuffer &buffer, Continuations) = 0;
 
     /**
      * @brief Get total size of gcode stream, but this will just return estimate, as with PrusaPack its expensive to get real size
@@ -132,9 +104,9 @@ public:
      */
     virtual uint32_t get_gcode_stream_size() = 0;
 
-    virtual StreamRestoreInfo get_restore_info() { return {}; }
+    virtual StreamRestoreInfo get_restore_info() = 0;
 
-    virtual void set_restore_info(const StreamRestoreInfo &) {}
+    virtual void set_restore_info(const StreamRestoreInfo &) = 0;
 
     /**
      * @brief Verify file contents validity (CRC and such). Not available for all formats.
@@ -142,27 +114,12 @@ public:
      */
     virtual FileVerificationResult verify_file(FileVerificationLevel level, std::span<uint8_t> crc_calc_buffer = std::span<uint8_t>()) const = 0;
 
-    /* @brief Sets what part of file are already valid.
-     *
-     * During a download, a file might be valid only in certain ranges. This
-     * sets the already available ranges so the reader can check it is in
-     * range.
-     *
-     * nullopt = whole file is valid (the default on construction if this is not set).
-     */
-    void set_validity(std::optional<transfers::PartialFile::State> validity) {
-        this->validity = validity;
-    }
-
     /**
      * @brief Get one character from current stream
      * @param out Character that was read
      * @return Result_t status of reading
      */
-    inline Result_t stream_getc(char &out) {
-        assert(ptr_stream_getc);
-        return (this->*ptr_stream_getc)(out);
-    }
+    virtual Result_t stream_getc(char &out) = 0;
 
     /**
      * @brief Returns whenever file is valid enough to begin printing it (has metadata and some gcodes)
@@ -172,15 +129,59 @@ public:
     /**
      * @brief Load latest validity information from current transfer
      */
-    void update_validity(transfers::Transfer::Path &filename);
+    virtual void update_validity(const char *filename) = 0;
 
-    /// Returns whtether the reader is in an (unrecoverable) error state
-    inline bool has_error() const {
+    /**
+     * Is the file valid in full - completely downloaded?
+     */
+    virtual bool fully_valid() const = 0;
+
+    /// Returns whether the reader is in an (unrecoverable) error state
+    virtual bool has_error() const = 0;
+
+    /// Returns error message if has_error() is true
+    virtual const char *error_str() const = 0;
+};
+
+/**
+ * @brief This is base class for reading gcode files. This defines interface that alows reading of different gcode formats.
+ *        User of this class can stream data from different formats without having to deal with what format they are using
+ */
+class GcodeReaderCommon : public IGcodeReader {
+
+protected:
+    // For unittest purposes only.
+    GcodeReaderCommon() {}
+
+    GcodeReaderCommon(FILE &f)
+        : file(&f) {}
+
+    GcodeReaderCommon(GcodeReaderCommon &&other) = default;
+
+    ~GcodeReaderCommon() = default;
+
+    GcodeReaderCommon &operator=(GcodeReaderCommon &&) = default;
+
+public:
+    void set_validity(std::optional<transfers::PartialFile::State> validity) {
+        this->validity = validity;
+    }
+
+    bool fully_valid() const override {
+        return !validity.has_value() || validity->fully_valid();
+    }
+
+    Result_t stream_getc(char &out) override {
+        return (this->*ptr_stream_getc)(out);
+    }
+
+    void update_validity(const char *filename) override;
+
+    bool has_error() const override {
         return error_str_;
     }
 
-    /// Returns error message if has_error() is true
-    inline const char *error_str() const {
+    const char *error_str() const override {
         return error_str_;
     }
 
@@ -190,11 +191,16 @@ protected:
         error_str_ = msg;
     }
 
-protected:
+    IGcodeReader::Result_t stream_get_line_common(GcodeBuffer &b, Continuations line_continuations);
+
     /// Returns whether the file starts with "GCDE" - mark for recognizing a binary gcode
     /// Can be used as a part of verify_file - even for non-bgcoode files (to check that they're not disguised bgcodes actually)
     /// Modifies the file reader.
     bool check_file_starts_with_BGCODE_magic() const;
+
+    inline StreamMode stream_mode() const {
+        return stream_mode_;
+    }
 
 protected:
     unique_file_ptr file;
@@ -209,8 +215,8 @@ protected:
 
     StreamMode stream_mode_ = StreamMode::none;
 
-    IGcodeReader &operator=(const IGcodeReader &) = delete;
-    IGcodeReader(const IGcodeReader &) = delete;
+    GcodeReaderCommon &operator=(const GcodeReaderCommon &) = delete;
+    GcodeReaderCommon(const GcodeReaderCommon &) = delete;
 
     /**
      * @brief Is the given range already downloaded, according to what's set with @c set_validity?

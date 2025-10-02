@@ -8,6 +8,7 @@
 #include "screen_menu.hpp"
 #include "MItem_enclosure.hpp"
 #include "MItem_menus.hpp"
+#include <MItem_tools.hpp>
 #include "option/has_side_leds.h"
 #include "option/has_toolchanger.h"
 #include <device/board.h>
@@ -46,7 +47,7 @@ private:
     uint32_t last_ticks_s;
 
 protected:
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 };
 
 class ScreenMenuManualSetting : public detail::ScreenMenuManualSetting {

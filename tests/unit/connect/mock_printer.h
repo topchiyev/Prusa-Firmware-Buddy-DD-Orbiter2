@@ -1,12 +1,14 @@
 #pragma once
 
 #include <connect/printer.hpp>
-#include <common/general_response.hpp>
+#include <general_response.hpp>
 
 #include <cstring>
 #include <optional>
 #include <vector>
 #include <string>
+
+extern "C" size_t strlcpy(char *, const char *, size_t);
 
 namespace connect_client {
 
@@ -15,9 +17,11 @@ inline Printer::Params params_idle() {
 
     params.job_id = 13;
     params.state = printer_state::DeviceState::Idle;
-    params.nozzle_diameter = 0.4;
     params.version = { 2, 3, 0 };
     params.slot_mask = 1;
+    params.slots[0] = Printer::SlotInfo {
+        .nozzle_diameter = 0.4,
+    };
 
     return params;
 }
@@ -29,9 +33,11 @@ inline Printer::Params params_dialog() {
 
     params.job_id = 13;
     params.state = printer_state::StateWithDialog(printer_state::DeviceState::Attention, ErrCode::ERR_UNDEF, 42, yes_no);
-    params.nozzle_diameter = 0.4;
     params.version = { 2, 3, 0 };
     params.slot_mask = 1;
+    params.slots[0] = Printer::SlotInfo {
+        .nozzle_diameter = 0.4,
+    };
 
     return params;
 }
@@ -73,8 +79,8 @@ public:
         return false;
     }
 
-    virtual bool start_print(const char *) override {
-        return false;
+    virtual const char *start_print(const char *, const std::optional<ToolMapping> &) override {
+        return "No";
     }
 
     virtual const char *delete_file(const char *) override {
@@ -84,6 +90,15 @@ public:
     virtual GcodeResult submit_gcode(const char *gcode) override {
         submitted_gcodes.push_back(gcode);
         return GcodeResult::Submitted;
+    }
+
+    virtual std::optional<FinishedJobResult> get_prior_job_result(uint16_t job_id) const override {
+        if (job_id == 41) {
+            return FinishedJobResult::FIN_OK;
+        } else if (job_id == 40) {
+            return FinishedJobResult::FIN_STOPPED;
+        }
+        return std::nullopt;
     }
 
     virtual bool set_ready(bool) override {
@@ -112,9 +127,11 @@ public:
         abort();
     }
 
-    virtual const char *dialog_action(uint32_t dialog_id, Response response) {
+    virtual const char *dialog_action(uint32_t dialog_id, Response response) override {
         return nullptr;
     }
+
+    virtual void set_slot_info(size_t, const SlotInfo &) override {}
 };
 
 } // namespace connect_client

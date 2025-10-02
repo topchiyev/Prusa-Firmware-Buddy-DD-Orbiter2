@@ -14,7 +14,7 @@
 #endif /*HAS_TOOLCHANGER()*/
 
 FooterItemHeatBreak::FooterItemHeatBreak(window_t *parent)
-    : AddSuperWindow<FooterIconText_IntVal>(parent, &img::heatbreak_dark_16x16, static_makeView, static_readValue) {
+    : FooterIconText_IntVal(parent, &img::heatbreak_dark_16x16, static_makeView, static_readValue) {
 }
 
 /**
@@ -24,12 +24,12 @@ FooterItemHeatBreak::FooterItemHeatBreak(window_t *parent)
  */
 int FooterItemHeatBreak::static_readValue() {
 #if HAS_TOOLCHANGER()
-    if (marlin_vars()->active_extruder == PrusaToolChanger::MARLIN_NO_TOOL_PICKED) {
+    if (marlin_vars().active_extruder == PrusaToolChanger::MARLIN_NO_TOOL_PICKED) {
         return no_tool_value;
     }
 #endif /*HAS_TOOLCHANGER()*/
 
-    return int(marlin_vars()->active_hotend().temp_heatbreak * 10.F);
+    return int(marlin_vars().active_hotend().temp_heatbreak * 10.F);
 }
 
 /**

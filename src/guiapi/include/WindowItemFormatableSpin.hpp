@@ -2,7 +2,7 @@
 #pragma once
 #include "WindowItemFormatableLabel.hpp"
 #include "guitypes.hpp"
-#include <functional>
+#include <inplace_function.hpp>
 
 /**
  * @brief Spin switch with texts printed with lambda.
@@ -15,13 +15,11 @@ class WI_LAMBDA_SPIN : public WI_LAMBDA_LABEL_t {
     char text[GuiDefaults::infoDefaultLen]; ///< Buffer for switch text
 
 public:
-    const size_t index_n; ///< Limit for the spinner switch index.
-
     /**
      * @brief Construct a spinner with different texts to choose from.
-     * @param index_n number of valid indexes, valid are from 0 to index_n - 1
+     * @param item_count number of valid indexes, valid are from 0 to index_n - 1
      */
-    WI_LAMBDA_SPIN(string_view_utf8 label, size_t index_n_, const img::Resource *icon, is_enabled_t enabled, is_hidden_t hidden, size_t init_index, std::function<void(char *)> printAs);
+    WI_LAMBDA_SPIN(const string_view_utf8 &label, size_t item_count, const img::Resource *icon, is_enabled_t enabled, is_hidden_t hidden, size_t init_index, stdext::inplace_function<void(char *)> printAs);
 
     /**
      * @brief Get currently selected index.
@@ -64,21 +62,13 @@ protected:
     /**
      * @brief Print switch text and brackets.
      */
-    void printExtension(Rect16 extension_rect, color_t color_text, color_t color_back, [[maybe_unused]] ropfn raster_op) const override;
+    void printExtension(Rect16 extension_rect, Color color_text, Color color_back, [[maybe_unused]] ropfn raster_op) const override;
 
     /**
      * @brief Called when this item is clicked.
      * @param window_menu reference to menu where this item is shown
      */
     virtual void click([[maybe_unused]] IWindowMenu &window_menu) final;
-
-    /**
-     * @brief Handle touch.
-     * It behaves the same as click, but only when extension was clicked.
-     * @param window_menu reference to menu where this item is shown
-     * @param relative_touch_point where this item is touched
-     */
-    virtual void touch(IWindowMenu &window_menu, point_ui16_t relative_touch_point) final;
 
     /**
      * @brief Selected value changed by dif ticks.
@@ -99,4 +89,7 @@ protected:
      * To be overriden in children.
      */
     virtual void OnChange() {}
+
+protected:
+    size_t item_count; ///< Limit for the spinner switch index.
 };

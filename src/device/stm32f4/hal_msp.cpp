@@ -1,7 +1,7 @@
 #include "main.h"
 #include "printers.h"
 #include <device/board.h>
-#include "log.h"
+#include <logging/log.hpp>
 #include "FreeRTOSConfig.h"
 #include <device/peripherals.h>
 #include "priorities_config.h"
@@ -15,6 +15,8 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 void HAL_MspInit(void) {
     __HAL_RCC_SYSCFG_CLK_ENABLE();
     __HAL_RCC_PWR_CLK_ENABLE();
+
+    HAL_EnableCompensationCell(); // allows maximum slew rate to be achieved
 
     /* System interrupt init*/
     /* PendSV_IRQn interrupt configuration */
@@ -83,16 +85,16 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef *hadc) {
          * PA6     ------> ADC1_IN6
          */
 
-#if (BOARD_IS_XBUDDY && PRINTER_IS_PRUSA_MK3_5)
+#if (BOARD_IS_XBUDDY() && PRINTER_IS_PRUSA_MK3_5())
         analog_gpio_init(GPIOA, THERM_1_Pin | HEATER_VOLTAGE_Pin | BED_VOLTAGE_Pin); /*Initialize GPIOA pins as analog input*/
         analog_gpio_init(THERM_0_GPIO_Port, THERM_0_Pin);
-#elif BOARD_IS_XBUDDY
+#elif BOARD_IS_XBUDDY()
         analog_gpio_init(GPIOA, THERM_1_Pin | THERM_HEATBREAK_Pin | HEATER_VOLTAGE_Pin | BED_VOLTAGE_Pin); /*Initialize GPIOA pins as analog input*/
         analog_gpio_init(THERM_0_GPIO_Port, THERM_0_Pin); /*Initialize GPIOC pins as analog input*/
-#elif BOARD_IS_BUDDY
+#elif BOARD_IS_BUDDY()
         analog_gpio_init(GPIOA, BED_MON_Pin | THERM_1_Pin | THERM_2_Pin | THERM_PINDA_Pin); /*Initialize GPIOA pins as analog input*/
         analog_gpio_init(THERM_0_GPIO_Port, THERM_0_Pin); /*Initialize GPIOC pins as analog input*/
-#elif BOARD_IS_XLBUDDY
+#elif BOARD_IS_XLBUDDY()
         analog_gpio_init(GPIOA, GPIO_PIN_4 | GPIO_PIN_5);
         analog_gpio_init(GPIOB, GPIO_PIN_0);
 #else
@@ -105,7 +107,7 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef *hadc) {
         /*Link ADC to DMA stram+channel*/
         __HAL_LINKDMA(hadc, DMA_Handle, hdma_adc1);
     }
-#if (BOARD_IS_XBUDDY || BOARD_IS_XLBUDDY)
+#if (BOARD_IS_XBUDDY() || BOARD_IS_XLBUDDY())
     if (hadc->Instance == ADC3) {
         /* Peripheral clock enable */
         __HAL_RCC_ADC3_CLK_ENABLE();
@@ -120,9 +122,9 @@ void HAL_ADC_MspInit(ADC_HandleTypeDef *hadc) {
          * PF10     ------> ADC3_IN8
          */
         /*Initialize GPIOF pins as analog input*/
-    #if BOARD_IS_XBUDDY
+    #if BOARD_IS_XBUDDY()
         analog_gpio_init(GPIOF, HEATER_CURRENT_Pin | INPUT_CURRENT_Pin | THERM3_Pin | MMU_CURRENT_Pin | THERM_2_Pin);
-    #elif BOARD_IS_XLBUDDY
+    #elif BOARD_IS_XLBUDDY()
         analog_gpio_init(GPIOF, GPIO_PIN_10);
         analog_gpio_init(GPIOC, GPIO_PIN_0);
         analog_gpio_init(GPIOF, GPIO_PIN_6);
@@ -159,17 +161,17 @@ void HAL_ADC_MspDeInit(ADC_HandleTypeDef *hadc) {
         HAL_GPIO_DeInit(THERM_0_GPIO_Port, THERM_0_Pin);
 
         HAL_GPIO_DeInit(GPIOA, BED_MON_Pin | THERM_1_Pin | THERM_2_Pin
-#if (BOARD_IS_BUDDY)
+#if (BOARD_IS_BUDDY())
                 | THERM_PINDA_Pin
 #endif
-#if (BOARD_IS_XBUDDY && (!PRINTER_IS_PRUSA_MK3_5))
+#if (BOARD_IS_XBUDDY() && (!PRINTER_IS_PRUSA_MK3_5()))
                 | THERM_HEATBREAK_Pin
 #endif
         );
 
         HAL_DMA_DeInit(hadc->DMA_Handle);
     }
-#if (BOARD_IS_BUDDY || BOARD_IS_XBUDDY)
+#if (BOARD_IS_BUDDY() || BOARD_IS_XBUDDY())
     if (hadc->Instance == ADC2) {
         /* Peripheral clock disable */
         __HAL_RCC_ADC2_CLK_DISABLE();
@@ -224,7 +226,7 @@ void HAL_I2C_MspInit(I2C_HandleTypeDef *hi2c) {
  */
 void HAL_I2C_MspDeInit(I2C_HandleTypeDef *hi2c) {
 
-#if (BOARD_IS_XBUDDY || BOARD_IS_XLBUDDY)
+#if (BOARD_IS_XBUDDY() || BOARD_IS_XLBUDDY())
     if (hi2c->Instance == I2C2) {
         /* Peripheral clock disable */
         __HAL_RCC_I2C2_CLK_DISABLE();
@@ -257,7 +259,7 @@ void HAL_I2C_MspDeInit(I2C_HandleTypeDef *hi2c) {
     #endif
 #endif
 
-#if (BOARD_IS_BUDDY || BOARD_IS_XLBUDDY)
+#if (BOARD_IS_BUDDY() || BOARD_IS_XLBUDDY())
     if (hi2c->Instance == I2C1) {
         /* Peripheral clock disable */
         __HAL_RCC_I2C1_CLK_DISABLE();
@@ -307,7 +309,7 @@ void HAL_RTC_MspDeInit(RTC_HandleTypeDef *hrtc) {
 void HAL_SPI_MspInit(SPI_HandleTypeDef *hspi) {
 
     GPIO_InitTypeDef GPIO_InitStruct {};
-#if (BOARD_IS_XBUDDY || BOARD_IS_XLBUDDY)
+#if (BOARD_IS_XBUDDY() || BOARD_IS_XLBUDDY())
     if (hspi->Instance == SPI2) {
         /* Peripheral clock enable */
         __HAL_RCC_SPI2_CLK_ENABLE();
@@ -323,7 +325,7 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef *hspi) {
         GPIO_InitStruct.Pin = GPIO_PIN_2;
         GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
 
-    #if BOARD_IS_XBUDDY
+    #if BOARD_IS_XBUDDY()
         GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
         GPIO_InitStruct.Pull = GPIO_PULLDOWN;
     #else
@@ -336,7 +338,7 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef *hspi) {
         GPIO_InitStruct.Pin = GPIO_PIN_3;
         GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
         GPIO_InitStruct.Pull = GPIO_NOPULL;
-    #if BOARD_IS_XBUDDY
+    #if BOARD_IS_XBUDDY()
         GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
     #else
         GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
@@ -346,8 +348,17 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef *hspi) {
 
         GPIO_InitStruct.Pin = GPIO_PIN_10;
         GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    #if spi_accelerometer == 2
+        // Accelerometer CLK: Pullup. The SPI clock on the MCU is high Z when
+        // not transmitting. The accelerometer requires clock idle to be high,
+        // and on the accelerometer (rev. 06) there's a 100k pulldown. Set the
+        // pullup on the MCU to force the clock high for the start of the
+        // communication.
+        GPIO_InitStruct.Pull = GPIO_PULLUP;
+    #else
         GPIO_InitStruct.Pull = GPIO_NOPULL;
-    #if BOARD_IS_XBUDDY
+    #endif
+    #if BOARD_IS_XBUDDY()
         GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
     #else
         GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
@@ -355,7 +366,7 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef *hspi) {
         GPIO_InitStruct.Alternate = GPIO_AF5_SPI2;
         HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-    #if BOARD_IS_XBUDDY
+    #if BOARD_IS_XBUDDY()
         /* SPI2 DMA Init */
         /* SPI2_RX Init */
         hdma_spi2_rx.Instance = DMA1_Stream3;
@@ -558,7 +569,7 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef *hspi) {
         __HAL_LINKDMA(hspi, hdmatx, hdma_spi6_tx);
     }
 
-#elif (BOARD_IS_BUDDY)
+#elif (BOARD_IS_BUDDY())
 
     if (hspi->Instance == SPI2) {
         /* Peripheral clock enable */
@@ -688,7 +699,7 @@ void HAL_SPI_MspInit(SPI_HandleTypeDef *hspi) {
  * @retval None
  */
 void HAL_SPI_MspDeInit(SPI_HandleTypeDef *hspi) {
-#if (BOARD_IS_XBUDDY || BOARD_IS_XLBUDDY)
+#if (BOARD_IS_XBUDDY() || BOARD_IS_XLBUDDY())
     if (hspi->Instance == SPI2) {
         /* Peripheral clock disable */
         __HAL_RCC_SPI2_CLK_DISABLE();
@@ -755,7 +766,7 @@ void HAL_SPI_MspDeInit(SPI_HandleTypeDef *hspi) {
         HAL_DMA_DeInit(hspi->hdmarx);
     }
 
-#elif (BOARD_IS_BUDDY)
+#elif (BOARD_IS_BUDDY())
 
     if (hspi->Instance == SPI2) {
         /* Peripheral clock disable */
@@ -914,7 +925,7 @@ void HAL_TIM_Base_MspDeInit(TIM_HandleTypeDef *htim_base) {
 void HAL_UART_MspInit(UART_HandleTypeDef *huart) {
     GPIO_InitTypeDef GPIO_InitStruct {};
 
-#if BOARD_IS_BUDDY
+#if BOARD_IS_BUDDY()
     if (huart->Instance == USART1) {
         /* Peripheral clock enable */
         __HAL_RCC_USART1_CLK_ENABLE();
@@ -1061,7 +1072,7 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart) {
     }
 #endif
 
-#if BOARD_IS_XLBUDDY
+#if BOARD_IS_XLBUDDY()
     if (huart->Instance == USART3) {
 
         __HAL_RCC_USART3_CLK_ENABLE();
@@ -1133,7 +1144,7 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart) {
     }
 #endif
 
-#if (BOARD_IS_XBUDDY || BOARD_IS_XLBUDDY)
+#if (BOARD_IS_XBUDDY() || BOARD_IS_XLBUDDY())
     if (huart->Instance == UART8) {
         /* Peripheral clock enable */
         __HAL_RCC_UART8_CLK_ENABLE();
@@ -1257,7 +1268,7 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart) {
         __HAL_UART_CLEAR_FLAG(huart, UART_FLAG_TC);
 
         // Enable the ISR
-    #if (PRINTER_IS_PRUSA_iX)
+    #if (PRINTER_IS_PRUSA_iX())
         HAL_NVIC_SetPriority(USART6_IRQn, ISR_PRIORITY_PUPPIES_USART, 0);
     #else
         HAL_NVIC_SetPriority(USART6_IRQn, ISR_PRIORITY_DEFAULT, 0);
@@ -1275,7 +1286,7 @@ void HAL_UART_MspInit(UART_HandleTypeDef *huart) {
  */
 void HAL_UART_MspDeInit(UART_HandleTypeDef *huart) {
 
-#if (BOARD_IS_BUDDY)
+#if (BOARD_IS_BUDDY())
     if (huart->Instance == USART1) {
         /* Peripheral clock disable */
         __HAL_RCC_USART1_CLK_DISABLE();
@@ -1322,7 +1333,7 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef *huart) {
     }
 #endif
 
-#if (BOARD_IS_XBUDDY || BOARD_IS_XLBUDDY)
+#if (BOARD_IS_XBUDDY() || BOARD_IS_XLBUDDY())
     if (huart->Instance == UART8) {
         /* Peripheral clock disable */
         __HAL_RCC_UART8_CLK_DISABLE();
@@ -1356,7 +1367,7 @@ void HAL_UART_MspDeInit(UART_HandleTypeDef *huart) {
     }
 #endif
 
-#if (BOARD_IS_XLBUDDY)
+#if (BOARD_IS_XLBUDDY())
     if (huart->Instance == USART3) {
         /* Peripheral clock disable */
         __HAL_RCC_USART3_CLK_DISABLE();

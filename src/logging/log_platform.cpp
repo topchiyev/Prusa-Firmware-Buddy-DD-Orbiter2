@@ -1,35 +1,54 @@
-#include "log.h"
-#include "cmsis_os.h"
-#include "task.h"
-#include "timing.h"
+#include <logging/log.hpp>
 
-log_timestamp_t log_platform_timestamp_get() {
+#include <common/timing.h>
+
+#include <FreeRTOS.h> // must appear in source files before include task.h
+#include <task.h>
+
+namespace logging {
+
+Timestamp log_platform_timestamp_get() {
     auto timestamp = get_timestamp();
     return { timestamp.sec, timestamp.us };
 }
 
-log_task_id_t log_platform_task_id_get() {
-    if (xPortIsInsideInterrupt()) {
-        return -1;
-    }
-    if (xTaskGetSchedulerState() != taskSCHEDULER_RUNNING) {
-        return -2;
-    }
+TaskId log_platform_task_id_get() {
     TaskHandle_t task_handle = xTaskGetCurrentTaskHandle();
     return uxTaskGetTaskNumber(task_handle);
 }
 
-bool log_platform_is_low_on_resources() {
-    if (xPortIsInsideInterrupt()) {
-        return true;
-    }
-    if (xTaskGetSchedulerState() != taskSCHEDULER_RUNNING) {
-        return true;
-    }
-    TaskHandle_t task_handle = xTaskGetCurrentTaskHandle();
-    int offset = sizeof(StackType_t) + 2 * sizeof(ListItem_t) + sizeof(UBaseType_t);
-    uint8_t *bottom_of_stack = (uint8_t *)((uint32_t *)((uint8_t *)task_handle + offset))[0];
-    uint8_t *current_stack_pos = (uint8_t *)&offset;
-    int available_bytes = current_stack_pos - bottom_of_stack;
-    return available_bytes < 512;
+} // namespace logging
+
+LOG_COMPONENT_REF(Network);
+LOG_COMPONENT_REF(USBHost);
+
+extern "C" void lwip_platform_log_error(const char *message) {
+    log_error(Network, "%s", message);
+}
+extern "C" void lwip_platform_log_info(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    _log_event_valist(logging::Severity::info, &LOG_COMPONENT(Network), fmt, &args);
+    va_end(args);
+}
+
+extern "C" void USBH_UsrLog(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    _log_event_valist(logging::Severity::info, &LOG_COMPONENT(USBHost), fmt, &args);
+    va_end(args);
+}
+
+extern "C" void USBH_ErrLog(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    _log_event_valist(logging::Severity::error, &LOG_COMPONENT(USBHost), fmt, &args);
+    va_end(args);
+}
+
+extern "C" void USBH_DbgLog(const char *fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    _log_event_valist(logging::Severity::debug, &LOG_COMPONENT(USBHost), fmt, &args);
+    va_end(args);
 }

@@ -12,7 +12,7 @@
 #include "changed.hpp"
 #include "resized.hpp"
 
-class IFooterItem : public AddSuperWindow<window_frame_t> {
+class IFooterItem : public window_frame_t {
     // uint16_t limits period to 65.5s but save 4B RAM
     uint16_t update_period;
     uint16_t last_updated;
@@ -23,7 +23,7 @@ public:
 
     static constexpr size_t item_h = GuiDefaults::FooterItemHeight;
     static constexpr size_t item_top = GuiDefaults::RectFooter.Top();
-    static Rect16::Width_t TextWidth(string_view_utf8 text);
+    static Rect16::Width_t TextWidth(const string_view_utf8 &text);
 
     IFooterItem(window_t *parent, Rect16::Width_t width);
     constexpr void ChangeUpdatePeriod(uint16_t ms) { update_period = ms; }
@@ -43,10 +43,10 @@ protected:
     virtual resized_t updateState() = 0;
     virtual changed_t updateValue() = 0;
 
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 };
 
-class IFooterIconText : public AddSuperWindow<IFooterItem> {
+class IFooterIconText : public IFooterItem {
 public:
     static constexpr size_t item_h = GuiDefaults::FooterItemHeight;
 
@@ -55,14 +55,14 @@ protected:
     FooterText text;
 
 public:
-    static Rect16::Width_t MeasureTextWidth(string_view_utf8 text);
+    static Rect16::Width_t MeasureTextWidth(const string_view_utf8 &text);
     IFooterIconText(window_t *parent, const img::Resource *icon, Rect16::W_t width); // icon width is calculated from resource
 };
 
 // this class must be able to create stringview
 // so it can measure text and correctly create sub windows
 // so it contains 2 function pointers
-class FooterIconText_IntVal : public AddSuperWindow<IFooterIconText> {
+class FooterIconText_IntVal : public IFooterIconText {
 public:
     using view_maker_cb = string_view_utf8 (*)(int val);
     using reader_cb = int (*)();
@@ -79,12 +79,12 @@ protected:
 
     virtual changed_t updateValue() override;
     virtual resized_t updateState() override;
-    static Rect16::Width_t GetTotalWidth(Rect16::Width_t icon_w, string_view_utf8 view);
+    static Rect16::Width_t GetTotalWidth(Rect16::Width_t icon_w, const string_view_utf8 &view);
 
 public:
     FooterIconText_IntVal(window_t *parent, const img::Resource *icon, view_maker_cb view_maker, reader_cb value_reader);
 };
-class FooterIconText_FloatVal : public AddSuperWindow<IFooterIconText> {
+class FooterIconText_FloatVal : public IFooterIconText {
 public:
     using view_maker_cb = string_view_utf8 (*)(float val);
     using reader_cb = float (*)();
@@ -101,7 +101,7 @@ protected:
 
     virtual changed_t updateValue() override;
     virtual resized_t updateState() override;
-    static Rect16::Width_t GetTotalWidth(Rect16::Width_t icon_w, string_view_utf8 view);
+    static Rect16::Width_t GetTotalWidth(Rect16::Width_t icon_w, const string_view_utf8 &view);
 
 public:
     FooterIconText_FloatVal(window_t *parent, const img::Resource *icon, view_maker_cb view_maker, reader_cb value_reader);

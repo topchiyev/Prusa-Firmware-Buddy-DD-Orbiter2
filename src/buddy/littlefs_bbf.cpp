@@ -5,7 +5,7 @@
 #include <errno.h>
 
 #include "bbf.hpp"
-#include "log.h"
+#include <logging/log.hpp>
 #include "bsod.h"
 #include "bsod.h"
 
@@ -38,7 +38,7 @@ struct LruCache {
      *     4 blocks - 1 minute 7 seconds
      *     2 blocks - 1 minute 7 seconds
      */
-#if PRINTER_IS_PRUSA_MINI
+#if PRINTER_IS_PRUSA_MINI()
     static constexpr size_t CACHE_SIZE = 4 * (4096 + sizeof(LruCache::Slot)); // Mini doesn't have enough RAM, sorry mini
 #else
     static constexpr size_t CACHE_SIZE = 12 * (4096 + sizeof(LruCache::Slot)); // Optimized for bbf with 4096 B blocks
@@ -53,7 +53,7 @@ struct LruCache {
         buffer = new uint8_t[CACHE_SIZE];
     }
 
-    virtual ~LruCache() {
+    ~LruCache() {
         delete[] buffer;
     }
 

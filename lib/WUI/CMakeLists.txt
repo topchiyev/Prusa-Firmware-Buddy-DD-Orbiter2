@@ -25,7 +25,6 @@ target_sources(
             nhttp/headers.cpp
             nhttp/job_command.cpp
             nhttp/job_command_marlin.cpp
-            nhttp/multipart_parser.c
             nhttp/req_parser.cpp
             nhttp/send_file.cpp
             nhttp/send_json.cpp
@@ -35,8 +34,7 @@ target_sources(
             nhttp/status_page.cpp
             nhttp/status_renderer.cpp
             nhttp/transfer_renderer.cpp
-            nhttp/upload_state.cpp
-            pbuf_rx.c
+            pbuf_rx.cpp
             sntp/sntp.c
             sntp/sntp_client.c
             wui.cpp
@@ -45,10 +43,6 @@ target_sources(
 
 if(MDNS)
   target_sources(WUI INTERFACE mdns/mdns.c mdns/mdns_domain.c mdns/mdns_out.c)
-endif()
-
-if(HAS_EMBEDDED_ESP32)
-  target_sources(WUI INTERFACE esp_flash.cpp)
 endif()
 
 if(NETWORKING_BENCHMARK_ENABLED)

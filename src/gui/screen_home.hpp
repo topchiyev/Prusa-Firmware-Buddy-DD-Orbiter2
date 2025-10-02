@@ -8,12 +8,18 @@
 #include "window_dlg_wait.hpp"
 #include <guiconfig/guiconfig.h>
 #include <option/has_mmu2.h>
+#include <option/has_nfc.h>
 
 #if HAS_MMU2()
     #include "../../lib/Marlin/Marlin/src/feature/prusa/MMU2/mmu2_state.h"
 #endif
 
-class screen_home_data_t : public AddSuperWindow<screen_t> {
+#if HAS_NFC()
+    #include <nfc.hpp>
+    #include <optional>
+#endif
+
+class screen_home_data_t : public screen_t {
 public:
     static constexpr size_t button_count = 6;
 
@@ -21,7 +27,6 @@ private:
     static bool usbWasAlreadyInserted; // usb inserted at least once
     static bool ever_been_opened; // set by ctor
     static bool try_esp_flash; // we try this maximum once
-    static bool touch_broken_during_run;
 
     bool usbInserted;
     bool event_in_progress { false };
@@ -36,30 +41,32 @@ private:
     window_header_t header;
     StatusFooter footer;
 
-#ifdef USE_ST7789
+#if HAS_MINI_DISPLAY()
     window_icon_t logo;
-#endif // USE_ST7789
+#endif
     WindowMultiIconButton w_buttons[button_count];
     window_text_t w_labels[button_count];
 
+#if HAS_NFC()
+    std::optional<nfc::SharedEnabler> nfc_enable { std::in_place };
+    void update_nfc_state();
+#endif
+
 public:
-    static void SetTouchBrokenDuringRun() { touch_broken_during_run = true; }
     static bool EverBeenOpened() { return ever_been_opened; }
     screen_home_data_t();
-    virtual ~screen_home_data_t() override;
+    ~screen_home_data_t();
 
     virtual void InitState(screen_init_variant var) override;
     virtual screen_init_variant GetCurrentState() const override;
 
 protected:
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 
 private:
     void printBtnEna();
     void printBtnDis();
     void filamentBtnSetState();
-
-    static bool find_latest_gcode(char *fpath, int fpath_len, char *fname, int fname_len);
 
     void on_enter();
     void handle_crash_dump();

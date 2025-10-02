@@ -2,6 +2,7 @@
 #include "i18n.h"
 #include <utility_extensions.hpp>
 #include <printer_selftest.hpp>
+#include "selftest_types.hpp"
 
 namespace SelftestSnake {
 enum class Tool {
@@ -15,9 +16,14 @@ enum class Tool {
 // Order matters, snake and will be run in the same order, as well as menu items (with indices) will be
 enum class Action {
     Fans,
-    XYCheck,
+    YCheck,
+    XCheck,
+    ZAlign, // also known as z_calib
+    Loadcell, // Check loadcell before Z test, because it is used there
     ZCheck,
     Heaters,
+    FilamentSensorCalibration,
+    PhaseSteppingCalibration,
     _count,
     _last = _count - 1,
     _first = Fans,
@@ -33,15 +39,15 @@ constexpr bool has_submenu(Action action) {
     }
 }
 
-constexpr bool is_multitool_only_action(Action action) {
+constexpr bool is_multitool_only_action([[maybe_unused]] Action action) {
     return false;
 }
 
-constexpr bool requires_toolchanger(Action action) {
+constexpr bool requires_toolchanger([[maybe_unused]] Action action) {
     return false;
 }
 
-constexpr bool is_singletool_only_action(Action action) {
+constexpr bool is_singletool_only_action([[maybe_unused]] Action action) {
     return false;
 }
 
@@ -72,13 +78,18 @@ struct MenuItemText {
 // could have been done with an array of texts directly, but there would be an order dependancy
 inline constexpr MenuItemText blank_item_texts[] {
     { Action::Fans, N_("%d Fan Test") },
-    { Action::XYCheck, N_("%d XY Axis Test") },
+    { Action::ZAlign, N_("%d Z Alignment Calibration") },
+    { Action::YCheck, N_("%d Y Axis Test") },
+    { Action::XCheck, N_("%d X Axis Test") },
+    { Action::Loadcell, N_("%d Loadcell Test") },
     { Action::ZCheck, N_("%d Z Axis Test") },
     { Action::Heaters, N_("%d Heater Test") },
+    { Action::FilamentSensorCalibration, N_("%d Filament Sensor Calibration") },
+    { Action::PhaseSteppingCalibration, N_("%d Phase Stepping Calibration") },
 };
 
 TestResult get_test_result(Action action, Tool tool);
-uint8_t get_tool_mask(Tool tool);
+ToolMask get_tool_mask(Tool tool);
 uint64_t get_test_mask(Action action);
 inline void ask_config([[maybe_unused]] Action action) {}
 inline Tool get_last_enabled_tool() { return Tool::Tool1; }

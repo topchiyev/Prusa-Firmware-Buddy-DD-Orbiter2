@@ -758,7 +758,7 @@
 
 /// HW limits of feed rate
 #define HWLIMIT_NORMAL_MAX_FEEDRATE \
-    { 400, 400, 20, 100 }
+    { 300, 300, 20, 100 }
 #define HWLIMIT_STEALTH_MAX_FEEDRATE \
     { 140, 140, 12, 100 }
 
@@ -768,7 +768,7 @@
  *                                      X, Y, Z, E0 [, E1[, E2[, E3[, E4[, E5]]]]]
  */
 #define DEFAULT_MAX_FEEDRATE \
-    { 200, 200, 12, 60 }
+    { 300, 300, 12, 60 }
 
 /// HW limits of max acceleration
 #define HWLIMIT_NORMAL_MAX_ACCELERATION \
@@ -801,6 +801,7 @@
 // Use Junction Deviation instead of traditional Jerk Limiting
 //
 //#define JUNCTION_DEVIATION
+#define CLASSIC_JERK
 #if DISABLED(CLASSIC_JERK)
     #define JUNCTION_DEVIATION_MM 0.02 // (mm) Distance from real junction edge
 #endif
@@ -1052,7 +1053,7 @@
 #define DISABLE_Z false
 
 // X and Y axes ENABLE/DISABLE functions are linked through pins
-#if BOARD_IS_XBUDDY
+#if BOARD_IS_XBUDDY()
   #define XY_LINKED_ENABLE true
 #endif
 
@@ -1116,14 +1117,15 @@
 // The size of the print bed
 #define X_BED_SIZE 260
 #define Y_BED_SIZE 260
-#define Z_SIZE 195
+#define Z_SIZE 185
 
 // Travel limits (mm) after homing, corresponding to endstop positions. defaul x -2.5 y -7.3
 #define X_MIN_POS -14
-#define Y_MIN_POS -11
+#define Y_MIN_POS -2
 #define Z_MIN_POS 0
-#define X_MAX_POS (X_MIN_POS + 283)
-#define Y_MAX_POS (Y_MIN_POS + 308)
+#define X_MAX_POS (X_MIN_POS + 288)
+#define Y_MAX_PRINT_POS (Y_BED_SIZE) // maximal print area Y position
+#define Y_MAX_POS (Y_MIN_POS + 309)
 #ifdef USE_PRUSA_EEPROM_AS_SOURCE_OF_DEFAULT_VALUES
     #define DEFAULT_Z_MAX_POS Z_SIZE
     #define Z_MIN_LEN_LIMIT 1
@@ -1139,9 +1141,15 @@
 #define Z_HOME_GAP 0
 
 /// Space after allowed end of axis where axis should end
-#define X_END_GAP 10
-#define Y_END_GAP 10
+#define X_END_GAP 5
+#define Y_END_GAP 5
 #define Z_END_GAP 10
+
+// Refine homing XY offsets on COREXY
+#define PRECISE_HOMING_COREXY
+
+// Improve homing reliability by fixing motion parameters while homing
+#define IMPROVE_HOMING_RELIABILITY
 
 /**
  * Software Endstops
@@ -1329,11 +1337,11 @@
 //#define MESH_EDIT_GFX_OVERLAY   // Display a graphics overlay while editing the mesh
 
     #define GRID_BORDER 1 // border we are never gonna probe, only border of size 1 is currently supported
-    #define GRID_MAJOR_STEP 5 // the offset between major points
-    #define GRID_MAJOR_POINTS_X 5 // number of major probes on the X axis
-    #define GRID_MAJOR_POINTS_Y 5 // number of major probes on the Y axis
-    #define GRID_MAX_POINTS_X 23
-    #define GRID_MAX_POINTS_Y 23
+    #define GRID_MAJOR_STEP 3 // the offset between major points
+    #define GRID_MAJOR_POINTS_X 9 // number of major probes on the X axis
+    #define GRID_MAJOR_POINTS_Y 9 // number of major probes on the Y axis
+    #define GRID_MAX_POINTS_X 27
+    #define GRID_MAX_POINTS_Y 27
     //#define GRID_MAX_POINTS_X (GRID_BORDER * 2 + GRID_MAJOR_POINTS_X + ((GRID_MAJOR_POINTS_X - 1) * (GRID_MAJOR_STEP - 1))) // full resolution of the grid (X axis)
     //#define GRID_MAX_POINTS_Y (GRID_BORDER * 2 + GRID_MAJOR_POINTS_Y + ((GRID_MAJOR_POINTS_Y - 1) * (GRID_MAJOR_STEP - 1))) // full resolution of the grid (X axis)
 
@@ -1420,7 +1428,7 @@
 #define Z_SAFE_HOMING
 
 #if ENABLED(Z_SAFE_HOMING)
-    #define Z_SAFE_HOMING_X_POINT (120) // X point for Z homing when homing all axes (G28).
+    #define Z_SAFE_HOMING_X_POINT (130) // X point for Z homing when homing all axes (G28).
     #define Z_SAFE_HOMING_Y_POINT (245) // Y point for Z homing when homing all axes (G28).
 
     #define DETECT_PRINT_SHEET
@@ -1535,11 +1543,6 @@
 //
 //#define INCH_MODE_SUPPORT
 
-/**
- * R1 Redirect gcode support
- */
-//#define REDIRECT_GCODE_SUPPORT
-
 //
 // M149 Set temperature units support
 //
@@ -1579,10 +1582,24 @@
     #define X_AXIS_LOAD_POS  (X_MIN_POS + 10)
     #define X_AXIS_UNLOAD_POS  (X_MIN_POS + 10)
     // Specify a park position as { X, Y, Z }
-    #define NOZZLE_PARK_POINT \
-        { (X_MIN_POS + 10), (Y_MAX_POS - 10), 20 }
-    #define NOZZLE_PARK_POINT_M600 \
-        { (X_MIN_POS + 10), (Y_MAX_POS - 10), 20 }
+    #define X_NOZZLE_PARK_POINT 208.75
+    #define Y_NOZZLE_PARK_POINT 305
+    #define Z_NOZZLE_PARK_POINT 20
+    #define XYZ_NOZZLE_PARK_POINT \
+        {X_NOZZLE_PARK_POINT, Y_NOZZLE_PARK_POINT, Z_NOZZLE_PARK_POINT}
+
+    #define X_NOZZLE_PRE_PARK_POINT 208.75
+    #define Y_NOZZLE_PRE_PARK_POINT 305
+    #define XY_NOZZLE_PRE_PARK_POINT \
+        {X_NOZZLE_PRE_PARK_POINT, Y_NOZZLE_PRE_PARK_POINT}
+
+
+    #define X_NOZZLE_PARK_POINT_M600    30
+    #define Y_NOZZLE_PARK_POINT_M600    15
+    #define Z_NOZZLE_PARK_POINT_M600    20
+    #define XYZ_NOZZLE_PARK_POINT_M600 \
+        {X_NOZZLE_PARK_POINT_M600, Y_NOZZLE_PARK_POINT_M600, Z_NOZZLE_PARK_POINT_M600}
+
     #define NOZZLE_PARK_XY_FEEDRATE 100 // (mm/s) X and Y axes feedrate (also used for delta Z axis)
     #define NOZZLE_PARK_Z_FEEDRATE 5 // (mm/s) Z axis feedrate (not used for delta printers)
 
@@ -1917,12 +1934,6 @@
 //
 
 //
-// Elefu RA Board Control Panel
-// http://www.elefu.com/index.php?route=product/product&product_id=53
-//
-#define RA_CONTROL_PANEL
-
-//
 // Sainsmart (YwRobot) LCD Displays
 //
 // These require F.Malpartida's LiquidCrystal_I2C library
@@ -2133,11 +2144,6 @@
 //
 // CONTROLLER TYPE: Standalone / Serial
 //
-
-//
-// LCD for Malyan M200 printers.
-//
-//#define MALYAN_LCD
 
 //
 // CONTROLLER TYPE: Keypad / Add-on

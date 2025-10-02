@@ -8,8 +8,8 @@
 #include "window_dlg_popup.hpp"
 #include "ScreenHandler.hpp"
 
-window_dlg_popup_t::window_dlg_popup_t(Rect16 rect, string_view_utf8 txt)
-    : AddSuperWindow<window_frame_t>(Screens::Access()->Get(), rect, win_type_t::popup)
+window_dlg_popup_t::window_dlg_popup_t(Rect16 rect, const string_view_utf8 &txt)
+    : window_frame_t(Screens::Access()->Get(), rect, win_type_t::popup)
     , text(this, rect, is_multiline::yes, is_closed_on_click_t::no, txt)
     , open_time(0)
     , ttl(0) {
@@ -18,7 +18,7 @@ window_dlg_popup_t::window_dlg_popup_t(Rect16 rect, string_view_utf8 txt)
     text.SetPadding({ 0, 2, 0, 2 });
 }
 
-void window_dlg_popup_t::Show(Rect16 rect, string_view_utf8 txt, uint32_t time) {
+void window_dlg_popup_t::Show(Rect16 rect, const string_view_utf8 &txt, uint32_t time) {
     static window_dlg_popup_t dlg(rect, txt);
 
     // hide the dialog if shown already (it is static)
@@ -41,7 +41,7 @@ void window_dlg_popup_t::Show(Rect16 rect, string_view_utf8 txt, uint32_t time) 
     }
 }
 
-void window_dlg_popup_t::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void window_dlg_popup_t::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     const uint32_t opened = gui::GetTick() - open_time;
     if (event == GUI_event_t::LOOP && opened > ttl) { // todo use timer
         if (GetParent()) {
@@ -49,6 +49,6 @@ void window_dlg_popup_t::windowEvent(EventLock /*has private ctor*/, window_t *s
             // frame will set parrent to null
         }
     } else {
-        SuperWindowEvent(sender, event, param);
+        window_frame_t::windowEvent(sender, event, param);
     }
 }

@@ -7,7 +7,6 @@
 #include "WindowMenuItems.hpp"
 #include "MItem_menus.hpp"
 #include "MItem_tools.hpp"
-#include "menu_items_languages.hpp"
 #include "knob_event.hpp"
 #include "MItem_crash.hpp"
 #include "Configuration_adv.h"
@@ -46,18 +45,17 @@ using ScreenMenuSettings__ = ScreenMenu<GuiDefaults::MenuFooter, MI_RETURN,
 #endif
     MI_STEALTH_MODE,
     MI_FAN_CHECK,
+    MI_GCODE_VERIFY,
+    MI_DRYRUN,
 #if ENABLED(CRASH_RECOVERY)
     MI_CRASH_DETECTION,
 #endif // ENABLED(CRASH_RECOVERY)
 #if HAS_TOOLCHANGER()
-    MI_TOOLS_SETUP,
+    MI_TOOLHEAD_SETTINGS,
 #endif
     MI_INPUT_SHAPER,
 #if DEVELOPER_MODE()
     MI_ERROR_TEST,
-#endif
-#ifdef _DEBUG
-    MI_TEST,
 #endif
     MI_USER_INTERFACE, MI_LANG_AND_TIME, MI_NETWORK, MI_HARDWARE, MI_HELP_FW_UPDATE,
     // MI_SYSTEM needs to be last to ensure we can safely hit factory reset even in presence of unknown languages
@@ -71,5 +69,5 @@ public:
     ~ScreenMenuSettings();
 
 protected:
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 };

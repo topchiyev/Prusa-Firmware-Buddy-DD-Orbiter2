@@ -10,20 +10,23 @@
 #include "status_footer.hpp"
 #include "radio_button.hpp"
 #include <guiconfig/guiconfig.h>
+#include <gui/qr.hpp>
 
-class ScreenHelpFWUpdate : public AddSuperWindow<screen_t> {
+class ScreenHelpFWUpdate : public screen_t {
     window_header_t header;
     window_text_t description;
-#if defined(USE_ST7789)
+#if HAS_MINI_DISPLAY()
     window_text_t description2;
 #endif
     window_text_t help;
-    window_qr_t qr;
+    QRDynamicStringWindow<32> qr;
     RadioButton radio;
+
+    std::array<char, 128> help_text;
 
 public:
     ScreenHelpFWUpdate();
 
 protected:
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 };

@@ -8,9 +8,11 @@
 
 /*****************************************************************************/
 // IWiSwitch
-IWiSwitch::IWiSwitch(string_view_utf8 label, const img::Resource *id_icon, is_enabled_t enabled, is_hidden_t hidden)
+IWiSwitch::IWiSwitch(const string_view_utf8 &label, const img::Resource *id_icon, is_enabled_t enabled, is_hidden_t hidden)
     : IWindowMenuItem(label, 0, id_icon, enabled, hidden) //
-{}
+{
+    touch_extension_only_ = true;
+}
 
 invalidate_t IWiSwitch::change(int /*dif*/) {
     if ((++index) >= item_count()) {
@@ -24,16 +26,6 @@ void IWiSwitch::click(IWindowMenu & /*window_menu*/) {
     Change(0);
     OnChange(old_index);
     changeExtentionWidth();
-}
-
-/**
- * @brief handle touch
- * it behaves the same as click, but only when extension was clicked
- */
-void IWiSwitch::touch(IWindowMenu &window_menu, point_ui16_t relative_touch_point) {
-    if (is_touch_in_extension_rect(window_menu, relative_touch_point)) {
-        click(window_menu);
-    }
 }
 
 void IWiSwitch::SetIndex(size_t idx) {
@@ -67,7 +59,7 @@ Rect16 IWiSwitch::getRightBracketRect(Rect16 extension_rect) const {
     return extension_rect;
 }
 
-void IWiSwitch::printExtension(Rect16 extension_rect, color_t color_text, color_t color_back, [[maybe_unused]] ropfn raster_op) const {
+void IWiSwitch::printExtension(Rect16 extension_rect, Color color_text, Color color_back, [[maybe_unused]] ropfn raster_op) const {
     // draw switch
     render_text_align(getSwitchRect(extension_rect), current_item_text(), GuiDefaults::FontMenuItems, color_back,
         (IsFocused() && IsEnabled()) ? GuiDefaults::ColorSelected : color_text,
@@ -87,7 +79,7 @@ void IWiSwitch::printExtension(Rect16 extension_rect, color_t color_text, color_
 }
 
 Rect16::Width_t IWiSwitch::calculateExtensionWidth() const {
-    const size_t len = current_item_text().computeNumUtf8CharsAndRewind();
+    const size_t len = current_item_text().computeNumUtf8Chars();
     const size_t ret = width(GuiDefaults::FontMenuItems) * len + Padding.left + Padding.right + (GuiDefaults::MenuSwitchHasBrackets ? (width(BracketFont) + GuiDefaults::MenuPaddingSpecial.left + GuiDefaults::MenuPaddingSpecial.right) * 2 : 0);
     return ret;
 }

@@ -3,19 +3,19 @@
 #include <img_resources.hpp>
 #include <marlin_client.hpp>
 #include <ScreenHandler.hpp>
-#include <ScreenSelftest.hpp>
 #include <selftest_types.hpp>
 #include <RAII.hpp>
 #include <option/has_toolchanger.h>
+#include "queue.h"
+#include "Marlin/src/gcode/queue.h"
 #if HAS_TOOLCHANGER()
     #include <module/prusa/toolchanger.h>
 #endif
+#include "selftest/i_selftest.hpp"
 
 using namespace SelftestSnake;
 
 namespace {
-
-constexpr const char *text_put_sheet_on_bed = N_("Before you continue, make sure the print sheet is installed on the heatbed.");
 
 inline bool is_multitool() {
 #if HAS_TOOLCHANGER()
@@ -121,12 +121,41 @@ struct SnakeConfig {
     State state { State::reset };
 };
 
-SnakeConfig snake_config {};
+} // namespace
+
+static SnakeConfig snake_config {};
+
+namespace {
 
 void do_snake(Action action, Tool tool = Tool::_first) {
     if (!are_previous_completed(action) && !snake_config.in_progress) {
         if (MsgBoxQuestion(_("Previous Calibrations & Tests are not all done. Continue anyway?"), Responses_YesNo, 1) == Response::No) {
             snake_config.reset();
+            return;
+        }
+    }
+
+    // Note: "gcode" tests are handled separately, partly because
+    //       there are not enough bits in the selftest mask.
+    {
+        bool has_test_special_handling = true;
+
+        switch (action) {
+
+#if HAS_PHASE_STEPPING()
+        case Action::PhaseSteppingCalibration:
+            marlin_client::gcode("M1977");
+            break;
+#endif
+
+        default:
+            has_test_special_handling = false;
+            break;
+        }
+
+        if (has_test_special_handling) {
+            marlin_client::gcode("M118 nop"); // No operation gcode to fill the queue until selftest is done
+            snake_config.next(action, tool);
             return;
         }
     }
@@ -145,7 +174,8 @@ void do_snake(Action action, Tool tool = Tool::_first) {
 };
 
 void continue_snake() {
-    if (get_test_result(snake_config.last_action, snake_config.last_tool) != TestResult_Passed
+    const TestResult last_test_result = get_test_result(snake_config.last_action, snake_config.last_tool);
+    if ((last_test_result != TestResult_Passed && last_test_result != TestResult_Skipped)
         || SelftestInstance().IsAborted()) { // last selftest didn't pass
         snake_config.reset();
         return;
@@ -227,7 +257,7 @@ constexpr IWindowMenuItem::ColorScheme not_yet_ready_scheme {
         .unfocused { is_inverted::no, has_swapped_bw::no, is_shadowed::no, is_desaturated::no } }
 };
 
-} // unnamed namespace
+} // namespace
 
 // returns the parameter, filled
 char *I_MI_STS::get_filled_menu_item_label(Action action) {
@@ -294,12 +324,12 @@ void I_MI_STS_SUBMENU::do_click([[maybe_unused]] IWindowMenu &window_menu, Tool 
 
 namespace SelftestSnake {
 void do_menu_event(window_t *receiver, [[maybe_unused]] window_t *sender, GUI_event_t event, [[maybe_unused]] void *param, Action action, bool is_submenu) {
-    if (receiver->GetFirstDialog() || event != GUI_event_t::LOOP || !snake_config.in_progress || SelftestInstance().IsInProgress()) {
+    if (receiver->GetFirstDialog() || event != GUI_event_t::LOOP || !snake_config.in_progress || SelftestInstance().IsInProgress() || queue.has_commands_queued()) {
+        // G-code selftests may take a few ticks to execute, do not continue snake while gcode is still in the queue or in progress (no operation gcode is enqueued behind it)
         return;
     }
 
     // snake is in progress and previous selftest is done
-
     continue_snake();
 
     if (!snake_config.in_progress) { // force redraw of current snake menu
@@ -330,7 +360,7 @@ void ScreenMenuSTSCalibrations::draw() {
     }
 }
 
-void ScreenMenuSTSCalibrations::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void ScreenMenuSTSCalibrations::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     do_menu_event(this, sender, event, param, get_first_action(), false);
 }
 
@@ -348,48 +378,24 @@ void ScreenMenuSTSWizard::draw() {
     }
 }
 
-void ScreenMenuSTSWizard::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void ScreenMenuSTSWizard::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     if (GetFirstDialog()) {
         return;
     }
-
-    static constexpr const char *msg =
-#if PRINTER_IS_PRUSA_XL
-        N_("Hi, this is your\nOriginal Prusa XL printer.\n"
-           "I would like to guide you\nthrough the setup process.");
-#elif PRINTER_IS_PRUSA_MK4
-        N_("Hi, this is your\nOriginal Prusa MK4 printer.\n"
-           "I would like to guide you\nthrough the setup process.");
-#elif PRINTER_IS_PRUSA_MK3_5
-        N_("Hi, this is your\nOriginal Prusa MK3.5 printer.\n"
-           "I would like to guide you\nthrough the setup process.");
-#elif PRINTER_IS_PRUSA_MINI
-        N_("Hi, this is your\nOriginal Prusa MINI printer.\n"
-           "I would like to guide you\nthrough the setup process.");
-#elif PRINTER_IS_PRUSA_iX
-        N_("Hi, this is your\nOriginal Prusa iX printer.\n"
-           "I would like to guide you\nthrough the setup process.");
-#else
-        "";
-    #error unknown config
-#endif
 
     static bool ever_shown_wizard_box { false };
     if (!ever_shown_wizard_box) {
         ever_shown_wizard_box = true;
 
-        if (MsgBoxPepaCentered(_(msg), { Response::Continue, Response::Cancel })
-            == Response::Cancel) {
+        if (MsgBoxPepaCentered(_("Run selftests and calibrations now?"), { Response::Yes, Response::No }) != Response::Yes) {
             Screens::Access()->Close();
-        } else {
-#if PRINTER_IS_PRUSA_MK3_5
-            if (MsgBoxInfo(_(text_put_sheet_on_bed), Responses_Ok) == Response::Ok) {
-                do_snake(get_first_action());
-            }
-#else
-            do_snake(get_first_action());
-#endif
+            return;
         }
+
+        // Now show always, bed heater selftest can fail if there is no sheet on the bed
+        MsgBoxInfo(_("Before you continue, make sure the print sheet is installed on the heatbed."), Responses_Ok);
+
+        do_snake(get_first_action());
         return;
     }
 

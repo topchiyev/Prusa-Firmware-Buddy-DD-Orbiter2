@@ -19,10 +19,17 @@ import tarfile
 import venv
 import zipfile
 import stat
-import platform
 from argparse import ArgumentParser
 from pathlib import Path
-from urllib.request import urlretrieve
+from urllib.parse import urlparse
+try:
+    import requests
+except ModuleNotFoundError:
+    print(
+        f'Python executable ({sys.executable}) is missing the "requests" package.',
+        file=sys.stderr,
+        flush=True)
+    raise
 
 assert sys.version_info >= (3, 8), 'Python 3.8+ is required.'
 is_windows = platform.system() == 'Windows'
@@ -40,6 +47,7 @@ dependencies = {
         'version': '1.10.2',
         'url': {
             'Linux': 'https://github.com/ninja-build/ninja/releases/download/v1.10.2/ninja-linux.zip',
+            'Linux-aarch64': 'https://prusa-buddy-firmware-dependencies.s3.eu-central-1.amazonaws.com/ninja-v1.10.2-linux-aarch64.zip',
             'Windows': 'https://github.com/ninja-build/ninja/releases/download/v1.10.2/ninja-win.zip',
             'Darwin': 'https://github.com/ninja-build/ninja/releases/download/v1.10.2/ninja-mac.zip',
         },
@@ -48,6 +56,7 @@ dependencies = {
         'version': '3.28.3',
         'url': {
             'Linux': 'https://github.com/Kitware/CMake/releases/download/v3.28.3/cmake-3.28.3-linux-x86_64.tar.gz',
+            'Linux-aarch64': 'https://prusa-buddy-firmware-dependencies.s3.eu-central-1.amazonaws.com/cmake-3.28.3-Linux-aarch64.tar.gz',
             'Windows': 'https://github.com/Kitware/CMake/releases/download/v3.28.3/cmake-3.28.3-windows-x86_64.zip',
             'Darwin': 'https://github.com/Kitware/CMake/releases/download/v3.28.3/cmake-3.28.3-macos-universal.tar.gz',
         },
@@ -56,6 +65,7 @@ dependencies = {
         'version': '13.2.1',
         'url': {
             'Linux': 'https://developer.arm.com/-/media/Files/downloads/gnu/13.2.rel1/binrel/arm-gnu-toolchain-13.2.rel1-x86_64-arm-none-eabi.tar.xz',
+            'Linux-aarch64': 'https://developer.arm.com/-/media/Files/downloads/gnu/13.2.rel1/binrel/arm-gnu-toolchain-13.2.rel1-aarch64-arm-none-eabi.tar.xz',
             'Windows': 'https://developer.arm.com/-/media/Files/downloads/gnu/13.2.rel1/binrel/arm-gnu-toolchain-13.2.rel1-mingw-w64-i686-arm-none-eabi.zip',
             'Darwin': 'https://developer.arm.com/-/media/Files/downloads/gnu/13.2.rel1/binrel/arm-gnu-toolchain-13.2.rel1-darwin-x86_64-arm-none-eabi.tar.xzg',
         }
@@ -69,31 +79,29 @@ dependencies = {
         }
     },
     'bootloader-mini': {
-        'version': '2.3.4',
-        'url': 'https://prusa-buddy-firmware-dependencies.s3.eu-central-1.amazonaws.com/bootloader-mini-2.3.4-7B64E593-7827-405D-B11A-0FEAED674B15.zip',
+        'version': '2.4.1',
+        'url': 'https://prusa-buddy-firmware-dependencies.s3.eu-central-1.amazonaws.com/bootloader-mini-2.4.1-F548BE04-E73E-48B1-ABA4-F1BE7FDB2420.zip',
     },
     'bootloader-mk4': {
-        'version': '2.3.4',
-        'url': 'https://prusa-buddy-firmware-dependencies.s3.eu-central-1.amazonaws.com/bootloader-mk4-2.3.4-4D895B74-E8D2-434A-8CCA-ACF549079EC5.zip',
+        'version': '2.4.1',
+        'url': 'https://prusa-buddy-firmware-dependencies.s3.eu-central-1.amazonaws.com/bootloader-mk4-2.4.1-0F09D30D-43CD-4B93-BBD5-932C1405A069.zip',
     },
     'bootloader-mk3.5': {
-        'version': '2.3.4',
-        'url': 'https://prusa-buddy-firmware-dependencies.s3.eu-central-1.amazonaws.com/bootloader-mk4-2.3.4-4D895B74-E8D2-434A-8CCA-ACF549079EC5.zip',
+        'version': '2.4.1',
+        'url': 'https://prusa-buddy-firmware-dependencies.s3.eu-central-1.amazonaws.com/bootloader-mk4-2.4.1-0F09D30D-43CD-4B93-BBD5-932C1405A069.zip',
     },
     'bootloader-xl': {
-        'version': '2.3.4',
-        'url': 'https://prusa-buddy-firmware-dependencies.s3.eu-central-1.amazonaws.com/bootloader-xl-2.3.4-B3918045-C68D-4978-BD7D-CD91F7927B2D.zip',
+        'version': '2.4.1',
+        'url': 'https://prusa-buddy-firmware-dependencies.s3.eu-central-1.amazonaws.com/bootloader-xl-2.4.1-21D38F7F-B1E9-4C30-BD46-B8006B1BB79E.zip',
     },
     'bootloader-ix': {
-        'version': '2.3.4',
-        'url': 'https://prusa-buddy-firmware-dependencies.s3.eu-central-1.amazonaws.com/bootloader-ix-2.3.4-6474070A-0C8B-4436-BFD2-A5C0F1864CC7.zip',
+        'version': '2.4.1',
+        'url': 'https://prusa-buddy-firmware-dependencies.s3.eu-central-1.amazonaws.com/bootloader-ix-2.4.1-9923AA1D-0047-4299-B2C8-E42A67E7AA97.zip',
     },
     'firmware-mmu': {
         'version': '3.0.3',
         'files': [
-            # 'https://github.com/prusa3d/Prusa-Firmware-MMU/releases/download/v3.0.2/MMU2S_MMU3_FW3.0.2+878.hex',
-            # 3.0.3 published *privately* because it's just a very minor change
-            'https://download.danol.cz/MMU2S_MMU3_FW3.0.3+895.hex'
+            'https://github.com/prusa3d/Prusa-Firmware-MMU/releases/download/v3.0.3/MMU2S_MMU3_FW3.0.3+896.hex'
         ],
     },
     'mini404': {
@@ -105,15 +113,15 @@ dependencies = {
         }
     },
     'cmsis-svd': {
-        'version': '0.4.9999',
+        'version': '40327a4d2dff0992682be2872aaa6e096f35d2f4',
         'files': [
-            'https://raw.githubusercontent.com/cmsis-svd/cmsis-svd/45a1e90afe488f01df94b3e0eb89a67c1a900a9a/data/STMicro/STM32F427.svd',
-            'https://raw.githubusercontent.com/cmsis-svd/cmsis-svd/45a1e90afe488f01df94b3e0eb89a67c1a900a9a/data/STMicro/STM32G07x.svd',
+            'https://raw.githubusercontent.com/cmsis-svd/cmsis-svd-data/40327a4d2dff0992682be2872aaa6e096f35d2f4/data/STMicro/STM32F427.svd',
+            'https://raw.githubusercontent.com/cmsis-svd/cmsis-svd-data/40327a4d2dff0992682be2872aaa6e096f35d2f4/data/STMicro/STM32G07x.svd',
         ],
     },
     'CrashDebug': {
-        'version': 'ab03f8b6fb6e3445c62fe3fa5f3263d2945d74ff',
-        'url': 'https://github.com/prusa3d/CrashDebug/archive/ab03f8b6fb6e3445c62fe3fa5f3263d2945d74ff.zip',
+        'version': '22acef8c6e248db2f04f65eebf4c2b470f4010c2',
+        'url': 'https://github.com/prusa3d/CrashDebug/archive/22acef8c6e248db2f04f65eebf4c2b470f4010c2.zip',
     },
 }
 # yapf: enable
@@ -133,24 +141,52 @@ def find_single_subdir(path: Path):
         raise RuntimeError
 
 
+def download_url(url: str, filename: Path):
+    """Download file from url and write it to given filename"""
+    with requests.get(url, stream=True) as response:
+        response.raise_for_status()
+        with open(filename, 'wb') as file:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    file.write(chunk)
+
+
 def download_and_unzip(url: str, directory: Path):
     """Download a compressed file and extract it at `directory`."""
     extract_dir = directory.with_suffix('.temp')
     shutil.rmtree(directory, ignore_errors=True)
     shutil.rmtree(extract_dir, ignore_errors=True)
 
-    print('Downloading ' + directory.name)
-    f, _ = urlretrieve(url, filename=None)
-    print('Extracting ' + directory.name)
-    if '.tar.bz2' in url or '.tar.gz' in url or '.tar.xz' in url:
-        obj = tarfile.open(f)
+    print('Downloading ' + directory.name, end=" ")
+
+    # temporary local filepath
+    parsed_url = urlparse(url)
+    file = Path(parsed_url.path).name
+    filename = Path(dependencies_dir) / file
+
+    download_url(url=url, filename=filename)
+
+    print('done')
+    print('Extracting ' + file, end=" ")
+
+    # Check if tar or zip
+    if any(url.endswith(ext) for ext in ['.tar.bz2', '.tar.gz', '.tar.xz']):
+        with tarfile.open(filename) as obj:
+            obj.extractall(path=extract_dir)
     else:
-        obj = zipfile.ZipFile(f, 'r')
-    obj.extractall(path=str(extract_dir))
+        with zipfile.ZipFile(filename, 'r') as obj:
+            obj.extractall(path=extract_dir)
 
     subdir = find_single_subdir(extract_dir)
-    shutil.move(str(subdir), str(directory))
+    shutil.move(subdir, directory)
+
+    print('done')
+
+    # remove temp unzip folder
     shutil.rmtree(extract_dir, ignore_errors=True)
+
+    # remove downloaded zip
+    os.remove(filename)
 
 
 def run(*cmd):
@@ -192,13 +228,17 @@ def install_dependency(dependency):
     files = specs.get('files', None)
     if url is not None:
         if isinstance(url, dict):
-            url = url[platform.system()]
+            full_description = f'{platform.system()}-{platform.machine()}'
+            if full_description not in url:
+                url = url[platform.system()]
+            else:
+                url = url[full_description]
         download_and_unzip(url=url, directory=installation_directory)
     elif files is not None:
         os.mkdir(installation_directory)
         for file in files:
             basename = file.split('/')[-1]
-            urlretrieve(file, installation_directory / basename)
+            download_url(url=file, filename=installation_directory / basename)
     else:
         raise ('dependency is missing payload')
 
@@ -207,11 +247,13 @@ def install_dependency(dependency):
 
 def install_openocd_config_template():
     debug_dir = project_root_dir / 'utils' / 'debug'
-    custom_config_path = debug_dir / '10_custom_config.cfg'
-    custom_config_template_path = debug_dir / '10_custom_config_template.cfg'
+    custom_config_path = debug_dir / '10_custom_config_overrides.cfg'
     if not custom_config_path.exists():
-        print(f'Installing openocd user-config to {custom_config_path}')
-        shutil.copy(custom_config_template_path, custom_config_path)
+        print(
+            f'Installing openocd user-config override to {custom_config_path}')
+        custom_config_path.write_text(
+            "# This file is meant for custom configuration overrides.\n# See 10_custom_config_defaults.cfg for info and copy one proc section here.\n"
+        )
 
 
 def get_dependency_version(dependency):
@@ -225,6 +267,7 @@ def get_dependency_directory(dependency) -> Path:
 
 def switch_to_venv_if_nedded():
     if not running_in_venv and os.environ.get('BUDDY_NO_VIRTUALENV') != '1':
+        prepare_venv_if_needed()
         print('Switching to Buddy\'s virtual environment.', file=sys.stderr)
         print(
             'You can disable this by setting the BUDDY_NO_VIRTUALENV=1 env. variable.',
@@ -237,6 +280,7 @@ def prepare_venv_if_needed():
     if venv_dir.exists():
         return
     venv.create(venv_dir, with_pip=True, prompt='buddy')
+    install_pip_packages()
 
 
 def pip_install(*args):
@@ -275,6 +319,10 @@ def install_pip_packages():
 
 
 def bootstrap():
+    # create dependency directory if not exists
+    if not os.path.exists(dependencies_dir):
+        os.makedirs(dependencies_dir)
+
     for dependency in dependencies:
         if recommended_version_is_available(dependency):
             continue

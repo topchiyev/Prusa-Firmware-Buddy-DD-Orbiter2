@@ -10,7 +10,7 @@
 #include <http/httpc.hpp>
 #include <http/websocket.hpp>
 
-#include <log.h>
+#include <logging/log.hpp>
 
 #include <atomic>
 #include <cassert>
@@ -40,11 +40,14 @@ using std::string_view;
 using std::variant;
 using std::visit;
 
-LOG_COMPONENT_DEF(connect, LOG_SEVERITY_INFO);
+LOG_COMPONENT_DEF(connect, logging::Severity::info);
 
 namespace connect_client {
 
 namespace {
+
+    // Send a ping if there's no activity from us during this time (15_000 ms = 15s)
+    constexpr uint32_t ping_inactivity = 15000;
 
     // These two should actually be a atomic<tuple<.., ..>>. This won't compile on our platform.
     // But, considering the error is informative only and we set these only in
@@ -109,6 +112,11 @@ namespace {
             assert(0);
             return "";
         }
+        static const char *url(const transfers::Download::InlineRequest &) {
+            // Not used in non-websocket mode and websocket doesn't call url.
+            assert(0);
+            return "";
+        }
         static const char *url(const SendTelemetry &) {
             return "/p/telemetry";
         }
@@ -167,7 +175,7 @@ namespace {
                 { nullptr, nullptr, nullopt }
             } {}
         virtual const char *url() const override {
-            return "/p/ws-pre";
+            return "/p/ws";
         }
         virtual Method method() const override {
             return Method::Get;
@@ -259,16 +267,104 @@ Connect::ServerResp Connect::handle_server_resp(http::Response resp, CommandId c
 }
 
 #if WEBSOCKET()
+CommResult Connect::send_ping(CachedFactory &conn_factory) {
+    log_debug(connect, "Sending ping");
+    uint8_t buffer[0] = {};
+    if (auto error = websocket->send(WebSocket::Ping, /*last=*/true, buffer, 0); error.has_value()) {
+        conn_factory.invalidate();
+        return err_to_status(*error);
+    }
+
+    last_send = now();
+
+    return ConnectionStatus::Ok;
+}
+
+namespace {
+
+    class DebugHandler {
+    public:
+        uint32_t id;
+        bool started = false;
+        CommResult flush(const uint8_t *buffer, size_t size, bool) {
+            const char *fmt = started ? "Msg from server: %.*s" : "Msg from server (cont): %.*s";
+            log_info(connect, fmt, static_cast<int>(size), reinterpret_cast<const char *>(buffer));
+            started = true;
+            return monostate {};
+        }
+    };
+
+    typedef Command (*BuffParser)(CommandId id, uint8_t *data, size_t size, SharedBuffer::Borrow buffer);
+
+    class CommandHandler {
+    public:
+        CommandId id;
+        // Should be reference, but pointer because of operator= :-|
+        Planner *planner;
+        SharedBuffer::Borrow buffer;
+        BuffParser parser;
+        bool broken = false;
+        CommResult flush(uint8_t *buffer, size_t size, bool last) {
+            if (broken) {
+                // Already broken, just ignore rest of the message.
+                return monostate {};
+            }
+
+            if (!last) {
+                // Currently, we don't handle commands larger than one buffer (it's our own limitation).
+                log_warning(connect, "Oversized command %" PRIu32 "X received", id);
+                broken = true;
+                planner->command(Command { id, BrokenCommand { "Oversized command" } });
+                return monostate {};
+            }
+
+            auto command = parser(id, buffer, size, move(this->buffer));
+            planner->command(command);
+            return monostate {};
+        }
+    };
+
+    class ChunkHandler {
+    public:
+        uint32_t id;
+        Planner *planner;
+        CommResult flush(const uint8_t *buffer, size_t size, bool) {
+            // File transfer
+            const bool ok = planner->transfer_chunk(transfers::Download::InlineChunk {
+                id,
+                size,
+                buffer,
+            });
+            if (ok) {
+                return monostate {};
+            } else {
+                return OnlineError::Internal;
+            }
+        }
+    };
+
+    class IgnoreCommand {
+    public:
+        CommResult flush(const uint8_t *, size_t, bool) {
+            // Intentionally left blank.
+            return monostate {};
+        }
+    };
+
+} // namespace
+
 CommResult Connect::receive_command(CachedFactory &conn_factory) {
-    log_debug(connect, "Trying to receive a commandfrom server");
+    log_debug(connect, "Trying to receive a command from server");
     bool first = true;
     bool more = true;
     size_t read = 0;
-    bool oversized = false;
+    bool parsed = false;
     // The extra 9 are for the message "header"
     // 1 is for "type", 8 are 32bit command ID in hex (without 0x in front).
     constexpr size_t HDR_LEN = 9;
     uint8_t buffer[MAX_RESP_SIZE + HDR_LEN];
+    variant<IgnoreCommand, DebugHandler, ChunkHandler, CommandHandler> handler;
+
     while (more) {
         auto res = websocket->receive(first ? make_optional(0) : nullopt);
 
@@ -301,16 +397,24 @@ CommResult Connect::receive_command(CachedFactory &conn_factory) {
                 return err_to_status(*error);
             }
 
-            if (auto error = websocket->send(WebSocket::Pong, false, data, fragment.len); error.has_value()) {
+            if (auto error = websocket->send(WebSocket::Pong, /*last=*/true, data, fragment.len); error.has_value()) {
                 conn_factory.invalidate();
                 return err_to_status(*error);
             }
+
+            last_send = now();
 
             // This one is handled, next one please.
             continue;
         }
         case WebSocket::Opcode::Pong:
-            // We didn't send a ping, so not expecting pong... ignore pongs
+            // We send pings, but don't really care about the pongs. We assume
+            // that the connection would break in some way (timeout / getting
+            // full) if the connection doesn't work. This doesn't protect us
+            // against the situation where the server would be consuming the
+            // data on low level (eg. sending ACKs), but otherwise would be
+            // dead on application level - but we don't care about that, as
+            // it's certainly less common than just broken Internet.
             fragment.ignore();
             continue;
         case WebSocket::Opcode::Close:
@@ -326,122 +430,124 @@ CommResult Connect::receive_command(CachedFactory &conn_factory) {
 
         first = false;
 
-        // Even if we know it won't fit, we make sure to read at least the
-        // header, so we have a command ID to refuse.
-        size_t to_read = std::min(sizeof buffer - read, fragment.len);
-        if (auto error = fragment.conn->rx_exact(buffer + read, to_read); error.has_value()) {
-            conn_factory.invalidate();
-            return err_to_status(*error);
-        }
-        read += to_read;
-        fragment.len -= to_read;
-        if (fragment.len > 0) {
-            oversized = true;
-            // As we decreased the size already, this ignores only the rest.
-            fragment.ignore();
+        // A fragment may be bigger than our single chunk.
+        while (fragment.len > 0) {
+            size_t to_read = std::min((sizeof buffer) - read, fragment.len);
+            if (auto error = fragment.conn->rx_exact(buffer + read, to_read); error.has_value()) {
+                conn_factory.invalidate();
+                return err_to_status(*error);
+            }
+
+            fragment.len -= to_read;
+            read += to_read;
+
+            if (fragment.last || read == sizeof buffer) {
+                size_t skip;
+                if (!parsed) {
+                    if (read < HDR_LEN) {
+                        planner().command(Command {
+                            // We don't have a command ID, so we cheat a bit here. Should not happen really.
+                            0,
+                            BrokenCommand { "Message too short to contain header" } });
+                        return ConnectionStatus::Ok;
+                    }
+                    CommandId command_id;
+                    auto id_result = std::from_chars(reinterpret_cast<const char *>(buffer + 1), reinterpret_cast<const char *>(buffer + 9), command_id, 16);
+                    if (id_result.ec != std::errc {}) {
+                        planner().command(Command {
+                            0,
+                            BrokenCommand { "Could not parse command ID" } });
+                        return ConnectionStatus::Ok;
+                    }
+
+                    char cmd_type = buffer[0];
+
+                    log_debug(connect, "Received a command from server %c %" PRIu32 "X", buffer[0], command_id);
+
+                    auto buff(this->buffer.borrow());
+                    if (!buff.has_value() && (cmd_type == 'G' || cmd_type == 'F' || cmd_type == 'J')) {
+                        // We can only hold the buffer already borrowed in case we are still
+                        // processing some command. In that case we can't accept another one
+                        // and we just reject it.
+                        planner().command(Command {
+                            command_id,
+                            ProcessingOtherCommand {},
+                        });
+                        handler = IgnoreCommand {};
+                    } else {
+                        switch (buffer[0]) {
+                        case 'J':
+                            handler = CommandHandler {
+                                .id = command_id,
+                                .planner = &planner(),
+                                .buffer = move(*buff),
+                                .parser = [](CommandId id, uint8_t *data, size_t size, SharedBuffer::Borrow buffer) -> Command {
+                                    return Command::parse_json_command(id, reinterpret_cast<char *>(data), size, move(buffer));
+                                },
+                            };
+                            break;
+                        case 'G':
+                        case 'F':
+                            // Forced GCode: The HTTP version has a `Force` header. The
+                            // idea is we would refuse non-forced gcode during a print, but
+                            // accept the forced one. We don't have that distinction
+                            // implemented, but the websocket protocol needs to put the
+                            // distinction somewhere and we need to understand both the `G`
+                            // and `F` types.
+                            //
+                            // TODO: We should implement the distinction O:-)
+                            handler = CommandHandler {
+                                .id = command_id,
+                                .planner = &planner(),
+                                .buffer = move(*buff),
+                                .parser = [](CommandId id, uint8_t *data, size_t size, SharedBuffer::Borrow buffer) -> Command {
+                                    const string_view body(reinterpret_cast<const char *>(data), size);
+                                    return Command::gcode_command(id, body, move(buffer));
+                                },
+                            };
+                            break;
+                        case 'D':
+                            // This is a debug message. We just log it and throw away (and
+                            // we don't care about the oversized).
+                            handler = DebugHandler { command_id };
+                            break;
+                        case 'T':
+                            handler = ChunkHandler { command_id, &planner() };
+                            break;
+                        default:
+                            planner().command(Command {
+                                command_id,
+                                BrokenCommand { "Unrecognized type of message" } });
+                            handler = IgnoreCommand {};
+                            break;
+                        }
+                    }
+
+                    parsed = true;
+
+                    skip = HDR_LEN;
+                } else {
+                    skip = 0;
+                }
+
+                auto flush_result = visit(
+                    [&](auto &&handler) {
+                        return handler.flush(buffer + skip, read - skip, fragment.last && fragment.len == 0);
+                    },
+                    handler);
+
+                if (!holds_alternative<monostate>(flush_result)) {
+                    if (holds_alternative<OnlineError>(flush_result)) {
+                        conn_factory.invalidate();
+                    }
+                    return flush_result;
+                }
+
+                read = 0;
+            }
         }
 
         if (fragment.last) {
-            if (read < HDR_LEN) {
-                planner().command(Command {
-                    // We don't have a command ID, so we cheat a bit here. Should not happen really.
-                    0,
-                    BrokenCommand { "Message too short to contain header" } });
-                return ConnectionStatus::Ok;
-            }
-            uint32_t command_id;
-            auto id_result = std::from_chars(reinterpret_cast<const char *>(buffer + 1), reinterpret_cast<const char *>(buffer + 9), command_id, 16);
-            if (id_result.ec != std::errc {}) {
-                planner().command(Command {
-                    0,
-                    BrokenCommand { "Could not parse command ID" } });
-                return ConnectionStatus::Ok;
-            }
-            log_debug(connect, "Received a command from server");
-            enum class Type {
-                Json,
-                Gcode,
-                ForcedGcode,
-            };
-            Type type;
-            switch (buffer[0]) {
-            case 'J':
-                type = Type::Json;
-                break;
-            case 'G':
-                type = Type::Gcode;
-                break;
-            case 'F':
-                type = Type::ForcedGcode;
-                break;
-            case 's':
-                // The `s` was used in some experiments. It's not actually part
-                // of the protocol right now, but it's ignored temporarily to
-                // deal with version transitions. Shall be removed before we
-                // put this to production.
-                return ConnectionStatus::Ok;
-            case 'D':
-                // This is a debug message. We just log it and throw away (and
-                // we don't care about the oversized).
-                log_debug(connect, "Msg from server: %.*s", static_cast<int>(read - HDR_LEN), reinterpret_cast<const char *>(buffer + HDR_LEN));
-                return ConnectionStatus::Ok;
-            default:
-                planner().command(Command {
-                    command_id,
-                    BrokenCommand { "Unrecognized type of message" } });
-                return ConnectionStatus::Ok;
-            }
-
-            if (oversized) {
-                planner().command(Command {
-                    command_id,
-                    BrokenCommand { "Command too large" } });
-
-                // We have managed to consume the command alright, we just
-                // didn't handle it -> the connection itself is fine.
-                return ConnectionStatus::Ok;
-            }
-            if (command_id == planner().background_command_id()) {
-                planner().command(Command {
-                    command_id,
-                    ProcessingThisCommand {},
-                });
-
-                return ConnectionStatus::Ok;
-            }
-            auto buff(this->buffer.borrow());
-            if (!buff.has_value()) {
-                // We can only hold the buffer already borrowed in case we are still
-                // processing some command. In that case we can't accept another one
-                // and we just reject it.
-                planner().command(Command {
-                    command_id,
-                    ProcessingOtherCommand {},
-                });
-            }
-
-            switch (type) {
-            case Type::Json: {
-                auto command = Command::parse_json_command(command_id, reinterpret_cast<char *>(buffer + HDR_LEN), read - HDR_LEN, move(*buff));
-                planner().command(command);
-                break;
-            }
-            case Type::Gcode:
-            case Type::ForcedGcode: {
-                // Forced GCode: The HTTP version has a `Force` header. The
-                // idea is we would refuse non-forced gcode during a print, but
-                // accept the forced one. We don't have that distinction
-                // implemented, but the websocket protocol needs to put the
-                // distinction somewhere and we need to understand both the `G`
-                // and `F` types.
-                //
-                // TODO: We should implement the distinction O:-)
-                const string_view body(reinterpret_cast<const char *>(buffer + HDR_LEN), read - HDR_LEN);
-                auto command = Command::gcode_command(command_id, body, move(*buff));
-                break;
-            }
-            }
-
             more = false;
         }
     }
@@ -458,6 +564,9 @@ CommResult Connect::prepare_connection(CachedFactory &conn_factory, const Printe
         // Could have been using the old connection and contain a dangling pointer. Get rid of it.
         // (We currently don't do a proper shutdown
         websocket.reset();
+        // Similarly, any download that has been running might have missing /
+        // confused chunks, we need a new one.
+        planner().transfer_reset();
         last_known_status = ConnectionStatus::Connecting;
     }
     // Let it reconnect if it needs it.
@@ -498,6 +607,8 @@ CommResult Connect::prepare_connection(CachedFactory &conn_factory, const Printe
             } while (received > 0);
 
             websocket = WebSocket::from_response(resp);
+            // Initiating the connection is a "send" in some sense.
+            last_send = now();
             break;
         }
         default: {
@@ -548,6 +659,8 @@ CommResult Connect::send_command(CachedFactory &conn_factory, const Printer::Con
             planner().action_done(ActionResult::Failed);
             return err_to_status(*error);
         }
+
+        last_send = now();
 
         first = false;
     }
@@ -649,7 +762,7 @@ CommResult Connect::send_command(CachedFactory &conn_factory, const Printer::Con
         // We don't know that exactly the server answer means, but we guess
         // that it will persist, so we consider it refused and throw the
         // request away.
-        planner().action_done(ActionResult::Refused);
+        planner().action_done(resp.status == Status::BadRequest ? ActionResult::RefusedFast : ActionResult::Refused);
         // Switch just to provide proper error message
         switch (resp.status) {
         case Status::BadRequest:
@@ -704,6 +817,17 @@ CommResult Connect::communicate(CachedFactory &conn_factory) {
     // planner checks if it _can_ receive the command at that point).
     if (conn_factory.is_valid() && websocket.has_value()) {
         wake_on_readable = websocket->inner_connection();
+
+        if (now() - last_send > ping_inactivity) {
+            return send_ping(conn_factory);
+        }
+    } else {
+        // The server node might want to have fresh telemetry. Important in websocket mode, because:
+        // * We stretch the time between telemetries to much longer in
+        //   websocket mode, so the time to "auto-recover" is longer.
+        // * The server node in the websocket mode can keep a bit more context
+        //   internally, unlike the http-based exchange.
+        planner().reset_telemetry();
     }
 #endif
     auto action = planner().next_action(buffer, wake_on_readable);
@@ -778,6 +902,18 @@ Connect::Connect(Printer &printer, SharedBuffer &buffer)
 
 OnlineStatus last_status() {
     return make_tuple(last_known_status.load(), last_connection_error.load(), retries_left.load());
+}
+
+bool is_connect_registered() {
+    switch (last_known_status.load()) {
+    case ConnectionStatus::Ok:
+    case ConnectionStatus::Connecting:
+    case ConnectionStatus::Error:
+        return true;
+    default:
+        break;
+    }
+    return false;
 }
 
 void request_registration() {

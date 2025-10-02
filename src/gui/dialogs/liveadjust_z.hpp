@@ -7,7 +7,7 @@
 #include "window_icon.hpp"
 #include "window_arrows.hpp"
 
-class WindowScale : public AddSuperWindow<window_frame_t> {
+class WindowScale : public window_frame_t {
     window_numb_t scaleNum0;
     window_numb_t scaleNum1;
     window_numb_t scaleNum2;
@@ -30,14 +30,14 @@ protected:
     Rect16 getNumRect(point_i16_t pt) const;
 
 private:
-    void horizLine(uint16_t width_pad, uint16_t height, color_t color);
+    void horizLine(uint16_t width_pad, uint16_t height, Color color);
     void horizLineWhite(uint16_t width_pad, uint16_t height) {
         horizLine(width_pad, height, COLOR_WHITE);
     }
 };
 
 // regular window bound to Z calib
-class WindowLiveAdjustZ : public AddSuperWindow<window_frame_t> {
+class WindowLiveAdjustZ : public window_frame_t {
 protected:
     window_numb_t number;
     WindowArrows arrows;
@@ -45,7 +45,10 @@ protected:
 public:
     WindowLiveAdjustZ(window_t *parent, point_i16_t pt);
     void Save();
-    virtual ~WindowLiveAdjustZ() override { Save(); }
+    ~WindowLiveAdjustZ() {
+        Save();
+    }
+
     float GetValue() const { return number.GetValue(); }
 
 protected:
@@ -59,10 +62,10 @@ protected:
         return { ret.x, int16_t(ret.y + 0) };
     }
 
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 };
 
-class WindowLiveAdjustZ_withText : public AddSuperWindow<WindowLiveAdjustZ> {
+class WindowLiveAdjustZ_withText : public WindowLiveAdjustZ {
     window_text_t text;
 
 public:
@@ -73,10 +76,10 @@ public:
     bool IsActive();
 
 protected:
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 };
 
-class LiveAdjustZ : public AddSuperWindow<IDialog> {
+class LiveAdjustZ : public IDialog {
     window_text_t text;
     window_icon_t nozzle_icon;
     WindowLiveAdjustZ adjuster;
@@ -90,5 +93,5 @@ public:
 protected:
     void moveNozzle();
 
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 };

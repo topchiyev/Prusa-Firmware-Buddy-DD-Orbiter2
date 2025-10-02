@@ -1,7 +1,7 @@
 #include "ModbusControl.hpp"
 #include "ModbusRegisters.hpp"
 #include <cstring>
-#include "log.h"
+#include <logging/log.hpp>
 #include "Marlin/src/module/temperature.h"
 #include "Marlin/src/module/stepper/trinamic.h"
 #include "../loadcell.hpp"
@@ -18,7 +18,7 @@
 
 namespace dwarf::ModbusControl {
 
-LOG_COMPONENT_DEF(ModbusControl, LOG_SEVERITY_INFO);
+LOG_COMPONENT_DEF(ModbusControl, logging::Severity::info);
 
 struct ModbusMessage {
     uint16_t m_Address;
@@ -42,6 +42,7 @@ union __attribute__((packed)) LedPwm {
 };
 
 dwarf_shared::StatusLed status_led = dwarf_shared::StatusLed(); // Default LED control
+uint32_t tool_picked_timestamp_ms = 0; // Holds when tool was picked - used to delay fault state checking
 
 static constexpr unsigned int MODBUS_QUEUE_MESSAGE_COUNT = 40;
 
@@ -180,7 +181,7 @@ void ProcessModbusMessages() {
             loadcell::loadcell_set_enable(msg->m_Value);
             break;
         }
-        case ((uint16_t)ModbusRegisters::SystemCoil::accelerometer_enable): {
+        case ftrstd::to_underlying(ModbusRegisters::SystemCoil::accelerometer_enable): {
             if (msg->m_Value) {
                 dwarf::accelerometer::enable();
             } else {
@@ -301,6 +302,24 @@ static inline int16_t clamp_to_int16(float temperature) {
     return std::clamp(temperature, float(INT16_MIN), float(INT16_MAX));
 }
 
+static void update_fault_status() {
+    const uint32_t gstat = stepperE0.read(0x01);
+    if (gstat != 0) {
+        ModbusRegisters::SetRegValue(ModbusRegisters::SystemInputRegister::fault_status, static_cast<uint16_t>(dwarf_shared::errors::FaultStatusMask::TMC_FAULT));
+    }
+}
+
+static bool should_check_fault_status(bool is_parked, bool is_picked) {
+    if (is_picked && tool_picked_timestamp_ms == 0) {
+        tool_picked_timestamp_ms = ticks_ms();
+    } else if (!is_picked) {
+        tool_picked_timestamp_ms = 0;
+    }
+    // Do not report issues with a tool that is parked, not picked or was picked less of a second ago
+    static constexpr uint32_t picked_tool_delay_ms = 1000;
+    return (!is_parked && (is_picked && (ticks_ms() - tool_picked_timestamp_ms) >= picked_tool_delay_ms));
+}
+
 void UpdateRegisters() {
     ModbusRegisters::SetRegValue(ModbusRegisters::SystemInputRegister::hotend_measured_temperature, clamp_to_int16(Temperature::degHotend(0)));
     ModbusRegisters::SetRegValue(ModbusRegisters::SystemInputRegister::hotend_pwm_state, Temperature::getHeaterPower(H_E0));
@@ -330,6 +349,10 @@ void UpdateRegisters() {
 
     ModbusRegisters::SetRegValue(ModbusRegisters::SystemInputRegister::system_24V_mV, advancedpower.Get24VVoltage() * 1000);
     ModbusRegisters::SetRegValue(ModbusRegisters::SystemInputRegister::heater_current_mA, advancedpower.GetDwarfNozzleCurrent() * 1000);
+
+    if (should_check_fault_status(Cheese::is_parked(), Cheese::is_picked())) {
+        update_fault_status();
+    }
 }
 
 void TriggerMarlinKillFault(dwarf_shared::errors::FaultStatusMask fault, const char *component, const char *message) {

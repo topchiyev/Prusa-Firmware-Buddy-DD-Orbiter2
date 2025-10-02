@@ -3,7 +3,7 @@
  */
 
 #include "window_filebrowser.hpp"
-#include "log.h"
+#include <logging/log.hpp>
 #include "sound.hpp"
 #include <transfers/transfer.hpp>
 #include <algorithm>
@@ -18,16 +18,13 @@ LOG_COMPONENT_REF(GUI);
 /// This is something else than the selected file for print
 /// This is used to restore the content of the browser into previous state including the layout
 static char firstVisibleSFN[FileSort::MAX_SFN];
-char WindowFileBrowser::root[FILE_PATH_BUFFER_LEN] = "/usb";
 
 static constexpr char dirUp[] = "..";
 static constexpr char slash = '/';
 
 WindowFileBrowser::WindowFileBrowser(window_t *parent, Rect16 rect, const char *media_SFN_path)
-    : AddSuperWindow<window_file_list_t>(parent, rect) {
+    : window_file_list_t(parent, rect) {
 
-    // set root of the file list
-    window_file_list_t::SetRoot(root);
     // initialize the directory
     // here the strncpy is meant to be - need the rest of the buffer zeroed
     strncpy(sfn_path, media_SFN_path, sizeof(sfn_path));
@@ -46,7 +43,7 @@ WindowFileBrowser::WindowFileBrowser(window_t *parent, Rect16 rect, const char *
     // scroll offset/current item is automatically set by IWindowMenu
 }
 
-void WindowFileBrowser::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void WindowFileBrowser::windowEvent(window_t *sender, GUI_event_t event, void *param) {
 
     switch (event) {
 
@@ -70,19 +67,15 @@ void WindowFileBrowser::windowEvent(EventLock /*has private ctor*/, window_t *se
         break;
     }
 
-    SuperWindowEvent(sender, event, param);
-}
-
-void WindowFileBrowser::CopyRootTo(char *path) {
-    strlcpy(path, root, FILE_PATH_BUFFER_LEN);
-}
-
-void WindowFileBrowser::SetRoot(const char *path) {
-    strlcpy(root, path, FILE_PATH_BUFFER_LEN);
+    window_file_list_t::windowEvent(sender, event, param);
 }
 
 void WindowFileBrowser::SaveTopSFN() {
     strlcpy(firstVisibleSFN, TopItemSFN(), sizeof(firstVisibleSFN));
+}
+
+void WindowFileBrowser::clear_first_visible_sfn() {
+    *firstVisibleSFN = 0;
 }
 
 int WindowFileBrowser::WriteNameToPrint(char *buff, size_t sz) {
@@ -94,15 +87,6 @@ void WindowFileBrowser::handle_click() {
 
     // No item focused -> do nothign
     if (!focused_slot_opt) {
-        return;
-    }
-
-    const auto focused_slot = *focused_slot_opt;
-
-    // Return button -> signal to parent
-    if (is_return_slot(focused_slot)) {
-        log_debug(GUI, "Clicked on return slot");
-        go_up();
         return;
     }
 

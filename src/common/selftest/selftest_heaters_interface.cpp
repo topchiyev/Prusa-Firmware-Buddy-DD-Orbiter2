@@ -5,7 +5,6 @@
  */
 #include "selftest_heaters_interface.hpp"
 #include "selftest_heater.h"
-#include "selftest_hotend_specify.hpp"
 #include "../../Marlin/src/module/temperature.h"
 #include "marlin_server.hpp"
 #include "selftest_part.hpp"
@@ -20,7 +19,7 @@
  * Keep in mind that enabling this for printers that will use the PowerCheckBooth (MK4) will cause an
  * untested code path in PowerCheckBoth to be executed.
  */
-#if !PRINTER_IS_PRUSA_XL
+#if !PRINTER_IS_PRUSA_XL()
     // disable power check, since measurement does not work
     #include <option/has_advanced_power.h>
     #if HAS_ADVANCED_POWER()
@@ -31,7 +30,7 @@
 
 #if HAS_ADVANCED_POWER()
     #include "advanced_power.hpp"
-    #if !PRINTER_IS_PRUSA_XL
+    #if !PRINTER_IS_PRUSA_XL()
         #include "power_check_both.hpp"
     #endif
 #endif
@@ -58,7 +57,7 @@ static void HeatbreakCorrelation([[maybe_unused]] CSelftestPart_Heater &h) {}
 // Shared check callback
 // Splits implementation for printers with independent bed, nozzle measurement and others
 static inline void check_callback(CSelftestPart_Heater &part) {
-#if !PRINTER_IS_PRUSA_XL
+#if !PRINTER_IS_PRUSA_XL()
     PowerCheckBoth::Instance().Callback(part);
 #else
     part.single_check_callback();
@@ -106,7 +105,7 @@ void phaseHeaters_noz_ena(std::array<IPartHandler *, HOTENDS> &pNozzles, const s
                 HeatbreakCorrelation(part);
                 check_callback(part);
             });
-#if !PRINTER_IS_PRUSA_XL
+#if !PRINTER_IS_PRUSA_XL()
             PowerCheckBoth::Instance().BindNozzle(&pNoz->GetInstance());
 #endif
         }
@@ -125,7 +124,7 @@ void phaseHeaters_bed_ena(IPartHandler *&pBed, const HeaterConfig_t &config_bed)
         // as the nozzle selftest takes care of showing the dialog and this one
         // running in parallel would just make a mess.
         SelftestTool tool_res = config_store().selftest_result.get().tools[0];
-        if (tool_res.heatBreakFan != TestResult_Passed || tool_res.fansSwitched != TestResult_Passed) {
+        if (!tool_res.has_heatbreak_fan_passed()) {
             return;
         }
     }
@@ -153,7 +152,7 @@ void phaseHeaters_bed_ena(IPartHandler *&pBed, const HeaterConfig_t &config_bed)
         // add same hooks for both "states changes" and "does not change"
         pBed_->SetStateChangedHook(&check_callback);
         pBed_->SetStateRemainedHook(&check_callback);
-#if !PRINTER_IS_PRUSA_XL
+#if !PRINTER_IS_PRUSA_XL()
         PowerCheckBoth::Instance().BindBed(&pBed_->GetInstance());
 #endif
     }
@@ -174,7 +173,7 @@ bool phaseHeaters(std::array<IPartHandler *, HOTENDS> &pNozzles, IPartHandler **
     const bool just_finished_bed = pBed && *pBed && !(*pBed)->Loop();
 
     // change dialog state
-    FSM_CHANGE_WITH_EXTENDED_DATA__LOGGING(IPartHandler::GetFsmPhase(), resultHeaters);
+    marlin_server::fsm_change_extended(IPartHandler::GetFsmPhase(), resultHeaters);
 
     // Continue below only if some of the tests just finished, if not, just run this again until some finishes
     if (!just_finished_bed && !std::ranges::any_of(just_finished_noz, [](bool val) { return val; })) {
@@ -196,7 +195,7 @@ bool phaseHeaters(std::array<IPartHandler *, HOTENDS> &pNozzles, IPartHandler **
 
     for (size_t i = 0; i < HOTENDS; i++) {
         if (just_finished_noz[i]) {
-#if !PRINTER_IS_PRUSA_XL
+#if !PRINTER_IS_PRUSA_XL()
             PowerCheckBoth::Instance().UnBindNozzle();
 #endif
             delete pNozzles[i];
@@ -206,7 +205,7 @@ bool phaseHeaters(std::array<IPartHandler *, HOTENDS> &pNozzles, IPartHandler **
 
     if (just_finished_bed) {
         assert(pBed && *pBed);
-#if !PRINTER_IS_PRUSA_XL
+#if !PRINTER_IS_PRUSA_XL()
         PowerCheckBoth::Instance().UnBindBed();
 #endif
         delete *pBed;
@@ -220,43 +219,6 @@ bool phaseHeaters(std::array<IPartHandler *, HOTENDS> &pNozzles, IPartHandler **
 
     resultHeaters.tested_parts = 0; // reset tested parts so they can be set next time again
     return false; // finished
-}
-
-SelftestHotendSpecifyType hotend_result;
-bool retry_heater = false;
-bool get_retry_heater() { return retry_heater; }
-
-bool phase_hotend_specify(IPartHandler *&machine, const HotendSpecifyConfig &config) {
-    if (!machine) {
-        machine = Factory::CreateDynamical<selftest::CSelftestPart_HotendSpecify>(
-            config,
-            hotend_result,
-            &CSelftestPart_HotendSpecify::stateStart,
-            &CSelftestPart_HotendSpecify::stateAskAdjust,
-            &CSelftestPart_HotendSpecify::stateAskHotendInit,
-            &CSelftestPart_HotendSpecify::stateAskHotend,
-#if NOZZLE_TYPE_SUPPORT()
-            &CSelftestPart_HotendSpecify::stateAskNozzleInit,
-            &CSelftestPart_HotendSpecifyx::stateAskNozzle,
-#endif
-            &CSelftestPart_HotendSpecify::stateAskRetryInit,
-            &CSelftestPart_HotendSpecify::stateAskRetry);
-    }
-    bool in_progress = machine->Loop();
-    FSM_CHANGE_WITH_DATA__LOGGING(IPartHandler::GetFsmPhase(), hotend_result.Serialize());
-
-    if (in_progress) {
-        return true;
-    }
-
-    retry_heater = machine->GetResult() != TestResult_Skipped;
-
-    config_store().hotend_type.set(hotend_result.hotend_type);
-    config_store().nozzle_type.set(hotend_result.nozzle_type);
-
-    delete machine;
-    machine = nullptr;
-    return false;
 }
 
 } // namespace selftest

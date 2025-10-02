@@ -11,11 +11,11 @@ ScreenMenuStatistics::ScreenMenuStatistics()
     header.SetIcon(&img::info_16x16);
 }
 
-void ScreenMenuStatistics::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void ScreenMenuStatistics::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     if (event == GUI_event_t::HELD_RELEASED) {
         DialogMoveZ::Show();
         return;
     }
 
-    SuperWindowEvent(sender, event, param);
+    ScreenMenu::windowEvent(sender, event, param);
 }

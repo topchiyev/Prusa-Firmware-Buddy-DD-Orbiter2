@@ -13,7 +13,6 @@
 #endif /*HAS_TOOLCHANGER()*/
 
 #include "marlin_server.hpp"
-#include "media.hpp"
 
 #include "../lib/Marlin/Marlin/src/feature/prusa/crash_recovery.hpp"
 #include "../lib/Marlin/Marlin/src/module/endstops.h"
@@ -43,7 +42,7 @@
 #include "../lib/Marlin/Marlin/src/feature/input_shaper/input_shaper_config.hpp"
 #include "../lib/Marlin/Marlin/src/feature/pressure_advance/pressure_advance_config.hpp"
 
-#include "log.h"
+#include <logging/log.hpp>
 #include "w25x.h"
 #include "sound.hpp"
 #include "bsod.h"
@@ -74,6 +73,7 @@
 #include "wdt.hpp"
 
 #include <usb_host/usbh_async_diskio.hpp>
+#include <gcode/gcode_reader_restore_info.hpp>
 
 // External thread handles required for suspension
 extern osThreadId defaultTaskHandle;
@@ -81,7 +81,7 @@ extern osThreadId displayTaskHandle;
 
 namespace power_panic {
 
-LOG_COMPONENT_DEF(PowerPanic, LOG_SEVERITY_INFO);
+LOG_COMPONENT_DEF(PowerPanic, logging::Severity::info);
 
 osThreadId ac_fault_task;
 
@@ -103,6 +103,11 @@ void ac_fault_task_main([[maybe_unused]] void const *argument) {
 
     // switch into reaping mode: break out of any delay/signal wait until suspended
     osThreadSetPriority(NULL, osPriorityIdle);
+
+    // BFW-6419 REMOVEME
+    // xTaskAbortDelay is interrupting waiting for mutexes
+    freertos::Mutex::power_panic_mode_removeme = true;
+
     for (;;) {
         osSignalSet(defaultTaskHandle, ~0UL);
         xTaskAbortDelay(defaultTaskHandle);
@@ -144,7 +149,12 @@ struct flash_planner_t {
     uint8_t axis_relative;
     uint8_t allow_cold_extrude;
 
-    uint8_t _padding_is[1];
+    uint8_t gcode_compatibility_mode;
+    uint8_t fan_compatibility_mode;
+
+    uint8_t marlin_debug_flags;
+
+    uint8_t _padding_is[2];
 
     // IS/PA
     input_shaper::AxisConfig axis_config[3]; // XYZ
@@ -230,7 +240,7 @@ struct flash_data {
         SpoolJoin::serialized_state_t spool_join;
 #endif
         GCodeReaderStreamRestoreInfo gcode_stream_restore_info;
-        uint8_t invalid; // set to zero before writing, cleared on erase
+        uint8_t invalid = true; // set to zero before writing, cleared on erase
 
         static void load();
         static void save();
@@ -256,30 +266,12 @@ std::atomic_bool ac_fault_triggered = false;
 static PPState power_panic_state = PPState::Inactive;
 
 // Temporary buffer for state filled at the time of the acFault trigger
-static struct {
+static struct : public flash_data::state_t {
     bool nested_fault;
     PPState orig_state;
     char media_SFN_path[FILE_PATH_MAX_LEN]; // temporary buffer
     uint8_t orig_axis_known_position;
     uint32_t fault_stamp; // time since acFault trigger
-
-    // Temporary copy to handle nested fault handling
-    flash_crash_t crash;
-    flash_planner_t planner;
-    flash_progress_t progress;
-    flash_print_t print;
-    flash_toolchanger_t toolchanger;
-
-#if ENABLED(CANCEL_OBJECTS)
-    uint32_t canceled_objects;
-#endif
-#if ENABLED(PRUSA_TOOL_MAPPING)
-    ToolMapper::serialized_state_t tool_mapping;
-#endif
-#if ENABLED(PRUSA_SPOOL_JOIN)
-    SpoolJoin::serialized_state_t spool_join;
-#endif
-    GCodeReaderStreamRestoreInfo gcode_stream_restore_info;
 } state_buf;
 
 // Helper functions to read/write to the flash area with type checking
@@ -341,44 +333,15 @@ void flash_data::fixed_t::load() {
 }
 
 void flash_data::state_t::save() {
-    FLASH_SAVE(state.crash, state_buf.crash);
-    FLASH_SAVE(state.planner, state_buf.planner);
-    FLASH_SAVE(state.progress, state_buf.progress);
-    FLASH_SAVE(state.print, state_buf.print);
-    FLASH_SAVE(state.toolchanger, state_buf.toolchanger);
-#if ENABLED(CANCEL_OBJECTS)
-    FLASH_SAVE(state.canceled_objects, state_buf.canceled_objects);
-#endif
-#if ENABLED(PRUSA_TOOL_MAPPING)
-    FLASH_SAVE(state.tool_mapping, state_buf.tool_mapping);
-#endif
-#if ENABLED(PRUSA_SPOOL_JOIN)
-    FLASH_SAVE(state.spool_join, state_buf.spool_join);
-#endif
-    FLASH_SAVE(state.gcode_stream_restore_info, state_buf.gcode_stream_restore_info);
-
-    FLASH_SAVE_EXPR(state.invalid, false);
+    state_buf.invalid = false;
+    w25x_program(FLASH_DATA_OFF(state), reinterpret_cast<const uint8_t *>(&state_buf), sizeof(flash_data::state_t));
     if (w25x_fetch_error()) {
         log_error(PowerPanic, "Failed to save live data.");
     }
 }
 
 void flash_data::state_t::load() {
-    FLASH_LOAD(state.crash, state_buf.crash);
-    FLASH_LOAD(state.planner, state_buf.planner);
-    FLASH_LOAD(state.progress, state_buf.progress);
-    FLASH_LOAD(state.print, state_buf.print);
-    FLASH_LOAD(state.toolchanger, state_buf.toolchanger);
-#if ENABLED(CANCEL_OBJECTS)
-    FLASH_LOAD(state.canceled_objects, state_buf.canceled_objects);
-#endif
-#if ENABLED(PRUSA_TOOL_MAPPING)
-    FLASH_LOAD(state.tool_mapping, state_buf.tool_mapping);
-#endif
-#if ENABLED(PRUSA_SPOOL_JOIN)
-    FLASH_LOAD(state.spool_join, state_buf.spool_join);
-#endif
-    FLASH_LOAD(state.gcode_stream_restore_info, state_buf.gcode_stream_restore_info);
+    w25x_rd_data(FLASH_DATA_OFF(state), reinterpret_cast<uint8_t *>(&state_buf), sizeof(flash_data::state_t));
     state_buf.nested_fault = true;
 }
 
@@ -400,54 +363,6 @@ bool state_stored() {
     return retval;
 }
 
-// decide whether to current print can auto-recover
-static bool auto_recover_check() {
-    if (state_buf.print.odometer_e_start >= Odometer_s::instance().get_extruded_all()) {
-        // nothing has been extruded on the bed so far, it's safe to auto-resume irregardless of temp
-        return true;
-    }
-
-// check the bed temperature
-#if ENABLED(MODULAR_HEATBED)
-    thermalManager.setEnabledBedletMask(state_buf.planner.enabled_bedlets_mask);
-#endif
-    float current_bed_temp = thermalManager.degBed();
-    bool auto_recover;
-    if (!state_buf.planner.target_bed || current_bed_temp >= state_buf.planner.target_bed) {
-        auto_recover = true;
-    } else {
-        auto_recover = (state_buf.planner.target_bed - current_bed_temp) < POWER_PANIC_MAX_BED_DIFF;
-    }
-    return auto_recover;
-}
-
-bool setup_auto_recover_check() {
-    assert(state_stored()); // caller is responsible for checking
-
-    // load the data
-    flash_data::fixed_t::load();
-    flash_data::state_t::load();
-    if (w25x_fetch_error()) {
-        log_error(PowerPanic, "Setup load failed.");
-        return false;
-    }
-
-    // immediately update print progress
-    print_job_timer.resume(state_buf.progress.print_duration);
-    print_job_timer.pause();
-
-    const auto mode_specific = [](const flash_progress_t::ModeSpecificData &mbuf, ClProgressData::ModeSpecificData &pdata) {
-        pdata.percent_done.mSetValue(mbuf.percent_done, state_buf.progress.print_duration);
-        pdata.percent_done.mSetValue(mbuf.time_to_end, state_buf.progress.print_duration);
-        pdata.percent_done.mSetValue(mbuf.time_to_pause, state_buf.progress.print_duration);
-    };
-    mode_specific(state_buf.progress.standard_mode, oProgressData.standard_mode);
-    mode_specific(state_buf.progress.stealth_mode, oProgressData.stealth_mode);
-
-    // decide whether to auto-recover
-    return auto_recover_check();
-}
-
 const char *stored_media_path() {
     assert(state_stored()); // caller is responsible for checking
     FLASH_LOAD(fixed.media_SFN_path, state_buf.media_SFN_path);
@@ -466,7 +381,7 @@ void prepare() {
     // do not erase/save unless we have a path we can use to resume later
     if (!state_buf.nested_fault) {
         // update the internal filename on the first fault
-        marlin_vars()->media_SFN_path.copy_to(state_buf.media_SFN_path, sizeof(state_buf.media_SFN_path));
+        marlin_vars().media_SFN_path.copy_to(state_buf.media_SFN_path, sizeof(state_buf.media_SFN_path));
     }
 
     // erase and save the MBL data
@@ -533,16 +448,63 @@ static void atomic_finish() {
     HAL_NVIC_EnableIRQ(buddy::hw::acFault.getIRQn());
 }
 
-void resume_print(bool auto_recover) {
+void resume_print() {
     assert(state_stored()); // caller is responsible for checking
     assert(marlin_server::printer_idle()); // caller is responsible for checking
 
+    // load the data
+    flash_data::fixed_t::load();
+    flash_data::state_t::load();
+    if (w25x_fetch_error()) {
+        log_error(PowerPanic, "Setup load failed.");
+        return;
+    }
+
     log_info(PowerPanic, "resuming print");
     state_buf.nested_fault = true;
+
+    // immediately update print progress
+    {
+        print_job_timer.resume(state_buf.progress.print_duration);
+        print_job_timer.pause();
+
+        const auto mode_specific = [](const flash_progress_t::ModeSpecificData &mbuf, ClProgressData::ModeSpecificData &pdata) {
+            pdata.percent_done.mSetValue(mbuf.percent_done, state_buf.progress.print_duration);
+            pdata.percent_done.mSetValue(mbuf.time_to_end, state_buf.progress.print_duration);
+            pdata.percent_done.mSetValue(mbuf.time_to_pause, state_buf.progress.print_duration);
+        };
+        mode_specific(state_buf.progress.standard_mode, oProgressData.standard_mode);
+        mode_specific(state_buf.progress.stealth_mode, oProgressData.stealth_mode);
+    }
+
+    const bool auto_recover = [] {
+        if (state_buf.print.odometer_e_start >= Odometer_s::instance().get_extruded_all()) {
+            // nothing has been extruded on the bed so far, it's safe to auto-resume irregardless of temp
+            return true;
+        }
+
+// check the bed temperature
+#if ENABLED(MODULAR_HEATBED)
+        thermalManager.setEnabledBedletMask(state_buf.planner.enabled_bedlets_mask);
+#endif
+        const float current_bed_temp = thermalManager.degBed();
+
+        if (!state_buf.planner.target_bed || current_bed_temp >= state_buf.planner.target_bed) {
+            return true;
+        }
+
+        return (state_buf.planner.target_bed - current_bed_temp) < POWER_PANIC_MAX_BED_DIFF;
+    }();
+
     if (resume_state == ResumeState::Setup && auto_recover) {
         resume_state = ResumeState::Resume;
     }
-    marlin_server::powerpanic_resume_loop(state_buf.media_SFN_path, state_buf.crash.sdpos, auto_recover);
+
+    const GCodeReaderPosition gcode_pos {
+        .restore_info = state_buf.gcode_stream_restore_info,
+        .offset = state_buf.crash.sdpos,
+    };
+    marlin_server::powerpanic_resume(state_buf.media_SFN_path, gcode_pos, auto_recover);
 }
 
 void resume_continue() {
@@ -557,7 +519,8 @@ void resume_loop() {
         // Set bed temperature to prevent bed from cooling down
         thermalManager.setTargetBed(state_buf.planner.target_bed);
         break;
-    case ResumeState::Resume:
+
+    case ResumeState::Resume: {
         // setup the paused state
         // This applies for PowerPanic from paused AND from printing too
         // because printing after power up starts from pause
@@ -565,14 +528,12 @@ void resume_loop() {
         resume.pos = state_buf.crash.crash_current_position;
         resume.fan_speed = state_buf.planner.fan_speed;
         resume.print_speed = state_buf.planner.print_speed;
+        resume.nozzle_temp_paused = state_buf.planner.was_paused; // Nozzle temperatures are stored in resume
         HOTEND_LOOP() {
             resume.nozzle_temp[e] = state_buf.planner.target_nozzle[e];
             if (state_buf.planner.was_paused) {
                 marlin_server::set_temp_to_display(state_buf.planner.target_nozzle[e], e);
             }
-        }
-        if (state_buf.planner.was_paused) {
-            resume.nozzle_temp_paused = true; // Nozzle temperatures are stored in resume
         }
         marlin_server::set_resume_data(&resume);
 
@@ -586,6 +547,16 @@ void resume_loop() {
         thermalManager.extrude_min_temp = state_buf.planner.extrude_min_temp;
         thermalManager.allow_cold_extrude = state_buf.planner.allow_cold_extrude;
 #endif
+
+#if ENABLED(GCODE_COMPATIBILITY_MK3)
+        GcodeSuite::gcode_compatibility_mode = static_cast<GcodeSuite::GcodeCompatibilityMode>(state_buf.planner.gcode_compatibility_mode);
+#endif
+#if ENABLED(FAN_COMPATIBILITY_MK4_MK3)
+        GcodeSuite::fan_compatibility_mode = static_cast<GcodeSuite::FanCompatibilityMode>(state_buf.planner.fan_compatibility_mode);
+#endif
+
+        marlin_debug_flags = state_buf.planner.marlin_debug_flags;
+
         // planner settings
         planner.apply_settings(state_buf.planner.settings);
         planner.refresh_acceleration_rates();
@@ -613,7 +584,6 @@ void resume_loop() {
 #if ENABLED(PRUSA_SPOOL_JOIN)
         spool_join.deserialize(state_buf.spool_join);
 #endif
-        media_set_restore_info(state_buf.gcode_stream_restore_info);
 
 #if HAS_TOOLCHANGER()
         if (state_buf.crash.crash_position.y > PrusaToolChanger::SAFE_Y_WITH_TOOL) { // Was in toolchange area
@@ -646,6 +616,7 @@ void resume_loop() {
             resume_state = ResumeState::WaitForHeaters;
         }
         break;
+    }
 
     case ResumeState::WaitForHeaters: {
         // enqueue a proper wait-for-temperature loop
@@ -796,7 +767,7 @@ bool shutdown_loop() {
         ili9488_power_down();
         break;
     case 2:
-#if BOARD_IS_XLBUDDY
+#if BOARD_IS_XLBUDDY()
         hwio_low_power_state();
         break;
 #else
@@ -940,7 +911,7 @@ void panic_loop() {
 #if ENABLED(PRUSA_SPOOL_JOIN)
         spool_join.serialize(state_buf.spool_join);
 #endif
-        state_buf.gcode_stream_restore_info = media_get_restore_info();
+        state_buf.gcode_stream_restore_info = marlin_server::stream_restore_info();
 #if HAS_TOOLCHANGER()
         // Store tool that was last requested and where to return in case toolchange is ongoing
         state_buf.toolchanger.precrash_tool = prusa_toolchanger.get_precrash().tool_nr;
@@ -1035,9 +1006,9 @@ std::atomic<bool> ac_fault_enabled = false;
 
 void check_ac_fault_at_startup() {
     // AC-fault during initialization //TODO: IXL Remove if after PP is ready
-    if constexpr (PRINTER_IS_PRUSA_XL || PRINTER_IS_PRUSA_MK4 || PRINTER_IS_PRUSA_MK3_5) {
+    if constexpr (PRINTER_IS_PRUSA_XL() || PRINTER_IS_PRUSA_MK4() || PRINTER_IS_PRUSA_MK3_5()) {
         if (power_panic::is_ac_fault_active()) {
-#if !PRINTER_IS_PRUSA_MK3_5 // TODO fix error codes
+#if !PRINTER_IS_PRUSA_MK3_5() // TODO fix error codes
             fatal_error(ErrCode::ERR_ELECTRO_ACF_AT_INIT);
 #endif
         }
@@ -1081,6 +1052,9 @@ void ac_fault_isr() {
     power_panic_state = PPState::Triggered;
 
     // power off devices in order of power draw
+#if PRINTER_IS_PRUSA_iX()
+    buddy::hw::modularBedReset.write(buddy::hw::Pin::State::high);
+#endif
     state_buf.orig_axis_known_position = axis_known_position;
     disable_XY();
     buddy::hw::hsUSBEnable.write(buddy::hw::Pin::State::high);
@@ -1090,7 +1064,7 @@ void ac_fault_isr() {
 
     // stop motion
     if (!state_buf.nested_fault) {
-        marlin_vars()->media_SFN_path.copy_to(state_buf.media_SFN_path, sizeof(state_buf.media_SFN_path));
+        marlin_vars().media_SFN_path.copy_to(state_buf.media_SFN_path, sizeof(state_buf.media_SFN_path));
         state_buf.planner.was_paused = marlin_server::printer_paused();
         state_buf.planner.was_crashed = crash_s.did_trigger();
     }
@@ -1107,7 +1081,7 @@ void ac_fault_isr() {
         if (state_buf.planner.was_paused) {
             // crash_current_position *is* current_position while the print is paused,
             // so abuse the slot for the restore position instead
-            state_buf.crash.sdpos = media_print_get_pause_position();
+            state_buf.crash.sdpos = marlin_server::media_position();
             state_buf.crash.crash_current_position = resume.pos;
         } else {
             state_buf.crash.sdpos = crash_s.sdpos;
@@ -1150,7 +1124,7 @@ void ac_fault_isr() {
             state_buf.planner.print_speed = resume.print_speed;
         } else {
             state_buf.planner.fan_speed = thermalManager.fan_speed[0];
-            state_buf.planner.print_speed = marlin_vars()->print_speed;
+            state_buf.planner.print_speed = marlin_vars().print_speed;
         }
         state_buf.planner.target_bed = thermalManager.degTargetBed();
 #if ENABLED(MODULAR_HEATBED)
@@ -1209,15 +1183,44 @@ void ac_fault_isr() {
         crash_s.set_state(Crash_s::TRIGGERED_AC_FAULT);
     }
 
+#if ENABLED(GCODE_COMPATIBILITY_MK3)
+    static_assert(
+        std::is_same_v<
+            decltype(state_buf.planner.gcode_compatibility_mode),
+            std::underlying_type_t<GcodeSuite::GcodeCompatibilityMode>>
+        == true);
+    state_buf.planner.gcode_compatibility_mode = static_cast<uint8_t>(GcodeSuite::gcode_compatibility_mode);
+#endif
+#if ENABLED(FAN_COMPATIBILITY_MK4_MK3)
+    static_assert(
+        std::is_same_v<
+            decltype(state_buf.planner.fan_compatibility_mode),
+            std::underlying_type_t<GcodeSuite::FanCompatibilityMode>>
+        == true);
+    state_buf.planner.fan_compatibility_mode = static_cast<uint8_t>(GcodeSuite::fan_compatibility_mode);
+#endif
+
+    static_assert(
+        std::is_same_v<
+            decltype(state_buf.planner.marlin_debug_flags),
+            decltype(marlin_debug_flags)>
+        == true);
+    state_buf.planner.marlin_debug_flags = marlin_debug_flags;
+
+    // Disabling heaters & fans on dwarves wouldn't be even done before the dwarvers are disabled altogether soon
+    // We're in the ISR and Dwarf functions lock mutexes, which we cannot do here - so the simplest thing is to just skip this step altogether.
+    // BFW-6419
+#if !HAS_DWARF()
     // heaters are *already* disabled via HW, but stop temperature and fan regulation too
     thermalManager.disable_all_heaters();
     thermalManager.zero_fan_speeds();
-#if !HAS_PUPPIES() && HAS_TEMP_HEATBREAK && HAS_TEMP_HEATBREAK_CONTROL
+    #if !HAS_PUPPIES() && HAS_TEMP_HEATBREAK && HAS_TEMP_HEATBREAK_CONTROL
     thermalManager.suspend_heatbreak_fan(2000);
+    #endif
 #endif
 
     // stop & disable endstops
-    media_print_quick_stop_powerpanic();
+    marlin_server::print_quick_stop_powerpanic();
     endstops.enable_globally(false);
 
     // will continue in the main loop

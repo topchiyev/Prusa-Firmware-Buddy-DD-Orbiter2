@@ -15,7 +15,7 @@ TestResult get_test_result(Action action, Tool tool) {
     case Action::Fans:
         return merge_hotends_evaluations(
             [&](int8_t e) {
-                return evaluate_results(sr.tools[e].printFan, sr.tools[e].heatBreakFan, sr.tools[e].fansSwitched);
+                return evaluate_results(sr.tools[e].evaluate_fans());
             });
     case Action::ZAlign:
         return evaluate_results(sr.zalign);
@@ -62,7 +62,7 @@ uint64_t get_test_mask(Action action) {
     case Action::Fans:
         return stmFans;
     case Action::XYCheck:
-        return stmXYAxisWithMotorDetection;
+        return stmXYAxis;
     case Action::ZCheck:
         return stmZAxis;
     case Action::Heaters:

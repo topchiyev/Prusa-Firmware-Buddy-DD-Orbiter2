@@ -25,19 +25,22 @@
 #include "screen_home.hpp"
 #include "gcode_info.hpp"
 #include "language_eeprom.hpp"
+#include "screen_messages.hpp"
+#include <screen_splash.hpp>
 
 #include <option/has_side_leds.h>
 
-#if PRINTER_IS_PRUSA_MK4 || PRINTER_IS_PRUSA_MK3_5
+#if PRINTER_IS_PRUSA_MK4() || PRINTER_IS_PRUSA_MK3_5()
     #include "screen_fatal_warning.hpp"
 #endif
 
-#if BOARD_IS_XBUDDY || BOARD_IS_XLBUDDY
+#if BOARD_IS_XBUDDY() || BOARD_IS_XLBUDDY()
     #include "hw_configuration.hpp"
 #endif
 
+#include <option/has_selftest.h>
 #if HAS_SELFTEST()
-    #include "ScreenSelftest.hpp"
+    #include "screen_menu_selftest_snake.hpp"
 #endif
 
 #if HAS_SIDE_LEDS()
@@ -54,19 +57,14 @@
 #if HAS_LEDS()
     #include "led_animations/printer_animation_state.hpp"
 #endif
-#include "log.h"
+#include <logging/log.hpp>
 #include <printers.h>
 
-#include <option/has_selftest_snake.h>
-#if HAS_SELFTEST_SNAKE()
-    #include "screen_menu_selftest_snake.hpp"
-#endif
-
-#if PRINTER_IS_PRUSA_MK4 || PRINTER_IS_PRUSA_iX
+#if PRINTER_IS_PRUSA_MK4() || PRINTER_IS_PRUSA_iX()
     #include "MItem_love_board.hpp"
 #endif
 
-#if BOARD_IS_XBUDDY || BOARD_IS_XLBUDDY
+#if BOARD_IS_XBUDDY() || BOARD_IS_XLBUDDY()
     #include "menu_item_xlcd.hpp"
 #endif
 
@@ -76,24 +74,16 @@ using namespace buddy::hw;
 
 LOG_COMPONENT_REF(GUI);
 LOG_COMPONENT_REF(Buddy);
-LOG_COMPONENT_DEF(XLCD, LOG_SEVERITY_INFO);
-LOG_COMPONENT_DEF(LoveBoard, LOG_SEVERITY_INFO);
-extern void blockISR(); // do not want to include marlin temperature
+LOG_COMPONENT_DEF(XLCD, logging::Severity::info);
+LOG_COMPONENT_DEF(LoveBoard, logging::Severity::info);
 
 marlin_vars_t *gui_marlin_vars = 0;
 
-char gui_media_LFN[FILE_NAME_BUFFER_LEN];
-char gui_media_SFN_path[FILE_PATH_BUFFER_LEN]; //@@TODO DR - tohle pouzit na ulozeni posledni cesty
-
 Jogwheel jogwheel;
 
-MsgBuff_t &MsgCircleBuffer() {
-    static CircleStringBuffer<MSG_STACK_SIZE, MSG_MAX_LENGTH> ret;
-    return ret;
-}
+inline constexpr size_t MSG_MAX_LENGTH = 63; // status message max length
 
-void MsgCircleBuffer_cb(const char *txt) {
-    MsgCircleBuffer().push_back(txt);
+void MsgCircleBuffer_cb(char *txt) {
     // cannot open == already opened
     IScreenPrinting *const prt_screen = IScreenPrinting::GetInstance();
     if (prt_screen && (!prt_screen->GetPopUpRect().IsEmpty())) {
@@ -102,6 +92,7 @@ void MsgCircleBuffer_cb(const char *txt) {
         strlcpy((char *)msg.data(), txt, MSG_MAX_LENGTH);
         window_dlg_popup_t::Show(prt_screen->GetPopUpRect(), string_view_utf8::MakeRAM(msg.data()), POPUP_MSG_DUR_MS);
     }
+    screen_messages_data_t::message_buffer.put(txt);
 }
 
 namespace {
@@ -132,13 +123,6 @@ void make_gui_ready_to_print() {
     bool filebrowser_preview = Screens::Access()->Count() == 2 && Screens::Access()->IsScreenOpened<ScreenPrintPreview>() && Screens::Access()->IsScreenOnStack<screen_filebrowser_data_t>();
 
     if (can_print_on_current_screen || one_click_preview || filebrowser_preview) {
-        {
-            // Update printed filename from marlin_server, sample LFN+SFN atomically
-            auto lock = MarlinVarsLockGuard();
-            marlin_vars()->media_LFN.copy_to(gui_media_LFN, sizeof(gui_media_LFN), lock);
-            marlin_vars()->media_SFN_path.copy_to(gui_media_SFN_path, sizeof(gui_media_SFN_path), lock);
-        }
-
         // Handle different states of GUI before print begins
         if (can_print_on_current_screen) {
             bool have_file_browser = Screens::Access()->IsScreenOnStack<screen_filebrowser_data_t>();
@@ -159,7 +143,7 @@ void make_gui_ready_to_print() {
         Screens::Access()->Get()->Validate(); // Do not redraw after CloseAll (keep wait dialog displayed)
 
         while (!DialogHandler::Access().IsAnyOpen() // Wait for start of the print - to prevent any unwanted GUI action
-            && marlin_vars()->print_state != marlin_server::State::Idle) { // Abort if print was not started (this function is called when State::WaitGui)
+            && marlin_vars().print_state != marlin_server::State::Idle) { // Abort if print was not started (this function is called when State::WaitGui)
             // main thread is processing a print
             // wait for print screen to open, any fsm can break waiting (f.e.: Print Preview)
             gui_timers_cycle(); // refresh GUI time
@@ -176,7 +160,7 @@ void make_gui_ready_to_print() {
 
 static void log_onewire_otp() {
 #if DEVELOPMENT_ITEMS()
-    #if PRINTER_IS_PRUSA_MK4 || PRINTER_IS_PRUSA_iX
+    #if PRINTER_IS_PRUSA_MK4() || PRINTER_IS_PRUSA_iX()
     OtpStatus loveboard = buddy::hw::Configuration::Instance().get_loveboard_status();
 
     if (loveboard.data_valid) {
@@ -189,7 +173,7 @@ static void log_onewire_otp() {
     }
     #endif
 
-    #if BOARD_IS_XBUDDY || BOARD_IS_XLBUDDY
+    #if BOARD_IS_XBUDDY() || BOARD_IS_XLBUDDY()
     OtpStatus xlcd = buddy::hw::Configuration::Instance().get_xlcd_status();
 
     log_info(XLCD, "%s: Read e. %u, Repeated e. %u, Cyclic e. %u, Retried %u",
@@ -212,7 +196,7 @@ static ScreenFactory::Creator get_error_screen() {
     if (crash_dump::message_get_type() == crash_dump::MsgType::RSOD && !crash_dump::message_is_displayed()) {
         return ScreenFactory::Screen<ScreenErrorQR>;
     }
-#if PRINTER_IS_PRUSA_MK4 || PRINTER_IS_PRUSA_MK3_5
+#if PRINTER_IS_PRUSA_MK4() || PRINTER_IS_PRUSA_MK3_5()
     if (crash_dump::message_get_type() == crash_dump::MsgType::FATAL_WARNING && !crash_dump::message_is_displayed()) {
         return ScreenFactory::Screen<ScreenFatalWarning>;
     }
@@ -303,14 +287,11 @@ void gui_run(void) {
     gui_bootstrap_screen_run();
 
     marlin_client::init();
-    GCodeInfo::getInstance().Init(gui_media_LFN, gui_media_SFN_path);
 
     DialogHandler::Access(); // to create class NOW, not at first call of one of callback
     marlin_client::set_message_cb(MsgCircleBuffer_cb);
 
     marlin_client::set_event_notify(marlin_server::EVENT_MSK_DEF);
-
-    TaskDeps::provide(TaskDeps::Dependency::gui_task_ready);
 
     // Close bootstrap screen, open home screen
     Screens::Access()->Close();
@@ -330,17 +311,23 @@ void gui_run(void) {
 
     log_onewire_otp();
 
+    TaskDeps::provide(TaskDeps::Dependency::gui_ready);
+
+    // Do one initial screen loop to close the screen_splash_t and open the screen_home_t
+    // Otherwise, some FSM dialogs might possibly open over the splash screen in  DialogHandler::Access().Loop();
+    // and then be immediately closed.
+    // BFW-6193
+    Screens::Access()->Loop();
+
     // TODO make some kind of registration
     while (1) {
         gui::StartLoop();
 
         led_animation_step();
 
-        lcd::communication_check();
-
         // I must do it before screen and dialog loops
         // do not use marlin_update_vars(MARLIN_VAR_MSK(MARLIN_VAR_PRNSTATE))->print_state, it can make gui freeze in case main thread is unresponsive
-        volatile bool print_processor_waiting = marlin_vars()->print_state == marlin_server::State::WaitGui;
+        volatile bool print_processor_waiting = marlin_vars().print_state == marlin_server::State::WaitGui;
 
         DialogHandler::Access().Loop();
 
@@ -352,6 +339,7 @@ void gui_run(void) {
         }
 
         Screens::Access()->Loop();
+
         gui_loop();
         gui::EndLoop();
     }

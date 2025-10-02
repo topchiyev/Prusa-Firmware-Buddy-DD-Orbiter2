@@ -49,6 +49,8 @@
 #include "buddy/priorities_config.h"
 #include <option/has_modularbed.h>
 #include <option/has_loadcell_hx717.h>
+#include <option/has_phase_stepping.h>
+#include <option/has_i2c_expander.h>
 
 #if (!defined(PRINTER_IS_PRUSA_MINI) || !defined(PRINTER_IS_PRUSA_MK4) || !defined(PRINTER_IS_PRUSA_MK3_5) \
     || !defined(PRINTER_IS_PRUSA_XL) || !defined(PRINTER_IS_PRUSA_iX))
@@ -74,13 +76,13 @@ extern "C" void hx717_soft(); // low-priority soft read interrupt
  */
 void hw_init_spi_side_leds();
 
-#if (PRINTER_IS_PRUSA_XL && BOARD_IS_DWARF)
+#if (PRINTER_IS_PRUSA_XL() && BOARD_IS_DWARF())
     #include "hwio_pindef_XL_dwarf.h"
-#elif PRINTER_IS_PRUSA_XL && !BOARD_IS_DWARF || BOARD_IS_MODULARBED
+#elif PRINTER_IS_PRUSA_XL() && !BOARD_IS_DWARF() || BOARD_IS_MODULARBED()
     #include "hwio_pindef_XL.h"
 #else // Not special board with separate pin definition file.
 
-    #if PRINTER_IS_PRUSA_iX
+    #if PRINTER_IS_PRUSA_iX()
 inline void hw_init_spi_side_leds() {}
 
 inline constexpr SPI_HandleTypeDef *hw_get_spi_side_strip() {
@@ -113,7 +115,7 @@ inline constexpr SPI_HandleTypeDef *hw_get_spi_side_strip() {
     #define MARLIN_PORT_DUMMY   MARLIN_PORT_V
     #define MARLIN_PIN_NR_DUMMY MARLIN_PIN_NR_15
 
-    #if (BOARD_IS_XBUDDY)
+    #if (BOARD_IS_XBUDDY())
         #define MARLIN_PORT_TEMP_BOARD   MARLIN_PORT_V
         #define MARLIN_PIN_NR_TEMP_BOARD MARLIN_PIN_NR_0
 
@@ -135,7 +137,7 @@ inline constexpr SPI_HandleTypeDef *hw_get_spi_side_strip() {
         #define MARLIN_PORT_Y_DIR   MARLIN_PORT_D
         #define MARLIN_PIN_NR_Y_DIR MARLIN_PIN_NR_4
 
-        #if PRINTER_IS_PRUSA_MK3_5
+        #if PRINTER_IS_PRUSA_MK3_5()
             #define MARLIN_PORT_Z_MIN   MARLIN_PORT_A
             #define MARLIN_PIN_NR_Z_MIN MARLIN_PIN_NR_6
         #else
@@ -175,7 +177,7 @@ inline constexpr SPI_HandleTypeDef *hw_get_spi_side_strip() {
         #define MARLIN_PIN_NR_CS_Z          MARLIN_PIN_NR_15
         #define MARLIN_PORT_CS_E            MARLIN_PORT_F
         #define MARLIN_PIN_NR_CS_E          MARLIN_PIN_NR_12
-    #elif BOARD_IS_BUDDY
+    #elif BOARD_IS_BUDDY()
         #define MARLIN_PORT_TEMP_BOARD   MARLIN_PORT_V
         #define MARLIN_PIN_NR_TEMP_BOARD MARLIN_PIN_NR_0
 
@@ -245,6 +247,14 @@ inline constexpr SPI_HandleTypeDef *hw_get_spi_side_strip() {
     #define MARLIN_PORT_HW_IDENTIFY   MARLIN_PORT_A
     #define MARLIN_PIN_NR_HW_IDENTIFY MARLIN_PIN_NR_3 // ADC, unused
 
+    #if PRINTER_IS_PRUSA_iX()
+        #define MARLIN_PORT_TEMP_PSU   MARLIN_PORT_A
+        #define MARLIN_PIN_NR_TEMP_PSU MARLIN_PIN_NR_4 // ADC
+
+        #define MARLIN_PORT_TEMP_AMBIENT   MARLIN_PORT_F
+        #define MARLIN_PIN_NR_TEMP_AMBIENT MARLIN_PIN_NR_5 // ADC
+    #endif
+
     #if HAS_MODULARBED()
         #define MARLIN_PORT_TEMP_BED   MARLIN_PORT_DUMMY
         #define MARLIN_PIN_NR_TEMP_BED MARLIN_PIN_NR_DUMMY
@@ -253,10 +263,10 @@ inline constexpr SPI_HandleTypeDef *hw_get_spi_side_strip() {
         #define MARLIN_PIN_NR_TEMP_BED MARLIN_PIN_NR_4 // ADC
     #endif
 
-    #if (!PRINTER_IS_PRUSA_MK3_5)
+    #if (!PRINTER_IS_PRUSA_MK3_5())
         #define MARLIN_PORT_TEMP_HEATBREAK   MARLIN_PORT_A
         #define MARLIN_PIN_NR_TEMP_HEATBREAK MARLIN_PIN_NR_6 // ADC
-    #endif // !PRINTER_IS_PRUSA_MK3_5
+    #endif // !PRINTER_IS_PRUSA_MK3_5()
 
     #define MARLIN_PORT_TEMP_0   MARLIN_PORT_C
     #define MARLIN_PIN_NR_TEMP_0 MARLIN_PIN_NR_0
@@ -270,7 +280,7 @@ inline constexpr SPI_HandleTypeDef *hw_get_spi_side_strip() {
  * @{
  */
 // clang-format off
-    #if (BOARD_IS_BUDDY)
+    #if (BOARD_IS_BUDDY())
         #define PIN_TABLE_BOARD_SPECIFIC(MACRO_FUNCTION) \
             MACRO_FUNCTION(buddy::hw::InterruptPin, zMin, BUDDY_PIN(Z_MIN), IMode::IT_rising_falling COMMA Pull::up COMMA ISR_PRIORITY_ENDSTOP COMMA 0, endstop_ISR) \
             MACRO_FUNCTION(buddy::hw::OutputPin, yEnable, BUDDY_PIN(Y_ENA), Pin::State::high COMMA OMode::pushPull COMMA OSpeed::low, buddy::hw::noHandler) \
@@ -286,7 +296,7 @@ inline constexpr SPI_HandleTypeDef *hw_get_spi_side_strip() {
             MACRO_FUNCTION(buddy::hw::OutputPin, extFlashCs, buddy::hw::IoPort::D COMMA buddy::hw::IoPin::p7, Pin::State::high COMMA OMode::pushPull COMMA OSpeed::high, buddy::hw::noHandler) \
             MACRO_FUNCTION(buddy::hw::InputPin, fanPrintTach, buddy::hw::IoPort::E COMMA buddy::hw::IoPin::p10, IMode::input COMMA Pull::up, buddy::hw::noHandler) \
             MACRO_FUNCTION(buddy::hw::InputPin, fanHeatBreakTach, buddy::hw::IoPort::E COMMA buddy::hw::IoPin::p14, IMode::input COMMA Pull::up, buddy::hw::noHandler)
-    #elif (BOARD_IS_XBUDDY && PRINTER_IS_PRUSA_iX)
+    #elif (BOARD_IS_XBUDDY() && PRINTER_IS_PRUSA_iX())
         #define PIN_TABLE_BOARD_SPECIFIC(MACRO_FUNCTION) \
             MACRO_FUNCTION(buddy::hw::OutputPin, heaterEnable, BUDDY_PIN(HEATER_ENABLE), Pin::State::low COMMA OMode::pushPull COMMA OSpeed::low, buddy::hw::noHandler) \
             MACRO_FUNCTION(buddy::hw::OutputPin, displayCs, buddy::hw::IoPort::D COMMA buddy::hw::IoPin::p11, Pin::State::high COMMA OMode::pushPull COMMA OSpeed::high, buddy::hw::noHandler) \
@@ -312,7 +322,7 @@ inline constexpr SPI_HandleTypeDef *hw_get_spi_side_strip() {
             MACRO_FUNCTION(buddy::hw::InputPin, fsUSBOvercurrent, buddy::hw::IoPort::F COMMA buddy::hw::IoPin::p14, IMode::input COMMA Pull::none, buddy::hw::noHandler) \
             MACRO_FUNCTION(buddy::hw::InputPin, fsUSBCInt, buddy::hw::IoPort::A COMMA buddy::hw::IoPin::p9, IMode::input COMMA Pull::none, buddy::hw::noHandler) \
             MACRO_FUNCTION(buddy::hw::OutputPin, acellCs, buddy::hw::IoPort::A COMMA buddy::hw::IoPin::p10, Pin::State::high COMMA OMode::pushPull COMMA OSpeed::high, buddy::hw::noHandler) \
-            MACRO_FUNCTION(buddy::hw::InputPin, acFault, buddy::hw::IoPort::G COMMA buddy::hw::IoPin::p0, IMode::input COMMA Pull::up, buddy::hw::noHandler) \
+            MACRO_FUNCTION(buddy::hw::InterruptPin, acFault, buddy::hw::IoPort::G COMMA buddy::hw::IoPin::p0, IMode::IT_falling COMMA Pull::none COMMA ISR_PRIORITY_POWER_PANIC COMMA 0, power_panic::ac_fault_isr) \
             MACRO_FUNCTION(buddy::hw::OutputPin, extFlashCs, buddy::hw::IoPort::F COMMA buddy::hw::IoPin::p2, Pin::State::high COMMA OMode::pushPull COMMA OSpeed::high, buddy::hw::noHandler) \
             MACRO_FUNCTION(buddy::hw::InputPin, fanTach, buddy::hw::IoPort::E COMMA buddy::hw::IoPin::p10, IMode::input COMMA Pull::up, buddy::hw::noHandler) \
             MACRO_FUNCTION(buddy::hw::InputOutputPin, touch_sig, buddy::hw::IoPort::C COMMA buddy::hw::IoPin::p8, IMode::input COMMA Pull::none, buddy::hw::noHandler) \
@@ -323,7 +333,7 @@ inline constexpr SPI_HandleTypeDef *hw_get_spi_side_strip() {
             MACRO_FUNCTION(buddy::hw::InputPin, backFilamentSensorState, buddy::hw::IoPort::C COMMA buddy::hw::IoPin::p9, IMode::input COMMA Pull::none, buddy::hw::noHandler) \
             MACRO_FUNCTION(buddy::hw::InputPin, backFilamentSensorDetect, buddy::hw::IoPort::A COMMA buddy::hw::IoPin::p8, IMode::input COMMA Pull::none, buddy::hw::noHandler) \
 
-    #elif (BOARD_IS_XBUDDY && PRINTER_IS_PRUSA_MK3_5)
+    #elif (BOARD_IS_XBUDDY() && PRINTER_IS_PRUSA_MK3_5())
         #define PIN_TABLE_BOARD_SPECIFIC(MACRO_FUNCTION) \
             MACRO_FUNCTION(buddy::hw::InputPin, fSensor, buddy::hw::IoPort::F COMMA buddy::hw::IoPin::p13, IMode::input COMMA Pull::up, buddy::hw::noHandler) \
             MACRO_FUNCTION(buddy::hw::OutputPin, extruderSwitch, buddy::hw::IoPort::E COMMA buddy::hw::IoPin::p14, Pin::State::low COMMA OMode::pushPull COMMA OSpeed::very_high, buddy::hw::noHandler) \
@@ -356,7 +366,7 @@ inline constexpr SPI_HandleTypeDef *hw_get_spi_side_strip() {
             MACRO_FUNCTION(buddy::hw::InterruptPin, acFault, buddy::hw::IoPort::G COMMA buddy::hw::IoPin::p0, IMode::IT_falling COMMA Pull::none COMMA ISR_PRIORITY_POWER_PANIC COMMA 0, power_panic::ac_fault_isr) \
             MACRO_FUNCTION(buddy::hw::OutputPin, extFlashCs, buddy::hw::IoPort::F COMMA buddy::hw::IoPin::p2, Pin::State::high COMMA OMode::pushPull COMMA OSpeed::high, buddy::hw::noHandler) \
             MACRO_FUNCTION(buddy::hw::InputOutputPin, touch_sig, buddy::hw::IoPort::C COMMA buddy::hw::IoPin::p8, IMode::input COMMA Pull::none, buddy::hw::noHandler)
-    #elif (BOARD_IS_XBUDDY)
+    #elif (BOARD_IS_XBUDDY())
         #define PIN_TABLE_BOARD_SPECIFIC(MACRO_FUNCTION) \
             MACRO_FUNCTION(buddy::hw::OutputPin, heaterEnable, BUDDY_PIN(HEATER_ENABLE), Pin::State::low COMMA OMode::pushPull COMMA OSpeed::low, buddy::hw::noHandler) \
             MACRO_FUNCTION(buddy::hw::OutputPin, displayCs, buddy::hw::IoPort::D COMMA buddy::hw::IoPin::p11, Pin::State::high COMMA OMode::pushPull COMMA OSpeed::high, buddy::hw::noHandler) \
@@ -393,6 +403,13 @@ inline constexpr SPI_HandleTypeDef *hw_get_spi_side_strip() {
     #else
         #error "Unknown board."
     #endif // #if (BOARD_TYPE == BUDDY_BOARD)
+
+    #if HAS_I2C_EXPANDER()
+        #include "TCA6408A.hpp"
+        namespace buddy::hw {
+            extern TCA6408A io_expander2;
+        }
+    #endif // HAS_I2C_EXPANDER()
 // clang-format on
 
 /**
@@ -454,14 +471,14 @@ inline constexpr SPI_HandleTypeDef *hw_get_spi_side_strip() {
         MACRO_FUNCTION(buddy::hw::OutputPin, xEnable, BUDDY_PIN(X_ENA), Pin::State::high COMMA OMode::pushPull COMMA OSpeed::low, buddy::hw::noHandler) \
         MACRO_FUNCTION(buddy::hw::OutputPin, zEnable, BUDDY_PIN(Z_ENA), Pin::State::high COMMA OMode::pushPull COMMA OSpeed::low, buddy::hw::noHandler) \
         MACRO_FUNCTION(buddy::hw::OutputPin, e0Enable, BUDDY_PIN(E0_ENA), Pin::State::high COMMA OMode::pushPull COMMA OSpeed::low, buddy::hw::noHandler) \
-        MACRO_FUNCTION(buddy::hw::OutputPin, xStep, BUDDY_PIN(X_STEP), Pin::State::low COMMA OMode::pushPull COMMA OSpeed::low, buddy::hw::noHandler) \
-        MACRO_FUNCTION(buddy::hw::OutputPin, yStep, BUDDY_PIN(Y_STEP), Pin::State::low COMMA OMode::pushPull COMMA OSpeed::low, buddy::hw::noHandler) \
-        MACRO_FUNCTION(buddy::hw::OutputPin, zStep, BUDDY_PIN(Z_STEP), Pin::State::low COMMA OMode::pushPull COMMA OSpeed::low, buddy::hw::noHandler) \
-        MACRO_FUNCTION(buddy::hw::OutputPin, e0Step, BUDDY_PIN(E0_STEP), Pin::State::low COMMA OMode::pushPull COMMA OSpeed::low, buddy::hw::noHandler) \
-        MACRO_FUNCTION(buddy::hw::OutputPin, xDir, BUDDY_PIN(X_DIR), Pin::State::low COMMA OMode::pushPull COMMA OSpeed::low, buddy::hw::noHandler) \
-        MACRO_FUNCTION(buddy::hw::OutputPin, yDir, BUDDY_PIN(Y_DIR), Pin::State::low COMMA OMode::pushPull COMMA OSpeed::low, buddy::hw::noHandler) \
-        MACRO_FUNCTION(buddy::hw::OutputPin, zDir, BUDDY_PIN(Z_DIR), Pin::State::low COMMA OMode::pushPull COMMA OSpeed::low, buddy::hw::noHandler) \
-        MACRO_FUNCTION(buddy::hw::OutputPin, e0Dir, BUDDY_PIN(E0_DIR), Pin::State::low COMMA OMode::pushPull COMMA OSpeed::low, buddy::hw::noHandler) \
+        MACRO_FUNCTION(buddy::hw::OutputPin, xStep, BUDDY_PIN(X_STEP), Pin::State::low COMMA OMode::pushPull COMMA OSpeed::very_high, buddy::hw::noHandler) \
+        MACRO_FUNCTION(buddy::hw::OutputPin, yStep, BUDDY_PIN(Y_STEP), Pin::State::low COMMA OMode::pushPull COMMA OSpeed::very_high, buddy::hw::noHandler) \
+        MACRO_FUNCTION(buddy::hw::OutputPin, zStep, BUDDY_PIN(Z_STEP), Pin::State::low COMMA OMode::pushPull COMMA OSpeed::very_high, buddy::hw::noHandler) \
+        MACRO_FUNCTION(buddy::hw::OutputPin, e0Step, BUDDY_PIN(E0_STEP), Pin::State::low COMMA OMode::pushPull COMMA OSpeed::very_high, buddy::hw::noHandler) \
+        MACRO_FUNCTION(buddy::hw::OutputPin, xDir, BUDDY_PIN(X_DIR), Pin::State::low COMMA OMode::pushPull COMMA OSpeed::very_high, buddy::hw::noHandler) \
+        MACRO_FUNCTION(buddy::hw::OutputPin, yDir, BUDDY_PIN(Y_DIR), Pin::State::low COMMA OMode::pushPull COMMA OSpeed::very_high, buddy::hw::noHandler) \
+        MACRO_FUNCTION(buddy::hw::OutputPin, zDir, BUDDY_PIN(Z_DIR), Pin::State::low COMMA OMode::pushPull COMMA OSpeed::very_high, buddy::hw::noHandler) \
+        MACRO_FUNCTION(buddy::hw::OutputPin, e0Dir, BUDDY_PIN(E0_DIR), Pin::State::low COMMA OMode::pushPull COMMA OSpeed::very_high, buddy::hw::noHandler) \
         MACRO_FUNCTION(buddy::hw::OutputPin, fanPrintPwm, buddy::hw::IoPort::E COMMA buddy::hw::IoPin::p11, Pin::State::low COMMA OMode::pushPull COMMA OSpeed::high, buddy::hw::noHandler) \
         MACRO_FUNCTION(buddy::hw::OutputPin, fanHeatBreakPwm, buddy::hw::IoPort::E COMMA buddy::hw::IoPin::p9, Pin::State::low COMMA OMode::pushPull COMMA OSpeed::high, buddy::hw::noHandler)
 // clang-format on
@@ -517,6 +534,9 @@ inline constexpr SPI_HandleTypeDef *hw_get_spi_side_strip() {
 
 namespace buddy::hw {
 PIN_TABLE(DECLARE_PINS)
+#if defined(RUNTIME_PIN_TABLE)
+RUNTIME_PIN_TABLE(DECLARE_PINS)
+#endif
 #if defined(EXTENDER_PIN_TABLE)
 EXTENDER_PIN_TABLE(DECLARE_PINS)
 #endif
@@ -534,6 +554,11 @@ inline Pin::State xyProbeReadFn() {
     const bool zStall = !static_cast<bool>(buddy::hw::zDiag.read()); // TMC2130 driver has inverted diag output
     return static_cast<Pin::State>(!(loadcell.GetXYEndstop() || zStall)); // Marlin expects inverted XY PROBE endstop
 }
+#endif
+
+#if HAS_PHASE_STEPPING()
+extern const OutputPin *XStep;
+extern const OutputPin *YStep;
 #endif
 
 /**

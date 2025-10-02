@@ -14,7 +14,7 @@ enum {
 
 // this structure contain variables for rpm measuement
 // used in class CFanCtlTach
-typedef struct _fanctl_tach_t {
+struct fanctl_tach_t {
     union {
         struct { // flags:
             bool input_state : 1; //  last tacho input state (0/1)
@@ -26,7 +26,7 @@ typedef struct _fanctl_tach_t {
     uint16_t pwm_sum; // sum of ticks with pwm=1 in current cycle
     uint16_t rpm; // calculated RPM value (filtered)
     bool m_value_ready; // measure RPM done
-} fanctl_tach_t;
+};
 
 // class for software pwm control with phase-shifting
 class CFanCtlPWM {
@@ -48,17 +48,20 @@ public:
     // getters
     inline uint8_t get_min_PWM() const { return min_value; }
     inline uint8_t get_max_PWM() const { return max_value; }
-    inline PhaseShiftMode get_PhaseShiftMode() const { return (PhaseShiftMode)pha_mode; }
+    inline PhaseShiftMode get_PhaseShiftMode() const { return pha_mode; }
 
     // setters
+    inline void set_min_PWM(uint8_t val) { min_value = val; }
+    inline void set_max_PWM(uint8_t val) { max_value = val; }
+    inline void set_PhaseShiftThr(uint8_t val) { pha_thr = val; }
     void set_PWM(uint8_t new_pwm);
     inline void set_PhaseShiftMode(PhaseShiftMode new_pha_mode) { pha_mode = new_pha_mode; }
     void safeState();
 
 private:
     const buddy::hw::OutputPin &m_pin;
-    const uint8_t min_value; // minimum pwm value
-    const uint8_t max_value; // maximum pwm value
+    uint8_t min_value; // minimum pwm value
+    uint8_t max_value; // maximum pwm value
     union {
         struct { // flags:
             bool pha_ena : 1; //  phase shift enabled
@@ -69,7 +72,7 @@ private:
     uint8_t cnt; // pwm counter (value 0..max-1)
     uint8_t val; // pwm value (cached during pwm cycle)
     int8_t pha; // pwm phase shift
-    uint8_t pha_mode; // pwm phase shift mode
+    PhaseShiftMode pha_mode; // pwm phase shift mode
     uint8_t pha_thr; // pwm phase shift threshold (shifting will be enabled for pwm <= pha_thr)
     int8_t pha_max; // pwm phase shift maximum (calculated when pwm changed)
     int8_t pha_stp; // pwm phase shift step (calculated when pwm changed)
@@ -108,14 +111,13 @@ enum class skip_tacho_t : bool {
 };
 
 //
-class CFanCtl3Wire final : public CFanCtlCommon {
+class CFanCtl3Wire : public CFanCtlCommon {
 
 public:
     // constructor
     CFanCtl3Wire(const buddy::hw::OutputPin &pinOut, const buddy::hw::InputPin &pinTach, uint8_t minPWM, uint8_t maxPWM,
-        uint16_t minRPM, uint16_t maxRPM, uint8_t thrPWM, is_autofan_t autofan, skip_tacho_t skip_tacho);
+        uint16_t minRPM, uint16_t maxRPM, uint8_t thrPWM, is_autofan_t autofan, skip_tacho_t skip_tacho, uint8_t min_pwm_to_measure_rpm);
 
-public:
     virtual void tick() override; // tick callback from timer interrupt
 
     // getters
@@ -127,7 +129,7 @@ public:
     { return unscalePWM(m_PWMValue); }
     virtual uint16_t getActualRPM() const override // get actual (measured) RPM
     { return m_tach.getRPM(); }
-    uint8_t getPhaseShiftMode() const // get PhaseShiftMode
+    CFanCtlPWM::PhaseShiftMode getPhaseShiftMode() const // get PhaseShiftMode
     { return m_pwm.get_PhaseShiftMode(); }
     virtual bool getRPMIsOk() override;
     inline bool isAutoFan() const // get fan type
@@ -141,7 +143,7 @@ public:
 
     // setters
     virtual bool setPWM(uint16_t pwm) override; // set PWM value - switch to non closed-loop mode
-    bool setPhaseShiftMode(uint8_t psm); // set phase shift mode (none/triangle/random)
+    bool setPhaseShiftMode(CFanCtlPWM::PhaseShiftMode psm); // set phase shift mode (none/triangle/random)
     void safeState();
 
     inline void setSkipTacho(skip_tacho_t skip_tacho) {
@@ -152,12 +154,14 @@ public:
     virtual void enterSelftestMode() override;
     virtual void exitSelftestMode() override;
     virtual bool selftestSetPWM(uint8_t pwm) override; // sets pwm in selftest, doesn't work outside selftest
-private:
+
+protected:
     uint16_t m_Ticks; // tick counter - used for starting and measurement
     uint16_t m_Result;
     FanState m_State; // fan control state
     uint8_t m_PWMValue; // current pwm value
     uint8_t m_Edges; // edge counter - used for starting and measurement
+    uint8_t min_pwm_to_measure_rpm;
     is_autofan_t is_autofan; // autofan restores temp differently (used in selftest)
     CFanCtlPWM m_pwm;
     CFanCtlTach m_tach;

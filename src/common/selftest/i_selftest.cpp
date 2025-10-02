@@ -2,12 +2,11 @@
 
 #include "i_selftest.hpp"
 #include "feature/prusa/crash_recovery.hpp"
-#include "log.h"
+#include <logging/log.hpp>
 #include "marlin_server.hpp"
-#include <guiconfig/wizard_config.hpp>
 #include "filament_sensors_handler.hpp"
 
-LOG_COMPONENT_DEF(Selftest, LOG_SEVERITY_DEBUG);
+LOG_COMPONENT_DEF(Selftest, logging::Severity::debug);
 
 ISelftest::ISelftest()
     : m_Time(0) {
@@ -16,20 +15,20 @@ ISelftest::ISelftest()
 void ISelftest::phaseStart() {
     FSensors_instance().IncEvLock(); // block autoload and M600
     marlin_server::set_exclusive_mode(1);
+#if HAS_PHASE_STEPPING()
+    phstep_restorer.set_state(false);
+#endif
 #if ENABLED(CRASH_RECOVERY)
     crash_s.set_state(Crash_s::SELFTEST);
 #endif
-#if HAS_PHASE_STEPPING()
-    ph_disabler = std::optional { phase_stepping::EnsureDisabled {} };
-#endif
-    FSM_CREATE__LOGGING(Selftest); // TODO data 0/1 selftest/wizard
+    marlin_server::fsm_create(PhasesSelftest::_none);
 }
 
 void ISelftest::phaseFinish() {
-    FSM_DESTROY__LOGGING(Selftest);
+    marlin_server::fsm_destroy(ClientFSM::Selftest);
     marlin_server::set_exclusive_mode(0);
 #if HAS_PHASE_STEPPING()
-    ph_disabler.reset();
+    phstep_restorer.release();
 #endif
 #if ENABLED(CRASH_RECOVERY)
     crash_s.set_state(Crash_s::IDLE);

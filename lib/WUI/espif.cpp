@@ -1,6 +1,7 @@
 #include "espif.h"
 
 #include <algorithm>
+#include <array>
 #include <bit>
 #include <cstring>
 #include <cstdint>
@@ -11,37 +12,33 @@
 #include <mutex>
 
 #include <FreeRTOS.h>
-#include <common/freertos_mutex.hpp>
+#include <freertos/binary_semaphore.hpp>
+#include <freertos/mutex.hpp>
+#include <common/metric.h>
+#include <freertos/queue.hpp>
 #include <task.h>
 #include <semphr.h>
 #include <ccm_thread.hpp>
 #include <bsod.h>
 #include <lwip/netifapi.h>
 
-#include "main.h"
-#include "../metric.h"
+#include <buddy/esp_uart_dma_buffer_rx.hpp>
+#include "data_exchange.hpp"
 #include "pbuf_rx.h"
+#include "scope_guard.hpp"
 #include "wui.h"
 #include <tasks.hpp>
 #include <option/has_embedded_esp32.h>
 #include <random.h>
-
-extern "C" {
-#include "stm32_port.h"
-}
-
-#include "ff.h"
-#include "wui_api.h"
 
 #include <lwip/def.h>
 #include <lwip/ethip6.h>
 #include <lwip/etharp.h>
 #include <lwip/sys.h>
 
-#include "log.h"
-#include <Marlin/src/inc/MarlinConfigPre.h>
+#include <logging/log.hpp>
 
-LOG_COMPONENT_DEF(ESPIF, LOG_SEVERITY_INFO);
+LOG_COMPONENT_DEF(ESPIF, logging::Severity::info);
 
 static_assert(std::endian::native == std::endian::little, "STM<->ESP protocol assumes all involved CPUs are little endian.");
 static_assert(ETHARP_HWADDR_LEN == 6);
@@ -86,24 +83,25 @@ enum ESPIFOperatingMode {
     ESPIF_UNINITIALIZED_MODE,
     ESPIF_WAIT_INIT,
     ESPIF_NEED_AP,
+    ESPIF_CONNECTING_AP,
     ESPIF_RUNNING_MODE,
-    ESPIF_FLASHING_MODE,
+    ESPIF_SCANNING_MODE,
     ESPIF_WRONG_FW,
+    ESPIF_FLASHING_ERROR_NOT_CONNECTED,
+    ESPIF_FLASHING_ERROR_OTHER,
 };
 
 enum MessageType {
     MSG_DEVINFO_V2 = 0,
     MSG_CLIENTCONFIG_V2 = 6,
     MSG_PACKET_V2 = 7,
+    MSG_SCAN_START = 8,
+    MSG_SCAN_STOP = 9,
+    MSG_SCAN_AP_CNT = 10,
+    MSG_SCAN_AP_GET = 11,
 };
 
-#if PRINTER_IS_PRUSA_XL
-// ESP32 FW version
-static constexpr uint8_t SUPPORTED_FW_VERSION = 10;
-#else
-// ESP8266 FW version
-static constexpr uint8_t SUPPORTED_FW_VERSION = 11;
-#endif
+static constexpr uint8_t SUPPORTED_FW_VERSION = 12;
 
 // NIC state
 static std::atomic<uint8_t> fw_version;
@@ -113,11 +111,10 @@ static std::atomic<netif *> active_esp_netif;
 // 10 seconds (20 health-check loops spaced 500ms from each other)
 static std::atomic<uint8_t> init_countdown = 20;
 static std::atomic<bool> seen_intron = false;
-static std::atomic<bool> seen_rx_packet = false;
+static std::atomic<bool> seen_pong = false;
+static std::atomic<bool> reset_parser = false;
 
 // UART
-static const uint32_t NIC_UART_BAUDRATE = 4600000;
-static const uint32_t FLASH_UART_BAUDRATE = 115200;
 static std::atomic<bool> esp_detected;
 // Have we seen the ESP alive at least once?
 // (so we never ever report it as not there or no firmware or whatever).
@@ -125,8 +122,7 @@ static std::atomic<bool> esp_was_ok = false;
 uint8_t dma_buffer_rx[RX_BUFFER_LEN];
 static size_t old_dma_pos = 0;
 static freertos::Mutex uart_write_mutex;
-static bool espif_initialized = false;
-static bool uart_has_recovered_from_error = false;
+static std::atomic<bool> uart_error_occured = false;
 // Note: We never transmit more than one message so we might as well allocate statically.
 static struct __attribute__((packed)) {
     uint8_t intron[8];
@@ -140,11 +136,36 @@ static struct __attribute__((packed)) {
     .size = 0,
 };
 
+struct APInfo {
+    std::span<uint8_t> ssid;
+    uint8_t ap_index;
+    bool requires_password;
+};
+
+struct ScanData {
+    std::atomic<bool> is_running;
+    APInfo result;
+    uint16_t ap_ssid_read = 0;
+    ESPIFOperatingMode prescan_op_mode = ESPIF_UNINITIALIZED_MODE;
+    std::atomic<uint8_t> ap_count = 0;
+    static constexpr auto SYNC_EVENT_TIMEOUT = 10 /*ms*/;
+    static freertos::Mutex get_ap_info_mutex;
+    static freertos::Queue<APInfo, 1> ap_info_queue;
+};
+
+freertos::Mutex ScanData::get_ap_info_mutex {};
+freertos::Queue<APInfo, 1> ScanData::ap_info_queue;
+
+static ScanData scan;
+
 static void uart_input(uint8_t *data, size_t size, struct netif *netif);
 
-void espif_receive_data(UART_HandleTypeDef *huart) {
-    LWIP_UNUSED_ARG(huart);
-    notify_esp_data();
+void espif_receive_data() {
+    if (running_in_tester_mode()) {
+        // block esp in tester mode
+    } else {
+        notify_esp_data();
+    }
 }
 
 static void hard_reset_device() {
@@ -154,33 +175,26 @@ static void hard_reset_device() {
     esp_detected = false;
 }
 
+static bool can_recieve_data(ESPIFOperatingMode mode);
+
 void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart) {
-    if (huart->Instance == UART_INSTANCE_FOR(esp) && (huart->ErrorCode & HAL_UART_ERROR_NE || huart->ErrorCode & HAL_UART_ERROR_FE)) {
-        __HAL_UART_DISABLE_IT(huart, UART_IT_IDLE);
-        HAL_UART_DeInit(huart);
-        if (HAL_UART_Init(huart) != HAL_OK) {
-            Error_Handler();
-        }
-        assert(can_be_used_by_dma(dma_buffer_rx));
-        if (HAL_UART_Receive_DMA(huart, (uint8_t *)dma_buffer_rx, RX_BUFFER_LEN) != HAL_OK) {
-            Error_Handler();
-        }
-        old_dma_pos = 0;
-        __HAL_UART_ENABLE_IT(huart, UART_IT_IDLE);
-        uart_has_recovered_from_error = true;
-        esp_detected = true;
+    if (huart == &UART_HANDLE_FOR(esp)) {
+        uart_error_occured = true;
     }
 }
 
 static bool is_running(ESPIFOperatingMode mode) {
     switch (mode) {
-    case ESPIF_FLASHING_MODE:
     case ESPIF_UNINITIALIZED_MODE:
+    case ESPIF_FLASHING_ERROR_NOT_CONNECTED:
+    case ESPIF_FLASHING_ERROR_OTHER:
     case ESPIF_WRONG_FW:
+    case ESPIF_SCANNING_MODE:
         return false;
     case ESPIF_WAIT_INIT:
     case ESPIF_NEED_AP:
     case ESPIF_RUNNING_MODE:
+    case ESPIF_CONNECTING_AP:
         return true;
     }
 
@@ -188,75 +202,48 @@ static bool is_running(ESPIFOperatingMode mode) {
     return false;
 }
 
-static TaskHandle_t espif_task = nullptr;
-static SemaphoreHandle_t tx_semaphore = nullptr;
-static HAL_StatusTypeDef tx_result;
-static bool tx_waiting = false;
-static pbuf *tx_pbuf = nullptr; // only valid when tx_waiting == true
+static bool can_recieve_data(ESPIFOperatingMode mode) {
+    switch (mode) {
+    case ESPIF_UNINITIALIZED_MODE:
+    case ESPIF_FLASHING_ERROR_OTHER:
+    case ESPIF_WRONG_FW:
+        return false;
+    case ESPIF_FLASHING_ERROR_NOT_CONNECTED:
+    case ESPIF_WAIT_INIT:
+    case ESPIF_NEED_AP:
+    case ESPIF_RUNNING_MODE:
+    case ESPIF_CONNECTING_AP:
+    case ESPIF_SCANNING_MODE:
+        return true;
+    }
+
+    assert(0);
+    return false;
+}
+
+// A semaphore by which an interrupt informs a (single) initiating task that
+// its DMA transfer into the UART is finished.
+//
+// The atomic pointer to this is additional safety measure. This way we can
+// prove (and double-check by asserts) that we get exactly one release for one
+// request. Using some other, unrelated variable to make sure could be OK, but
+// it would be significantly harder to prove that.
+static freertos::BinarySemaphore tx_semaphore;
+static std::atomic<freertos::BinarySemaphore *> tx_semaphore_active;
+
+struct PBufDeleter {
+    inline void operator()(pbuf *data) {
+        pbuf_free(data);
+    }
+};
+using pbuf_smart = std::unique_ptr<pbuf, PBufDeleter>;
+using pbuf_variant = std::variant<pbuf *, pbuf_smart>;
+static pbuf_variant tx_pbuf = nullptr; // only valid when tx_waiting == true
 
 void espif_tx_callback() {
-    // This is an interrupt handler for UART transmit completion. We want
-    // to keep it short, delegate to `espif_task`, waking it up if possible.
-    // Note that we can't simply `assert(espif_task)` because transmit may
-    // happen even before `espif_task` is created.
-    if (espif_task != nullptr) {
-        BaseType_t higher_priority_task_woken = pdFALSE;
-        vTaskNotifyGiveFromISR(espif_task, &higher_priority_task_woken);
-        portYIELD_FROM_ISR(higher_priority_task_woken);
-    }
-}
-
-static void espif_task_step() {
-    // block indefinitely until ISR wakes us...
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-    // ...woken up, do something
-
-    // Note that we can't simply `assert(tx_waiting)` because transmit may
-    // be initiated by code outside of the espif module.
-    if (tx_waiting) {
-        if (tx_pbuf) {
-            if constexpr (!option::has_embedded_esp32) {
-                // Predictive flow control - delay for ESP to load big enough buffer into UART driver
-                // This is hotfix for ESP8266 not supplying buffers fast enough
-                // Possibly, this slows down upload a little bit, but it is still faster than handling corruption.
-                osDelay(1);
-            }
-
-            uint8_t *data = (uint8_t *)tx_pbuf->payload;
-            size_t size = tx_pbuf->len;
-            assert(can_be_used_by_dma(data));
-            tx_pbuf = tx_pbuf->next;
-            tx_result = HAL_UART_Transmit_DMA(&ESP_UART_HANDLE, data, size);
-            if (tx_result != HAL_OK) {
-                log_error(ESPIF, "HAL_UART_Transmit_DMA() failed: %d", tx_result);
-                tx_waiting = false;
-                xSemaphoreGive(tx_semaphore);
-            }
-        } else {
-            tx_waiting = false;
-            xSemaphoreGive(tx_semaphore);
-        }
-    }
-}
-
-static void espif_task_run(void const *) {
-    for (;;) {
-        espif_task_step();
-    }
-}
-
-void espif_task_create() {
-    assert(tx_semaphore == nullptr && espif_task == nullptr);
-
-    tx_semaphore = xSemaphoreCreateBinary();
-    if (tx_semaphore == nullptr) {
-        bsod("espif_task_create (semaphore)");
-    }
-
-    osThreadCCMDef(esp_task, espif_task_run, TASK_PRIORITY_ESP, 0, 128);
-    espif_task = osThreadCreate(osThread(esp_task), nullptr);
-    if (espif_task == nullptr) {
-        bsod("espif_task_create (task)");
+    if (auto *semaphore = tx_semaphore_active.exchange(nullptr); semaphore != nullptr) {
+        long woken = semaphore->release_from_isr();
+        portYIELD_FROM_ISR(woken);
     }
 }
 
@@ -267,29 +254,61 @@ static void espif_tx_update_metrics(uint32_t len) {
     metric_record_custom(&metric_esp_out, " sent=%" PRIu32 "i", bytes_sent);
 }
 
-[[nodiscard]] static err_t espif_tx_raw(uint8_t message_type, uint8_t message_byte, pbuf *p) {
+// FIXME: This casually uses HAL_StatusTypeDef as a err_t, which works for the OK case (both 0), but it is kinda sketchy.
+static err_t espif_tx_buffer(const uint8_t *data, size_t len) {
+    // We are supposed to be under a mutex by the caller.
+    [[maybe_unused]] auto old_semaphore = tx_semaphore_active.exchange(&tx_semaphore);
+    assert(old_semaphore == nullptr);
+    assert(can_be_used_by_dma(data));
+    HAL_StatusTypeDef tx_result = HAL_UART_Transmit_DMA(&ESP_UART_HANDLE, data, len);
+
+    if (tx_result == HAL_OK) {
+        tx_semaphore.acquire();
+    } else {
+        [[maybe_unused]] auto withdrawn = tx_semaphore_active.exchange(nullptr);
+        // It's the one we put in
+        assert(withdrawn == &tx_semaphore);
+    }
+
+    return tx_result;
+}
+
+// FIXME: This casually uses HAL_StatusTypeDef as a err_t, which works for the OK case (both 0), but it is kinda sketchy.
+[[nodiscard]] static err_t espif_tx_raw(uint8_t message_type, uint8_t message_byte, pbuf_variant p) {
     std::lock_guard lock { uart_write_mutex };
 
-    const uint16_t size = p ? p->tot_len : 0;
+    const uint16_t size = std::visit([](const auto &pbuf) { return pbuf != nullptr ? pbuf->tot_len : 0; }, p);
     espif_tx_update_metrics(sizeof(tx_message) + size);
     tx_message.type = message_type;
     tx_message.byte = message_byte;
     tx_message.size = htons(size);
 
-    assert(!tx_waiting);
-    taskENTER_CRITICAL();
-    tx_waiting = true;
-    tx_pbuf = p;
-    assert(can_be_used_by_dma(&tx_message));
-    HAL_StatusTypeDef tx_result = HAL_UART_Transmit_DMA(&ESP_UART_HANDLE, (uint8_t *)&tx_message, sizeof(tx_message));
-    if (tx_result == HAL_OK) {
-        taskEXIT_CRITICAL();
-        xSemaphoreTake(tx_semaphore, portMAX_DELAY);
-    } else {
-        tx_waiting = false;
-        taskEXIT_CRITICAL();
+    auto tx_result = espif_tx_buffer((const uint8_t *)&tx_message, sizeof(tx_message));
+    if (tx_result != HAL_OK) {
         log_error(ESPIF, "HAL_UART_Transmit_DMA() failed: %d", tx_result);
+        return tx_result;
     }
+
+    pbuf *tx_pbuf;
+    if (std::holds_alternative<pbuf *>(p)) {
+        tx_pbuf = std::get<pbuf *>(p);
+    } else {
+        tx_pbuf = std::get<pbuf_smart>(p).get();
+    }
+
+    while (tx_pbuf != nullptr) {
+        // Predictive flow control - delay for ESP to load big enough buffer into UART driver
+        // This is hotfix for not supplying buffers fast enough
+        // Possibly, this slows down upload a little bit, but it is still faster than handling corruption.
+        osDelay(1);
+        tx_result = espif_tx_buffer((const uint8_t *)tx_pbuf->payload, tx_pbuf->len);
+        if (tx_result != HAL_OK) {
+            log_error(ESPIF, "HAL_UART_Transmit_DMA() failed: %d", tx_result);
+            return tx_result;
+        }
+        tx_pbuf = tx_pbuf->next;
+    }
+
     return tx_result;
 }
 
@@ -300,12 +319,18 @@ static void espif_tx_update_metrics(uint32_t len) {
 }
 
 [[nodiscard]] static err_t espif_tx_msg_clientconfig_v2(const char *ssid, const char *pass) {
-    // Generate new intron
-    uint8_t new_intron[8];
+    if (scan.is_running) {
+        log_error(ESPIF, "Client config while running scan");
+        return ERR_IF;
+    }
+
+    std::array<uint8_t, sizeof(tx_message.intron)> new_intron {};
+
     for (uint i = 0; i < 2; i++) {
         new_intron[i] = tx_message.intron[i];
     }
-    for (uint i = 2; i < sizeof(tx_message.intron); i++) {
+
+    for (uint i = 2; i < new_intron.size(); i++) {
         new_intron[i] = rand_u();
     }
 
@@ -313,24 +338,32 @@ static void espif_tx_update_metrics(uint32_t len) {
     const uint8_t pass_len = strlen(pass);
     const uint16_t length = sizeof(new_intron) + sizeof(ssid_len) + ssid_len + sizeof(pass_len) + pass_len;
 
-    pbuf *p = pbuf_alloc(PBUF_RAW, length, PBUF_RAM);
-    if (!p) {
+    auto pbuf = pbuf_smart { pbuf_alloc(PBUF_RAW, length, PBUF_RAM) };
+    if (!pbuf) {
+        log_error(ESPIF, "Low mem for client config");
         return ERR_MEM;
     }
+
     {
-        assert(p->tot_len == length);
-        uint8_t *buffer = (uint8_t *)p->payload;
-        buffer = buffer_append_unsafe(buffer, new_intron, sizeof(new_intron));
+        assert(pbuf->tot_len == length);
+        uint8_t *buffer = (uint8_t *)pbuf->payload;
+        buffer = buffer_append_unsafe(buffer, new_intron.data(), sizeof(new_intron));
         buffer = buffer_append_unsafe(buffer, &ssid_len, sizeof(ssid_len));
         buffer = buffer_append_unsafe(buffer, (uint8_t *)ssid, ssid_len);
         buffer = buffer_append_unsafe(buffer, &pass_len, sizeof(pass_len));
         buffer = buffer_append_unsafe(buffer, (uint8_t *)pass, pass_len);
-        assert(buffer == (uint8_t *)p->payload + length);
+        assert(buffer == (uint8_t *)pbuf->payload + length);
     }
 
-    err_t err = espif_tx_raw(MSG_CLIENTCONFIG_V2, 0, p);
-    memcpy(tx_message.intron, new_intron, sizeof(tx_message.intron));
-    pbuf_free(p);
+    err_t err = espif_tx_raw(MSG_CLIENTCONFIG_V2, 0, pbuf_variant { std::move(pbuf) });
+    if (err == ERR_OK) {
+        std::lock_guard lock { uart_write_mutex };
+        std::copy_n(new_intron.begin(), sizeof(tx_message.intron), tx_message.intron);
+        log_info(ESPIF, "Client config complete, have new intron");
+    } else {
+        log_error(ESPIF, "Client config failed: %d", static_cast<int>(err));
+    }
+
     return err;
 }
 
@@ -339,32 +372,46 @@ static void espif_tx_update_metrics(uint32_t len) {
     return espif_tx_raw(MSG_PACKET_V2, up, p);
 }
 
-static err_t espif_reconfigure_uart(const uint32_t baudrate) {
-    ESP_UART_HANDLE.Init.BaudRate = baudrate;
-    int hal_uart_res = HAL_UART_Init(&ESP_UART_HANDLE);
-    if (hal_uart_res != HAL_OK) {
-        log_error(ESPIF, "HAL_UART_Init() failed: %d", hal_uart_res);
-        return ERR_IF;
-    }
-
-    assert(can_be_used_by_dma(dma_buffer_rx));
-    int hal_dma_res = HAL_UART_Receive_DMA(&ESP_UART_HANDLE, (uint8_t *)dma_buffer_rx, RX_BUFFER_LEN);
-    if (hal_dma_res != HAL_OK) {
-        log_error(ESPIF, "HAL_UART_Receive_DMA() failed: %d", hal_dma_res);
-        return ERR_IF;
-    }
-
-    return ERR_OK;
-}
-
 void espif_input_once(struct netif *netif) {
-    /* Read data */
-    size_t pos = 0;
+    if (!can_recieve_data(esp_operating_mode)) {
+        return;
+    }
 
-    /* Read data */
+    bool error = true;
+    uart_error_occured.compare_exchange_strong(error, false);
+    if (error) {
+        // FIXME: There is a burst of these errors after the ESP boots, because bootloader prints
+        //        on the serial line with different baudrate.
+        //        It could help to only start receiving after some time, but we do not
+        //        want to miss the initial packet from our ESP firmware.
+        //        It doesn't matter too much besides spamming the log, so this remains
+        //        to be fixed later...
+        log_warning(ESPIF, "Recovering from UART error");
+        UART_HandleTypeDef *huart = &UART_HANDLE_FOR(esp);
+
+        __HAL_UART_DISABLE_IT(huart, UART_IT_IDLE);
+        auto enable_idle_iterrupt = ScopeGuard { [&] { __HAL_UART_ENABLE_IT(huart, UART_IT_IDLE); } };
+
+        HAL_UART_DeInit(huart);
+        if (const HAL_StatusTypeDef status = HAL_UART_Init(huart); status != HAL_OK) {
+            log_warning(ESPIF, "HAL_UART_Init() failed: %d", status);
+            uart_error_occured = true;
+            return;
+        }
+        assert(can_be_used_by_dma(dma_buffer_rx));
+        if (const HAL_StatusTypeDef status = HAL_UART_Receive_DMA(huart, (uint8_t *)dma_buffer_rx, RX_BUFFER_LEN); status != HAL_OK) {
+            log_warning(ESPIF, "HAL_UART_Receive_DMA() failed: %d", status);
+            uart_error_occured = true;
+            return;
+        }
+        old_dma_pos = 0;
+
+        return;
+    }
+
     uint32_t dma_bytes_left = __HAL_DMA_GET_COUNTER(ESP_UART_HANDLE.hdmarx); // no. of bytes left for buffer full
-    pos = sizeof(dma_buffer_rx) - dma_bytes_left;
-    if (pos != old_dma_pos && is_running(esp_operating_mode)) {
+    const size_t pos = sizeof(dma_buffer_rx) - dma_bytes_left;
+    if (pos != old_dma_pos) {
         if (pos > old_dma_pos) {
             uart_input(&dma_buffer_rx[old_dma_pos], pos - old_dma_pos, netif);
         } else {
@@ -396,6 +443,11 @@ static void process_mac(uint8_t *data, struct netif *netif) {
         }
         esp_operating_mode = ESPIF_NEED_AP;
         esp_was_ok = true;
+        log_info(ESPIF, "Waiting for AP");
+    } else {
+        // FIXME: Actually, the ESP sends the MAC twice during it's lifetime.
+        // BFW-5609.
+        log_error(ESPIF, "ESP operating mode mismatch: %d", static_cast<int>(old));
     }
 }
 
@@ -406,16 +458,117 @@ bool espif_link() {
 static void process_link_change(bool link_up, struct netif *netif) {
     assert(netif != nullptr);
     if (link_up) {
+        if (!scan.is_running) {
+            // Don't change the esp mode if the scan is running
+            esp_operating_mode = ESPIF_RUNNING_MODE;
+        }
         if (!associated.exchange(true)) {
             netifapi_netif_set_link_up(netif);
-            log_info(ESPIF, "Link went up");
         }
     } else {
         if (associated.exchange(false)) {
-            log_info(ESPIF, "Link went down");
             netifapi_netif_set_link_down(netif);
         }
     }
+}
+
+[[nodiscard]] err_t espif_scan_start() {
+    return espif::scan::start();
+}
+
+[[nodiscard]] err_t espif::scan::start() {
+    // TODO: Validate that we can start a scan
+    ::scan.is_running.exchange(true);
+
+    const auto err = espif_tx_raw(MSG_SCAN_START, 0, nullptr);
+
+    if (err == ERR_OK) {
+        ::scan.prescan_op_mode = esp_operating_mode.exchange(ESPIF_SCANNING_MODE);
+        ::scan.ap_count = 0;
+    } else {
+        ::scan.is_running.exchange(false);
+    }
+    return err;
+}
+
+bool espif_scan_is_running() { return espif::scan::is_running(); }
+bool espif::scan::is_running() { return ::scan.is_running.load(std::memory_order_relaxed); }
+
+[[nodiscard]] err_t espif_scan_stop() {
+    return espif::scan::stop();
+}
+
+[[nodiscard]] err_t espif::scan::stop() {
+    if (!::scan.is_running.load(std::memory_order_relaxed)) {
+        log_error(ESPIF, "Unable to stop scan if none is running. Ivalid state: %d", esp_operating_mode.load());
+        return ERR_IF;
+    }
+
+    const auto err = espif_tx_raw(MSG_SCAN_STOP, 0, nullptr);
+    if (err == ERR_OK) {
+        ::scan.is_running.exchange(false);
+        auto expected = ESPIF_SCANNING_MODE;
+        esp_operating_mode.compare_exchange_weak(expected, ::scan.prescan_op_mode);
+    }
+    return err;
+}
+
+[[nodiscard]] uint8_t espif_scan_get_ap_count() {
+    return espif::scan::get_ap_count();
+}
+
+uint8_t espif::scan::get_ap_count() {
+    return ::scan.ap_count.load();
+}
+
+[[nodiscard]] err_t espif_scan_get_ap_ssid(uint8_t index, uint8_t *ssid_buffer, uint8_t ssid_len, bool *needs_password) {
+    if (ssid_buffer == nullptr || needs_password == nullptr) {
+        return ERR_IF;
+    }
+    return espif::scan::get_ap_info(index, std::span { ssid_buffer, ssid_len }, *needs_password);
+}
+
+[[nodiscard]] err_t espif::scan::get_ap_info(uint8_t index, std::span<uint8_t> buffer, bool &needs_password) {
+    assert(index < ::scan.ap_count);
+    assert(buffer.size() >= config_store_ns::wifi_max_ssid_len);
+    std::lock_guard lock(ScanData::get_ap_info_mutex);
+    ::scan.result.ssid = buffer;
+
+    int tries = 4;
+
+    err_t last_error = ERR_OK;
+    APInfo info {};
+    while (tries >= 0) {
+        --tries;
+        const auto err = espif_tx_raw(MSG_SCAN_AP_GET, index, nullptr);
+
+        if (err != ERR_OK) {
+            last_error = err;
+            continue;
+        }
+
+        // There can be some old data in the queue if we just didn't make the timeout
+        if (ScanData::ap_info_queue.try_receive(info, ScanData::SYNC_EVENT_TIMEOUT) && info.ap_index == index && info.ssid.data() == buffer.data()) {
+            last_error = ERR_OK;
+            break;
+        } else {
+            last_error = ERR_IF;
+        }
+    }
+
+    if (last_error != ERR_OK) {
+        return last_error;
+    }
+    needs_password = info.requires_password;
+    return ERR_OK;
+}
+
+static void process_scan_ap_count(uint8_t ap_count) {
+    scan.ap_count.exchange(ap_count);
+}
+
+static void process_scan_ssid() {
+    ScanData::ap_info_queue.send(::scan.result);
 }
 
 static void uart_input(uint8_t *data, size_t size, struct netif *netif) {
@@ -436,6 +589,7 @@ static void uart_input(uint8_t *data, size_t size, struct netif *netif) {
         PacketData,
         PacketDataThrowaway,
         MACData,
+        APData,
     } state
         = Intron;
 
@@ -451,6 +605,22 @@ static void uart_input(uint8_t *data, size_t size, struct netif *netif) {
     static struct pbuf *rx_buff = NULL; // First RX pbuf for current packet (chain head)
     static struct pbuf *rx_buff_cur = NULL; // Current pbuf for data receive (part of rx_buff chain)
     static uint32_t rx_read = 0; // Amount of bytes already read into rx_buff_cur
+
+    bool did_reset = true;
+    if (reset_parser.compare_exchange_strong(did_reset, false, std::memory_order_release, std::memory_order_relaxed)) {
+        log_info(ESPIF, "Reseting uart input parser");
+        state = Intron;
+        rx_len = 0;
+        rx_read = 0;
+        intron_read = 0;
+        mac_read = 0;
+        scan.ap_ssid_read = 0;
+        if (rx_buff != nullptr) {
+            pbuf_free(rx_buff);
+            rx_buff = nullptr;
+            rx_buff_cur = nullptr;
+        }
+    }
 
     const uint8_t *end = &data[size];
     for (uint8_t *c = &data[0]; c < end;) {
@@ -474,6 +644,8 @@ static void uart_input(uint8_t *data, size_t size, struct netif *netif) {
             switch (message_type) {
             case MSG_DEVINFO_V2:
             case MSG_PACKET_V2:
+            case MSG_SCAN_AP_GET:
+            case MSG_SCAN_AP_CNT:
                 state = HeaderByte1;
                 break;
             default:
@@ -492,6 +664,18 @@ static void uart_input(uint8_t *data, size_t size, struct netif *netif) {
                 } else {
                     state = HeaderByte2;
                 }
+                break;
+            case MSG_SCAN_AP_CNT:
+                process_scan_ap_count(*c++);
+                state = HeaderByte2;
+                break;
+            case MSG_SCAN_AP_GET:
+                state = HeaderByte2;
+                ::scan.result.ap_index = *c++;
+                break;
+            case MSG_SCAN_STOP:
+                state = HeaderByte2;
+                c++;
                 break;
             case MSG_PACKET_V2:
                 process_link_change(*c++, netif);
@@ -514,6 +698,20 @@ static void uart_input(uint8_t *data, size_t size, struct netif *netif) {
             }
             break;
 
+        case APData:
+            assert(rx_len == 33);
+
+            while (c < end && scan.ap_ssid_read < config_store_ns::wifi_max_ssid_len) {
+                scan.result.ssid[scan.ap_ssid_read++] = *c++;
+            }
+            if (scan.ap_ssid_read == config_store_ns::wifi_max_ssid_len && c != end) {
+                scan.result.requires_password = static_cast<bool>(*c++);
+                process_scan_ssid();
+                scan.ap_ssid_read = 0;
+                state = Intron;
+            }
+            break;
+
         case HeaderByte2:
             rx_len = (*c++) << 8;
             state = HeaderByte3;
@@ -525,9 +723,16 @@ static void uart_input(uint8_t *data, size_t size, struct netif *netif) {
             case MSG_DEVINFO_V2:
                 state = MACData;
                 break;
+            case MSG_SCAN_AP_GET:
+                state = APData;
+                break;
+            case MSG_SCAN_AP_CNT:
+                state = Intron;
+                break;
             case MSG_PACKET_V2:
                 if (rx_len == 0) {
                     state = Intron;
+                    seen_pong = true;
                     break;
                 }
                 rx_buff = pbuf_alloc_rx(rx_len);
@@ -546,7 +751,6 @@ static void uart_input(uint8_t *data, size_t size, struct netif *netif) {
                 state = Intron;
             }
             break;
-
         case PacketData: {
             // Copy input to current pbuf (until end of input or current pbuf)
             const uint32_t to_read = std::min(rx_buff_cur->len - rx_read, (uint32_t)(end - c));
@@ -565,10 +769,16 @@ static void uart_input(uint8_t *data, size_t size, struct netif *netif) {
                 if (netif->input(rx_buff, netif) != ERR_OK) {
                     log_warning(ESPIF, "tcpip_input() failed, dropping packet");
                     pbuf_free(rx_buff);
+                    rx_buff = nullptr;
                     state = Intron;
                     break;
+                } else {
+                    // We've passed the ownership to netif->input, it'll free
+                    // it. Forget about it on our side, so we never ever touch
+                    // it by accident.
+                    rx_buff = rx_buff_cur = nullptr;
                 }
-                seen_rx_packet = true;
+                seen_pong = true;
                 state = Intron;
             }
         } break;
@@ -579,6 +789,7 @@ static void uart_input(uint8_t *data, size_t size, struct netif *netif) {
             if (rx_read == rx_len) {
                 state = Intron;
             }
+            break;
         }
     }
 }
@@ -603,27 +814,19 @@ static err_t low_level_output([[maybe_unused]] struct netif *netif, struct pbuf 
 }
 
 static void force_down() {
+    log_info(ESPIF, "Force down");
     struct netif *iface = active_esp_netif; // Atomic load
     assert(iface != nullptr); // Already initialized
     process_link_change(false, iface);
 }
 
 static void reset_intron() {
+    log_debug(ESPIF, "Reset intron");
     std::lock_guard lock { uart_write_mutex };
     for (uint i = 2; i < sizeof(tx_message.intron); i++) {
         tx_message.intron[i] = i - 2;
     }
 }
-
-void espif_init_hw() {
-    if (espif_initialized) {
-        bsod("espif_init_hw() called twice");
-    }
-
-    espif_reconfigure_uart(NIC_UART_BAUDRATE);
-    esp_operating_mode = ESPIF_WAIT_INIT;
-    espif_initialized = true;
-};
 
 /**
  * @brief Initalize ESPIF network interface
@@ -634,15 +837,6 @@ void espif_init_hw() {
  * @return err_t Possible error encountered during initialization
  */
 err_t espif_init(struct netif *netif) {
-#if BOARD_VER_HIGHER_OR_EQUAL_TO(0, 5, 0)
-    // This is temporary, remove once everyone has compatible hardware.
-    // Requires new sandwich rev. 06 or rev. 05 with R83 removed.
-
-    #if HAS_EMBEDDED_ESP32()
-    TaskDeps::wait(TaskDeps::Tasks::espif);
-    #endif
-#endif
-
     struct netif *previous = active_esp_netif.exchange(netif);
     assert(previous == nullptr);
     (void)previous; // Avoid warnings in release
@@ -663,41 +857,12 @@ err_t espif_init(struct netif *netif) {
     netif->flags = NETIF_FLAG_BROADCAST | NETIF_FLAG_ETHARP;
 
     reset_intron();
-    esp_operating_mode = ESPIF_WAIT_INIT;
     return ERR_OK;
 }
 
-void espif_flash_initialize(const bool take_down_interfaces) {
-    // NOTE: There is no extra synchronization with reader thread. This assumes
-    // it is not a problem if reader thread reads some garbage until it notices
-    // operating mode change.
-    // NOTE: This holds the writer mutex only during this call. Holding this one
-    // all the time the ESP is being flashed might block LwIP thread and prevent
-    // ethernet from being serviced. Still, all the writers must have finished -
-    // this holds the lock and new writers will fail as mode is set to flashing.
-    {
-        std::lock_guard lock { uart_write_mutex };
-        esp_operating_mode = ESPIF_FLASHING_MODE;
-        espif_reconfigure_uart(FLASH_UART_BAUDRATE);
-        loader_stm32_config_t loader_config = {
-            .huart = &ESP_UART_HANDLE,
-            .port_io0 = ESP_GPIO0_GPIO_Port,
-            .pin_num_io0 = ESP_GPIO0_Pin,
-            .port_rst = ESP_RST_GPIO_Port,
-            .pin_num_rst = ESP_RST_Pin,
-        };
-        loader_port_stm32_init(&loader_config);
-    }
-    if (take_down_interfaces) {
-        force_down();
-    }
-}
-
-void espif_flash_deinitialize() {
-    espif_reconfigure_uart(NIC_UART_BAUDRATE);
-    reset_intron();
-    hard_reset_device(); // Reset device to receive MAC address
-    esp_operating_mode = ESPIF_WAIT_INIT;
+void espif_reset_connection() {
+    esp_operating_mode.exchange(ESPIF_NEED_AP);
+    process_link_change(false, active_esp_netif.load());
 }
 
 /**
@@ -714,9 +879,14 @@ err_t espif_join_ap(const char *ssid, const char *pass) {
         return ERR_IF;
     }
     log_info(ESPIF, "Joining AP %s:*(%d)", ssid, strlen(pass));
-    esp_operating_mode = ESPIF_RUNNING_MODE;
 
-    return espif_tx_msg_clientconfig_v2(ssid, pass);
+    err_t err = espif_tx_msg_clientconfig_v2(ssid, pass);
+
+    if (err == ERR_OK) {
+        esp_operating_mode = ESPIF_CONNECTING_AP;
+    }
+
+    return err;
 }
 
 bool espif_tick() {
@@ -728,14 +898,11 @@ bool espif_tick() {
         init_countdown.store(current_init - 1);
     }
 
-    if (uart_has_recovered_from_error) {
-        log_warning(ESPIF, "Recovered from UART error");
-        uart_has_recovered_from_error = false;
-    }
-
     if (espif_link()) {
-        const bool was_alive = seen_intron.exchange(false);
-        if (!seen_rx_packet.exchange(false) && is_running(esp_operating_mode)) {
+        const bool was_alive = seen_pong.exchange(false);
+        seen_intron.store(false);
+        if (is_running(esp_operating_mode)) {
+            log_debug(ESPIF, "Ping ESP");
             // Poke the ESP somewhat to see if it's still alive and provoke it to
             // do some activity during next round.
             std::ignore = espif_tx_msg_packet(nullptr);
@@ -751,13 +918,31 @@ bool espif_need_ap() {
 }
 
 void espif_reset() {
+    if (!can_recieve_data(esp_operating_mode)) {
+        log_error(ESPIF, "Can't reset ESP");
+        return;
+    }
+    log_info(ESPIF, "Reset ESP");
     // Don't touch it in case we are flashing right now. If so, it'll get reset
     // when done.
-    if (esp_operating_mode != ESPIF_FLASHING_MODE) {
-        reset_intron();
-        force_down();
-        hard_reset_device(); // Reset device to receive MAC address
+    reset_intron();
+    force_down();
+    hard_reset_device(); // Reset device to receive MAC address
+    esp_operating_mode = ESPIF_WAIT_INIT;
+    reset_parser = true;
+}
+
+void espif_notify_flash_result(FlashResult result) {
+    switch (result) {
+    case FlashResult::success:
         esp_operating_mode = ESPIF_WAIT_INIT;
+        break;
+    case FlashResult::not_connected:
+        esp_operating_mode = ESPIF_FLASHING_ERROR_NOT_CONNECTED;
+        break;
+    case FlashResult::failure:
+        esp_operating_mode = ESPIF_FLASHING_ERROR_OTHER;
+        break;
     }
 }
 
@@ -775,6 +960,10 @@ EspFwState esp_fw_state() {
             return EspFwState::Ok;
         }
         return EspFwState::Unknown;
+    case ESPIF_FLASHING_ERROR_NOT_CONNECTED:
+        return EspFwState::FlashingErrorNotConnected;
+    case ESPIF_FLASHING_ERROR_OTHER:
+        return EspFwState::FlashingErrorOther;
     case ESPIF_WAIT_INIT:
         if (seen_ok) {
             return EspFwState::Ok;
@@ -789,12 +978,13 @@ EspFwState esp_fw_state() {
             return EspFwState::NoEsp;
         }
     case ESPIF_NEED_AP:
+    case ESPIF_CONNECTING_AP:
     case ESPIF_RUNNING_MODE:
         return EspFwState::Ok;
-    case ESPIF_FLASHING_MODE:
-        return EspFwState::Flashing;
     case ESPIF_WRONG_FW:
         return EspFwState::WrongVersion;
+    case ESPIF_SCANNING_MODE:
+        return EspFwState::Scanning;
     }
     assert(0);
     return EspFwState::NoEsp;
@@ -805,10 +995,13 @@ EspLinkState esp_link_state() {
     switch (mode) {
     case ESPIF_WAIT_INIT:
     case ESPIF_WRONG_FW:
-    case ESPIF_FLASHING_MODE:
     case ESPIF_UNINITIALIZED_MODE:
+    case ESPIF_FLASHING_ERROR_NOT_CONNECTED:
+    case ESPIF_FLASHING_ERROR_OTHER:
+    case ESPIF_SCANNING_MODE:
         return EspLinkState::Init;
     case ESPIF_NEED_AP:
+    case ESPIF_CONNECTING_AP:
         return EspLinkState::NoAp;
     case ESPIF_RUNNING_MODE: {
         if (espif_link()) {

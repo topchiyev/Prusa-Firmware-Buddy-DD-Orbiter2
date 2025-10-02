@@ -158,6 +158,7 @@ input_shaper::Shaper input_shaper::get(const float damping_ratio, const float sh
         input_shaper::Shaper shaper(a, t, num_pulses);
         return shaper;
     }
+    case Type::cnt: // Fallback to null filter
     case Type::null: {
         constexpr int num_pulses = 1;
         float a[num_pulses] = { 1.f };
@@ -226,8 +227,10 @@ void input_shaper_step_generator_init(const move_t &move, input_shaper_step_gene
     step_generator_state.step_generator[axis] = &step_generator;
     step_generator_state.next_step_func[axis] = (generator_next_step_f)input_shaper_step_generator_next_step_event;
 
-    step_generator_state.flags |= (!is_state->step_dir) * (STEP_EVENT_FLAG_X_DIR << axis);
-    step_generator_state.flags |= (is_state->start_v != 0. || is_state->half_accel != 0.) * (STEP_EVENT_FLAG_X_ACTIVE << axis);
+    // Set the initial direction and activity flags for the entire next move
+    step_generator.move_step_flags = 0;
+    step_generator.move_step_flags |= (!is_state->step_dir) * (STEP_EVENT_FLAG_X_DIR << axis);
+    step_generator.move_step_flags |= (is_state->start_v != 0. || is_state->half_accel != 0.) * (STEP_EVENT_FLAG_X_ACTIVE << axis);
 
 #ifdef COREXY
     if (axis == X_AXIS || axis == Y_AXIS) {
@@ -520,22 +523,16 @@ step_event_info_t input_shaper_step_generator_next_step_event(input_shaper_step_
             next_step_event.time = step_generator.is_state->nearest_next_change;
         }
 
-        // Update step direction flag, which is cached until this move segment is processed.
-        const uint16_t current_axis_dir_flag = (STEP_EVENT_FLAG_X_DIR << step_generator.axis);
-        step_generator_state.flags &= ~current_axis_dir_flag;
-        step_generator_state.flags |= (!step_generator.is_state->step_dir) * current_axis_dir_flag;
-
-        // Update active axis flag, which is cached until this move segment is processed.
-        const uint16_t current_axis_active_flag = (STEP_EVENT_FLAG_X_ACTIVE << step_generator.axis);
-        step_generator_state.flags &= ~current_axis_active_flag;
-        step_generator_state.flags |= (step_generator.is_state->start_v != 0. || step_generator.is_state->half_accel != 0.) * current_axis_active_flag;
+        // Update the direction and activity flags for the entire next move
+        step_generator.move_step_flags = 0;
+        step_generator.move_step_flags |= (!step_generator.is_state->step_dir) * (STEP_EVENT_FLAG_X_DIR << step_generator.axis);
+        step_generator.move_step_flags |= (step_generator.is_state->start_v != 0. || step_generator.is_state->half_accel != 0.) * (STEP_EVENT_FLAG_X_ACTIVE << step_generator.axis);
 
         input_shaper_step_generator_update(step_generator);
         PreciseStepping::move_segment_processed_handler();
     } else {
         next_step_event.time = elapsed_time;
         next_step_event.flags = STEP_EVENT_FLAG_STEP_X << step_generator.axis;
-        next_step_event.flags |= step_generator_state.flags;
         next_step_event.status = STEP_EVENT_INFO_STATUS_GENERATED_VALID;
         step_generator_state.current_distance[step_generator.axis] += (step_dir ? 1 : -1);
     }

@@ -1,9 +1,11 @@
 #include "config_features.h"
+#include <gui/menu_vars.h>
+
 // TODO do it in cmake
 #if ENABLED(CRASH_RECOVERY)
 
     #include "MItem_crash.hpp"
-    #include "menu_spin_config.hpp"
+    #include "WindowMenuSpin.hpp"
     #include "../lib/Marlin/Marlin/src/module/stepper/trinamic.h"
     #include "../Marlin/src/feature/prusa/crash_recovery.hpp"
     #include "../Marlin/src/feature/phase_stepping/phase_stepping.hpp"
@@ -11,11 +13,11 @@
 
 MI_CRASH_DETECTION::MI_CRASH_DETECTION()
     : WI_ICON_SWITCH_OFF_ON_t(crash_s.is_enabled(), _(label), nullptr, is_enabled_t::yes,
-    #if (PRINTER_IS_PRUSA_MK4 || PRINTER_IS_PRUSA_MK3_5)
+    #if (PRINTER_IS_PRUSA_MK4() || PRINTER_IS_PRUSA_MK3_5())
         is_hidden_t::dev
     #else
         is_hidden_t::no
-    #endif // (( PRINTER_IS_PRUSA_MK4) || ( PRINTER_IS_PRUSA_MK3_5))
+    #endif // (( PRINTER_IS_PRUSA_MK4()) || ( PRINTER_IS_PRUSA_MK3_5()))
     ) {
 }
 
@@ -40,41 +42,34 @@ void MI_CRASH_DETECTION::OnChange(size_t /*old_index*/) {
     crash_s.enable(value());
 }
 
+static const NumericInputConfig crash_sensitivity_spin_config = {
+    .min_value = static_cast<float>(MenuVars::crash_sensitivity_range.first),
+    .max_value = static_cast<float>(MenuVars::crash_sensitivity_range.second),
+};
+static constexpr NumericInputConfig crash_max_period_spin_config = {
+    .max_value = 0xFFFFF,
+};
+
 MI_CRASH_SENSITIVITY_X::MI_CRASH_SENSITIVITY_X()
-    : WiSpinInt(crash_s.get_sensitivity().x, SpinCnf::crash_sensitivity,
-        _(label), nullptr, is_enabled_t::yes,
-    #if PRINTER_IS_PRUSA_XL
-        is_hidden_t::no
-    #else
-        is_hidden_t::dev
-    #endif
-    ) {
+    : WiSpin(crash_s.get_sensitivity().x, crash_sensitivity_spin_config, _(label), nullptr, is_enabled_t::yes, PRINTER_IS_PRUSA_XL() ? is_hidden_t::no : is_hidden_t::dev) {
 }
 void MI_CRASH_SENSITIVITY_X::OnClick() {
 
     xy_long_t se = crash_s.get_sensitivity();
-    se.x = GetVal();
+    se.x = value();
     crash_s.set_sensitivity(se);
 }
 
 MI_CRASH_SENSITIVITY_Y::MI_CRASH_SENSITIVITY_Y()
-    : WiSpinInt(crash_s.get_sensitivity().y, SpinCnf::crash_sensitivity,
-        _(label), nullptr, is_enabled_t::yes,
-    #if PRINTER_IS_PRUSA_XL
-        is_hidden_t::no
-    #else
-        is_hidden_t::dev
-    #endif
-    ) {
+    : WiSpin(crash_s.get_sensitivity().y, crash_sensitivity_spin_config, _(label), nullptr, is_enabled_t::yes, PRINTER_IS_PRUSA_XL() ? is_hidden_t::no : is_hidden_t::dev) {
 }
 void MI_CRASH_SENSITIVITY_Y::OnClick() {
-
     xy_long_t se = crash_s.get_sensitivity();
-    se.y = GetVal();
+    se.y = value();
     crash_s.set_sensitivity(se);
 }
 
-    #if PRINTER_IS_PRUSA_XL
+    #if PRINTER_IS_PRUSA_XL()
 MI_CRASH_SENSITIVITY_XY::MI_CRASH_SENSITIVITY_XY()
     : WI_SWITCH_t<3>(get_item_id_from_sensitivity(crash_s.get_sensitivity().x), _(label), nullptr, is_enabled_t::yes, is_hidden_t::no,
         _(ITEMS[0].name), _(ITEMS[1].name), _(ITEMS[2].name)) {}
@@ -97,34 +92,28 @@ void MI_CRASH_SENSITIVITY_XY::OnChange([[maybe_unused]] size_t old_index) {
 }
     #else
 MI_CRASH_SENSITIVITY_XY::MI_CRASH_SENSITIVITY_XY()
-    : WiSpinInt(crash_s.get_sensitivity().x, SpinCnf::crash_sensitivity,
-        _(label), nullptr, is_enabled_t::yes,
-        is_hidden_t::dev) {
+    : WiSpin(crash_s.get_sensitivity().x, crash_sensitivity_spin_config, _(label), nullptr, is_enabled_t::yes, is_hidden_t::dev) {
 }
 void MI_CRASH_SENSITIVITY_XY::OnClick() {
-
-    xy_long_t se = crash_s.get_sensitivity();
-    se.x = GetVal();
-    se.y = GetVal();
-    crash_s.set_sensitivity(se);
+    crash_s.set_sensitivity({ static_cast<long>(value()), static_cast<long>(value()) });
 }
     #endif
 
 MI_CRASH_MAX_PERIOD_X::MI_CRASH_MAX_PERIOD_X()
-    : WI_SPIN_CRASH_PERIOD_t(crash_s.get_max_period().x, SpinCnf::crash_max_period, _(label), nullptr, is_enabled_t::yes, is_hidden_t::dev) {
+    : WiSpin(crash_s.get_max_period().x, crash_max_period_spin_config, _(label), nullptr, is_enabled_t::yes, is_hidden_t::dev) {
 }
 void MI_CRASH_MAX_PERIOD_X::OnClick() {
     xy_long_t mp = crash_s.get_max_period();
-    mp.x = GetVal();
+    mp.x = value();
     crash_s.set_max_period(mp);
 }
 
 MI_CRASH_MAX_PERIOD_Y::MI_CRASH_MAX_PERIOD_Y()
-    : WI_SPIN_CRASH_PERIOD_t(crash_s.get_max_period().y, SpinCnf::crash_max_period, _(label), nullptr, is_enabled_t::yes, is_hidden_t::dev) {
+    : WiSpin(crash_s.get_max_period().y, crash_max_period_spin_config, _(label), nullptr, is_enabled_t::yes, is_hidden_t::dev) {
 }
 void MI_CRASH_MAX_PERIOD_Y::OnClick() {
     xy_long_t mp = crash_s.get_max_period();
-    mp.y = GetVal();
+    mp.y = value();
     crash_s.set_max_period(mp);
 }
 
@@ -137,7 +126,7 @@ MI_POWER_PANICS::MI_POWER_PANICS()
 
 MI_CRASHES_X_LAST::MI_CRASHES_X_LAST()
     : WI_INFO_t(crash_s.counters.get(Crash_s::Counter::axis_crash_x), _(label),
-    #if PRINTER_IS_PRUSA_XL
+    #if PRINTER_IS_PRUSA_XL()
         is_hidden_t::no
     #else
         is_hidden_t::dev
@@ -147,7 +136,7 @@ MI_CRASHES_X_LAST::MI_CRASHES_X_LAST()
 
 MI_CRASHES_Y_LAST::MI_CRASHES_Y_LAST()
     : WI_INFO_t(crash_s.counters.get(Crash_s::Counter::axis_crash_y), _(label),
-    #if PRINTER_IS_PRUSA_XL
+    #if PRINTER_IS_PRUSA_XL()
         is_hidden_t::no
     #else
         is_hidden_t::dev
@@ -157,7 +146,7 @@ MI_CRASHES_Y_LAST::MI_CRASHES_Y_LAST()
 
 MI_CRASHES_X::MI_CRASHES_X()
     : WI_INFO_t(config_store().crash_count_x.get(), _(label),
-    #if PRINTER_IS_PRUSA_XL
+    #if PRINTER_IS_PRUSA_XL()
         is_hidden_t::no
     #else
         is_hidden_t::dev
@@ -167,7 +156,7 @@ MI_CRASHES_X::MI_CRASHES_X()
 
 MI_CRASHES_Y::MI_CRASHES_Y()
     : WI_INFO_t(config_store().crash_count_y.get(), _(label),
-    #if PRINTER_IS_PRUSA_XL
+    #if PRINTER_IS_PRUSA_XL()
         is_hidden_t::no
     #else
         is_hidden_t::dev

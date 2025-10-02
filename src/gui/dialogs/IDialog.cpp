@@ -1,7 +1,7 @@
 #include "IDialog.hpp"
 
 #include "ScreenHandler.hpp"
-#include "log.h"
+#include <logging/log.hpp>
 
 LOG_COMPONENT_REF(GUI);
 
@@ -29,7 +29,7 @@ static void set_underlying_screen_state(const screen_init_variant &underlying_sc
 }
 
 IDialog::IDialog(window_t *parent, Rect16 rc)
-    : AddSuperWindow<window_frame_t>(parent, rc, win_type_t::dialog)
+    : window_frame_t(parent, rc, win_type_t::dialog)
     , underlying_screen_state { get_underlying_screen_state() } {
     Enable();
 }

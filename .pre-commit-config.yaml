@@ -5,10 +5,10 @@ repos:
   rev: v0.6.13
   hooks:
     - id: cmake-format
-- repo: https://github.com/pre-commit/mirrors-yapf
-  rev: 'v0.27.0'
+- repo: https://github.com/google/yapf
+  rev: v0.40.2
   hooks:
-    - id: yapf  # python formatter
+    - id: yapf
 - repo: local
   hooks:
     - id: clang-format
@@ -27,7 +27,9 @@ repos:
     - id: generate-cmake-presets
       name: generate-cmake-presets
       description: This hook generates CMakePresets.json file based on utils/presets/presets.json
-      entry: python utils/build.py --generate-cmake-presets --generate-bbf
+      entry: python utils/build.py --generate-cmake-presets
+      additional_dependencies:
+        - requests
       files: (^|/)(.*.json)$
       pass_filenames: false
       language: python
@@ -38,6 +40,12 @@ repos:
       entry: python utils/logging/generate_overview.py
       language: python
       language_version: python3
+    - id: python3-requirements
+      name: python3-requirements
+      description: Check if requirements.txt matches the buildsystem.
+      entry: 'utils/check-requirements.py'
+      language: script
+      files: requirements\.txt$
 - repo: https://github.com/pre-commit/pre-commit-hooks
   rev: 'v2.4.0'
   hooks:
@@ -50,8 +58,6 @@ exclude: |
     ^lib/Catch2/|
     ^lib/CrashCatcher/|
     ^lib/Drivers/|
-    ^lib/ESP/prusa/src/serial-flasher/serial_comm.c|
-    ^lib/ESP/serial-flasher/|
     ^lib/Marlin/(?!
         Marlin/src(/gcode)?/feature/prusa/|
         Marlin/src(/gcode)?/feature/input_shaper/|
@@ -60,6 +66,7 @@ exclude: |
         Marlin/src(/gcode)?/feature/phase_stepping/|
         Marlin/src/module/prusa/|
         Marlin/src/gcode/calibrate/M958.cpp
+        Marlin/src/gcode/calibrate/M958.hpp
       )|
     ^lib/Middlewares/Third_Party/FatFs/|
     ^lib/Middlewares/Third_Party/FreeRTOS/|
@@ -72,6 +79,7 @@ exclude: |
     ^lib/Segger|
     ^lib/TMCStepper/|
     ^lib/cpp-std-extensions/|
+    ^lib/esp-serial-flasher/|
     ^lib/heatshrink/|
     ^lib/inih/|
     ^lib/jsmn/|
@@ -80,6 +88,8 @@ exclude: |
     ^lib/libsysbase/|
     ^lib/printf|
     ^lib/tinyusb/|
+    ^lib/magic_enum/|
+    ^lib/SG14/|
     ^tests/stubs/FreeRTOS|
     ^tests/unit/common/gcode/.*\.gcode$|
     ^tests/unit/lang/translator/(keys|cs|es|fr|de|pl|it)\.txt$

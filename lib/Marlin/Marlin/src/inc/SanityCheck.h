@@ -728,7 +728,7 @@ static_assert(Y_MAX_LENGTH >= Y_BED_SIZE, "Movement bounds (Y_MIN_POS, Y_MAX_POS
 #endif
 
 #if ENABLED(NOZZLE_PARK_FEATURE)
-  constexpr float npp[] = NOZZLE_PARK_POINT;
+  constexpr float npp[] = XYZ_NOZZLE_PARK_POINT;
   static_assert(COUNT(npp) == XYZ, "NOZZLE_PARK_POINT requires X, Y, and Z values.");
 #endif
 
@@ -1889,7 +1889,6 @@ static_assert(Y_MAX_LENGTH >= Y_BED_SIZE, "Movement bounds (Y_MIN_POS, Y_MAX_POS
   + ENABLED(RIGIDBOT_PANEL) \
   + ENABLED(MAKEBOARD_MINI_2_LINE_DISPLAY_1602) \
   + ENABLED(ZONESTAR_LCD) \
-  + ENABLED(RA_CONTROL_PANEL) \
   + ENABLED(LCD_SAINSMART_I2C_1602) \
   + ENABLED(LCD_SAINSMART_I2C_2004) \
   + ENABLED(LCM1602) \
@@ -1921,9 +1920,6 @@ static_assert(Y_MAX_LENGTH >= Y_BED_SIZE, "Movement bounds (Y_MIN_POS, Y_MAX_POS
   + ENABLED(MKS_12864OLED_SSD1306) \
   + ENABLED(U8GLIB_SH1106_EINSTART) \
   + ENABLED(OVERLORD_OLED) \
-  + ENABLED(DGUS_LCD) \
-  + ENABLED(MALYAN_LCD) \
-  + ENABLED(LULZBOT_TOUCH_UI) \
   + ENABLED(FSMC_GRAPHICAL_TFT)
   #error "Please select no more than one LCD controller option."
 #endif

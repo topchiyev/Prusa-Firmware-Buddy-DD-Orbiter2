@@ -2,6 +2,7 @@
 #include "i18n.h"
 #include "img_resources.hpp"
 #include <guiconfig/wizard_config.hpp>
+#include <str_utils.hpp>
 
 #include <algorithm>
 
@@ -18,7 +19,7 @@ static constexpr size_t row_8 = row_7 + txt_h;
 static constexpr size_t row_9 = row_8 + txt_h;
 
 SelftestFrameDock::SelftestFrameDock(window_t *parent, PhasesSelftest ph, fsm::PhaseData data)
-    : AddSuperWindow<SelftestFrameNamedWithRadio>(parent, ph, data, _("Dock Calibration"), 1)
+    : SelftestFrameNamedWithRadio(parent, ph, data, _("Dock Calibration"), 1)
     , footer(this, 0, footer::Item::nozzle, footer::Item::bed, footer::Item::axis_z) // ItemAxisZ to show Z coord while moving up
     , progress(this, WizardDefaults::row_1)
     , text_info(this, get_info_text_rect(), is_multiline::yes)
@@ -26,7 +27,7 @@ SelftestFrameDock::SelftestFrameDock(window_t *parent, PhasesSelftest ph, fsm::P
     , icon_warning(this, &img::printer_is_moving, point_i16(col_texts, row_4))
     , text_warning(this, Rect16(col_texts + img::warning_48x48.w + 20, row_4, WizardDefaults::X_space - img::warning_48x48.w - 20, 3 * txt_h), is_multiline::yes)
     , icon_info(this, &img::parking1, text_info.GetRect().TopRight())
-    , qr(this, get_info_icon_rect() + Rect16::Left_t(25), LINK)
+    , qr(this, get_info_icon_rect() + Rect16::Left_t(25), Align_t::Center(), LINK)
     , text_link(this, get_link_text_rect(), is_multiline::no) {
     qr.Hide();
     text_link.Hide();
@@ -114,22 +115,19 @@ void SelftestFrameDock::change() {
 }
 
 void SelftestFrameDock::set_name(SelftestDocks_t data) {
-    static const char fmt2Translate[] = N_("Dock %d calibration");
-    size_t buff_pos = 0;
+    StringBuilder sb(name_buff);
+
     if (data.current_dock != std::numeric_limits<decltype(data.current_dock)>::max()) {
-        char fmt[std::tuple_size_v<decltype(name_buff)>];
-        _(fmt2Translate).copyToRAM(fmt, sizeof(name_buff));
-        buff_pos += snprintf(name_buff.data(), name_buff.size(), fmt, data.current_dock + 1);
-        buff_pos = std::min(buff_pos, name_buff.size());
+        StringViewUtf8Parameters<4> params;
+        sb.append_string_view(_("Dock %d calibration").formatted(params, data.current_dock + 1));
     }
+
     if (const char *phase_name = get_phase_name(); phase_name != nullptr) {
-        char phase_name_buff[50];
-        _(phase_name).copyToRAM(phase_name_buff, sizeof(phase_name_buff));
-
-        snprintf(name_buff.data() + buff_pos, name_buff.size() - buff_pos, " - %s", phase_name_buff);
+        sb.append_string(" - ");
+        sb.append_string_view(_(phase_name));
     }
 
-    SetName(string_view_utf8::MakeRAM(reinterpret_cast<const uint8_t *>(name_buff.data())));
+    SetName(string_view_utf8::MakeRAM(name_buff.data()));
 }
 
 void SelftestFrameDock::set_remaining() {
@@ -142,7 +140,7 @@ void SelftestFrameDock::set_remaining() {
     text_estimate.SetText(string_view_utf8::MakeRAM(reinterpret_cast<const uint8_t *>(remaining_buff.data())));
 }
 
-void SelftestFrameDock::set_warning_layout(string_view_utf8 txt) {
+void SelftestFrameDock::set_warning_layout(const string_view_utf8 &txt) {
     qr.Hide();
     text_link.Hide();
     text_info.Hide();
@@ -153,7 +151,7 @@ void SelftestFrameDock::set_warning_layout(string_view_utf8 txt) {
     text_warning.Show();
 }
 
-void SelftestFrameDock::set_info_layout(string_view_utf8 txt, const img::Resource *res) {
+void SelftestFrameDock::set_info_layout(const string_view_utf8 &txt, const img::Resource *res) {
     qr.Hide();
     text_link.Hide();
     text_warning.Hide();

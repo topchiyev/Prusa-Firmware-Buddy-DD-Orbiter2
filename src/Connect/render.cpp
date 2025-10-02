@@ -11,6 +11,7 @@
 #include <state/printer_state.hpp>
 #include <transfers/transfer.hpp>
 #include <filament.hpp>
+#include <filament_list.hpp>
 #if XL_ENCLOSURE_SUPPORT()
     #include <xl_enclosure.hpp>
 #endif
@@ -45,6 +46,16 @@ namespace connect_client {
 
 namespace {
 
+    const char *to_str(Printer::FinishedJobResult result) {
+        switch (result) {
+        case Printer::FinishedJobResult::FIN_OK:
+            return "FIN_OK";
+        case Printer::FinishedJobResult::FIN_STOPPED:
+            return "FIN_STOPPED";
+        }
+        return nullptr;
+    }
+
     std::optional<transfers::Monitor::Status> get_transfer_status(size_t resume_point, const RenderState &state) {
         if (state.transfer_id.has_value()) {
             // If we've seen a transfer info previously, allow using a stale one to continue there.
@@ -57,6 +68,26 @@ namespace {
         } else {
             return nullopt;
         }
+    }
+
+    JsonResult render_msg(size_t resume_point, JsonOutput &output, RenderState &, const transfers::Download::InlineRequest &request) {
+        // Keep the indentation of the JSON in here!
+        // clang-format off
+        JSON_START;
+        JSON_OBJ_START;
+            JSON_FIELD_STR("transfer", "inline") JSON_COMMA;
+            if (request.details.has_value()) {
+                JSON_FIELD_STR("hash", request.details->hash) JSON_COMMA;
+                JSON_FIELD_INT("team_id", request.details->team_id) JSON_COMMA;
+            }
+            // Relates both to size of the FS block.
+            JSON_FIELD_INT("chunk", 4096) JSON_COMMA;
+            JSON_FIELD_INT("file_id", request.file_id) JSON_COMMA;
+            JSON_FIELD_INT("start", request.start) JSON_COMMA;
+            JSON_FIELD_INT("end", request.end);
+        JSON_OBJ_END;
+        JSON_END;
+        // clang-format on
     }
 
     JsonResult render_msg(size_t resume_point, JsonOutput &output, RenderState &state, const SendTelemetry &telemetry) {
@@ -107,14 +138,19 @@ namespace {
             // need to coordinate with Connect, as these are probably
             // "essential" fields right now.
             if (telemetry.mode == SendTelemetry::Mode::Full) {
-                JSON_FIELD_FFIXED("temp_nozzle", params.slots[params.preferred_slot()].temp_nozzle, 1) JSON_COMMA;
+                JSON_FIELD_FFIXED("temp_nozzle", params.slots[params.preferred_head()].temp_nozzle, 1) JSON_COMMA;
                 JSON_FIELD_FFIXED("temp_bed", params.temp_bed, 1) JSON_COMMA;
+#if PRINTER_IS_PRUSA_iX()
+                JSON_FIELD_FFIXED("temp_heatbreak", params.slots[params.preferred_head()].temp_heatbreak, 1) JSON_COMMA;
+                JSON_FIELD_FFIXED("temp_psu", params.temp_psu, 1) JSON_COMMA;
+                JSON_FIELD_FFIXED("temp_ambient", params.temp_ambient, 1) JSON_COMMA;
+#endif
                 JSON_FIELD_FFIXED("target_nozzle", params.target_nozzle, 1) JSON_COMMA;
                 JSON_FIELD_FFIXED("target_bed", params.target_bed, 1) JSON_COMMA;
                 JSON_FIELD_INT("speed", params.print_speed) JSON_COMMA;
                 JSON_FIELD_INT("flow", params.flow_factor) JSON_COMMA;
-                if (params.slots[params.preferred_slot()].material != nullptr) {
-                    JSON_FIELD_STR_G(params.slots[params.preferred_slot()].material != nullptr, "material", params.slots[params.preferred_slot()].material) JSON_COMMA;
+                if (strlen(params.slots[params.preferred_slot()].material.data()) > 0) {
+                    JSON_FIELD_STR("material", params.slots[params.preferred_slot()].material.data()) JSON_COMMA;
                 }
 #if XL_ENCLOSURE_SUPPORT()
                 if (params.enclosure_info.present) {
@@ -132,8 +168,8 @@ namespace {
                 }
                 JSON_FIELD_FFIXED("axis_z", params.pos[Printer::Z_AXIS_POS], 2) JSON_COMMA;
                 if (params.has_job) {
-                    JSON_FIELD_INT("fan_extruder", params.slots[params.preferred_slot()].heatbreak_fan_rpm) JSON_COMMA;
-                    JSON_FIELD_INT("fan_print", params.slots[params.preferred_slot()].print_fan_rpm) JSON_COMMA;
+                    JSON_FIELD_INT("fan_extruder", params.slots[params.preferred_head()].heatbreak_fan_rpm) JSON_COMMA;
+                    JSON_FIELD_INT("fan_print", params.slots[params.preferred_head()].print_fan_rpm) JSON_COMMA;
                     JSON_FIELD_FFIXED("filament", params.filament_used, 1) JSON_COMMA;
                 }
 
@@ -146,7 +182,7 @@ namespace {
                             // Note: XL can have multiple slots, but not consequitive, therefore the trick with a mask.
                             if (params.slot_mask & (1 << state.iter)) {
                                 JSON_CUSTOM("\"%zu\":{", state.iter + 1);
-                                    JSON_FIELD_STR("material", params.slots[state.iter].material) JSON_COMMA;
+                                    JSON_FIELD_STR("material", params.slots[state.iter].material.data()) JSON_COMMA;
                                     JSON_FIELD_FFIXED("temp", params.slots[state.iter].temp_nozzle, 1) JSON_COMMA;
                                     JSON_FIELD_FFIXED("fan_hotend", params.slots[state.iter].heatbreak_fan_rpm, 1) JSON_COMMA;
                                     JSON_FIELD_FFIXED("fan_print", params.slots[state.iter].print_fan_rpm, 1);
@@ -190,6 +226,7 @@ namespace {
 #if ENABLED(CANCEL_OBJECTS)
         char cancel_object_name[Printer::CANCEL_OBJECT_NAME_LEN];
 #endif
+        std::optional<Printer::FinishedJobResult> job_state;
 
         const char *reject_with = nullptr;
         Printer::NetCreds creds = {};
@@ -207,10 +244,14 @@ namespace {
         }
 
         if (event.type == EventType::JobInfo && (!params.has_job || event.job_id.value_or(params.job_id) != params.job_id)) {
-            // Can't send a job info when not printing, refuse instead.
-            //
-            // Can't provide historic/future jobs.
-            reject_with = params.has_job ? "Job ID doesn't match" : "No job in progress";
+            // We have a job history (with just the state) of two last jobs, if this is one of them, send it,
+            // otherwise reject.
+            if (event.job_id.has_value()) {
+                job_state = state.printer.get_prior_job_result(event.job_id.value());
+            }
+            if (job_state == nullopt) {
+                reject_with = params.has_job ? "Job ID doesn't match" : "No job in progress";
+            }
         }
 
         if (event.type == EventType::FileInfo && !state.has_stat && !state.file_extra.renderer.holds_alternative<DirRenderer>()) {
@@ -254,7 +295,10 @@ namespace {
                     JSON_FIELD_STR("sn", info.serial_number.begin()) JSON_COMMA;
                     JSON_FIELD_BOOL("appendix", info.appendix) JSON_COMMA;
                     JSON_FIELD_STR("fingerprint", info.fingerprint) JSON_COMMA;
-                    JSON_FIELD_FFIXED("nozzle_diameter", params.nozzle_diameter, 2) JSON_COMMA;
+                    // TODO: Deprecated, kept for now for backwards compatibility. Parts of the tools object.
+                    // Remove eventually.
+                    JSON_FIELD_FFIXED("nozzle_diameter", params.slots[params.preferred_head()].nozzle_diameter, 2) JSON_COMMA;
+                    JSON_FIELD_BOOL("transfer_paused", !params.can_start_download) JSON_COMMA;
                     if (strlen(creds.pl_password) > 0) {
                         JSON_FIELD_STR("api_key", creds.pl_password) JSON_COMMA;
                     }
@@ -275,21 +319,37 @@ namespace {
                     }
                     JSON_ARR_END JSON_COMMA;
                     JSON_FIELD_OBJ("network_info");
-                    if (state.lan.has_value()) {
-                        JSON_MAC("lan_mac", state.lan->mac) JSON_COMMA;
-                        JSON_IP("lan_ipv4", state.lan->ip);
-                    }
-                    if (state.lan.has_value() && state.wifi.has_value()) {
-                        // Why oh why can't json accept a trailing comma :-(
-                        JSON_COMMA;
-                    }
-                    if (state.wifi.has_value()) {
-                        if (strlen(creds.ssid) > 0) {
-                            JSON_FIELD_STR("wifi_ssid", creds.ssid) JSON_COMMA;
+                        if (state.lan.has_value()) {
+                            JSON_MAC("lan_mac", state.lan->mac) JSON_COMMA;
+                            JSON_IP("lan_ipv4", state.lan->ip) JSON_COMMA;
                         }
-                        JSON_MAC("wifi_mac", state.wifi->mac) JSON_COMMA;
-                        JSON_IP("wifi_ipv4", state.wifi->ip);
-                    }
+                        if (state.wifi.has_value()) {
+                            if (strlen(creds.ssid) > 0) {
+                                JSON_FIELD_STR("wifi_ssid", creds.ssid) JSON_COMMA;
+                            }
+                            JSON_MAC("wifi_mac", state.wifi->mac) JSON_COMMA;
+                            JSON_IP("wifi_ipv4", state.wifi->ip) JSON_COMMA;
+                        }
+                        JSON_FIELD_STR("hostname", creds.hostname);
+                    JSON_OBJ_END JSON_COMMA;
+
+                    JSON_FIELD_OBJ("tools");
+                        for (state.iter = 0, state.need_comma = false; state.iter < Printer::NUMBER_OF_SLOTS; state.iter ++) {
+                            if (params.slot_mask & (1 << state.iter)) {
+                                if (state.need_comma) {
+                                    JSON_COMMA;
+                                }
+
+                                JSON_CUSTOM("\"%zu\":{", state.iter + 1);
+                                    JSON_FIELD_FFIXED("nozzle_diameter", params.slots[state.iter].nozzle_diameter, 2) JSON_COMMA;
+                                    JSON_FIELD_BOOL("high_flow", params.slots[state.iter].high_flow) JSON_COMMA;
+                                    JSON_FIELD_BOOL("hardened", params.slots[state.iter].hardened) JSON_COMMA;
+                                    JSON_FIELD_STR("material", *params.slots[state.iter].material.data() ? params.slots[state.iter].material.data() : "---");
+                                JSON_OBJ_END;
+
+                                state.need_comma = true;
+                            }
+                        }
                     JSON_OBJ_END JSON_COMMA;
 
 #if XL_ENCLOSURE_SUPPORT()
@@ -301,13 +361,15 @@ namespace {
                             JSON_FIELD_INT("post_print_filtration_time", params.enclosure_info.post_print_filtration_time) JSON_COMMA;
                             JSON_FIELD_INT("filter_lifetime", Enclosure::expiration_deadline_sec) JSON_COMMA;
                             JSON_FIELD_ARR("filtration_filaments");
-                            state.iter = 0;
-                            while (state.iter <  std::size(Enclosure::filaments_requiring_filtration)) {
-                                if (state.iter > 0) {
+                            for (state.iter = 0, state.need_comma = false; state.iter <all_filament_types.size(); state.iter++) {
+                                if(!all_filament_types[state.iter].parameters().requires_filtration) {
+                                    continue;
+                                }
+                                if (state.need_comma) {
                                     JSON_COMMA;
                                 }
-                                JSON_CUSTOM("\"%s\"", filament::get_name(Enclosure::filaments_requiring_filtration[state.iter]));
-                                state.iter ++;
+                                JSON_CUSTOM("\"%s\"",  all_filament_types[state.iter].parameters().name);
+                                state.need_comma = true;
                             }
                             JSON_ARR_END;
                         JSON_OBJ_END JSON_COMMA;
@@ -323,22 +385,31 @@ namespace {
                 JSON_OBJ_END JSON_COMMA;
             } else if (event.type == EventType::JobInfo) {
                 JSON_FIELD_OBJ("data");
-                    // The JobInfo doesn't claim the buffer, so we get it to store the path.
-                    assert(params.job_path() != nullptr);
-                    if (state.has_stat) {
-                        JSON_FIELD_INT("size", state.st.st_size) JSON_COMMA;
-                        JSON_FIELD_INT("m_timestamp", state.st.st_mtime) JSON_COMMA;
-                    }
-                    if (params.job_lfn() != nullptr) {
-                        JSON_FIELD_STR("display_name", params.job_lfn());
+                    if (job_state != nullopt) {
+                        JSON_FIELD_STR("state", to_str(job_state.value()));
                     } else {
-                        JSON_FIELD_STR("display_name", basename_b(params.job_path()));
+                        if (params.state.device_state == DeviceState::Printing) {
+                            JSON_FIELD_STR("state", "PRINTING") JSON_COMMA;
+                        } else {
+                            JSON_FIELD_STR("state", "PAUSED") JSON_COMMA;
+                        }
+                        // The JobInfo doesn't claim the buffer, so we get it to store the path.
+                        assert(params.job_path() != nullptr);
+                        if (state.has_stat) {
+                            JSON_FIELD_INT("size", state.st.st_size) JSON_COMMA;
+                            JSON_FIELD_INT("m_timestamp", state.st.st_mtime) JSON_COMMA;
+                        }
+                        if (params.job_lfn() != nullptr) {
+                            JSON_FIELD_STR("display_name", params.job_lfn());
+                        } else {
+                            JSON_FIELD_STR("display_name", basename_b(params.job_path()));
+                        }
+                        JSON_COMMA;
+                        if (event.start_cmd_id.has_value()) {
+                            JSON_FIELD_INT("start_cmd_id", *event.start_cmd_id) JSON_COMMA;
+                        }
+                        JSON_FIELD_STR("path", params.job_path());
                     }
-                    JSON_COMMA;
-                    if (event.start_cmd_id.has_value()) {
-                        JSON_FIELD_INT("start_cmd_id", *event.start_cmd_id) JSON_COMMA;
-                    }
-                    JSON_FIELD_STR("path", params.job_path());
                 JSON_OBJ_END JSON_COMMA;
             } else if (event.type == EventType::FileInfo) {
                 JSON_FIELD_OBJ("data");
@@ -353,6 +424,10 @@ namespace {
                     // rendering a trailing comma if it outputs anything at
                     // all.
                     JSON_CHUNK(state.file_extra.renderer);
+
+                    // BEWARE:
+                    // If you add another field below, make sure to also
+                    // include it in the blacklist of meta headers (see MetaFilter::Ignore).
                     if (state.has_stat) {
                         // has_stat might be off in case of /usb, that one acts
                         // "weird", as it is root of the FS.
@@ -602,21 +677,14 @@ namespace {
     // TODO: We probably can come up with some way of not storing the long
     // strings in here and save some flash size with maybe CRCs of the strings?
     static constexpr MetaRecord meta_records[] = {
-        { "estimated printing time (normal mode)", MetaFilter::String },
         { "filament cost", MetaFilter::Float },
         { "filament used [mm]", MetaFilter::Float },
         { "filament used [cm3]", MetaFilter::Float },
         { "filament used [mm3]", MetaFilter::Float },
-        { "filament used [g]", MetaFilter::Float },
         { "filament used [m]", MetaFilter::Float },
         { "bed_temperature", MetaFilter::Int },
         { "brim_width", MetaFilter::Int },
-        { "filament_type", MetaFilter::String },
-        // Yes, really, a string, because it contains the % sign.
-        { "fill_density", MetaFilter::String },
         { "layer_height", MetaFilter::Float },
-        { "nozzle_diameter", MetaFilter::Float },
-        { "printer_model", MetaFilter::String },
         { "temperature", MetaFilter::Int },
         // Note: These two should actually be Bools. But it seems the server is
         // currently expecting 0/1, the gcode also contains 0/1, so we adhere
@@ -624,7 +692,21 @@ namespace {
         { "ironing", MetaFilter::Int },
         { "support_material", MetaFilter::Int },
         { "max_layer_z", MetaFilter::Float },
-        { "objects_info", MetaFilter::String },
+        { "estimated_print_time", MetaFilter::Int },
+        { "total filament used for wipe tower [g]", MetaFilter::Float },
+
+        // Blacklist of names not to send.
+        // These really aren't metadata headers in common gcode files as far as
+        // we know. But these are some additional fields we include in the data
+        // object of the FILE_INFO event, so we protect against a collision by
+        // malicious or confused gcode file.
+        { "preview", MetaFilter::Ignore },
+        { "size", MetaFilter::Ignore },
+        { "m_timestamp", MetaFilter::Ignore },
+        { "read_only", MetaFilter::Ignore },
+        { "display_name", MetaFilter::Ignore },
+        { "type", MetaFilter::Ignore },
+        { "path", MetaFilter::Ignore },
     };
 
     MetaFilter meta_filter(const char *name) {
@@ -634,7 +716,7 @@ namespace {
             }
         }
 
-        return MetaFilter::Ignore;
+        return MetaFilter::String;
     }
 } // namespace
 
@@ -645,9 +727,9 @@ tuple<JsonResult, size_t> PreviewRenderer::render(uint8_t *buffer, size_t buffer
 
     constexpr static const char *intro = "\"preview\":\"";
     constexpr static const char *outro = "\",";
-    constexpr static size_t intro_len = strlen_constexpr(intro);
+    constexpr static size_t intro_len = strlen(intro);
     // Ending quote and comma
-    constexpr static size_t outro_len = strlen_constexpr(outro);
+    constexpr static size_t outro_len = strlen(outro);
     // Don't bother with too small buffers to make the code easier. Extra char
     // for trying out there's some preview in there.
     constexpr static size_t min_len = intro_len + outro_len + encoded_chunk_size;
@@ -660,9 +742,8 @@ tuple<JsonResult, size_t> PreviewRenderer::render(uint8_t *buffer, size_t buffer
     size_t written = 0;
 
     if (!started) {
-        gcode->get()->line_continuations = IGcodeReader::Continuations::Discard;
         // get any thumbnail bigger than 17x17
-        if (!gcode->get()->stream_thumbnail_start(17, 17, IGcodeReader::ImgType::PNG, true)) {
+        if (!gcode->stream_thumbnail_start(17, 17, IGcodeReader::ImgType::PNG, true)) {
             // no thumbnail found in gcode, just dont send anything
             return make_tuple(JsonResult::Complete, 0);
         }
@@ -679,7 +760,7 @@ tuple<JsonResult, size_t> PreviewRenderer::render(uint8_t *buffer, size_t buffer
         uint8_t dec_chunk[decoded_chunk_size] = { 0 };
         size_t decoded_len = 0;
         while (decoded_len < decoded_chunk_size) {
-            if (gcode->get()->stream_getc(reinterpret_cast<char &>(dec_chunk[decoded_len])) != IGcodeReader::Result_t::RESULT_OK) {
+            if (gcode->stream_getc(reinterpret_cast<char &>(dec_chunk[decoded_len])) != IGcodeReader::Result_t::RESULT_OK) {
                 // probably end of data, or error. Either way stop reading and send whatever was read till now.
                 // if error happens while sending thumbnail, there is not much that can be done to signal that anyway.
                 write_end = true;
@@ -712,6 +793,7 @@ tuple<JsonResult, size_t> PreviewRenderer::render(uint8_t *buffer, size_t buffer
 
 void GcodeMetaRenderer::reset_buffer() {
     gcode_line_buffer.line = GcodeBuffer::String();
+    parsed.reset();
 }
 
 JsonResult GcodeMetaRenderer::out_str_chunk(JsonOutput &output, const GcodeBuffer::String &str) {
@@ -730,11 +812,9 @@ JsonResult GcodeMetaRenderer::out_str_chunk(JsonOutput &output, const GcodeBuffe
 }
 
 tuple<JsonResult, size_t> GcodeMetaRenderer::render(uint8_t *buffer, size_t buffer_size) {
-    assert(gcode->is_open());
     if (first_run) {
         reset_buffer();
-        gcode->get()->line_continuations = IGcodeReader::Continuations::Split;
-        if (!gcode->get()->stream_metadata_start()) {
+        if (!gcode->stream_metadata_start()) {
             return make_tuple(JsonResult::Complete, 0);
         }
         first_run = false;
@@ -756,7 +836,7 @@ tuple<JsonResult, size_t> GcodeMetaRenderer::render(uint8_t *buffer, size_t buff
     while (true) {
         if (gcode_line_buffer.line.is_empty()) {
             // line is empty, that indicates that last line was already processed and we need to fetch another one
-            if (gcode->get()->stream_get_line(gcode_line_buffer) != IGcodeReader::Result_t::RESULT_OK) {
+            if (gcode->stream_get_line(gcode_line_buffer, IGcodeReader::Continuations::Split) != IGcodeReader::Result_t::RESULT_OK) {
                 break;
             }
         }
@@ -776,13 +856,15 @@ tuple<JsonResult, size_t> GcodeMetaRenderer::render(uint8_t *buffer, size_t buff
             // that would look like a fragile assumption, so basing it off the real
             // "problem").
             const bool full_size = gcode_line_buffer.line.len() == gcode_line_buffer.buffer.size();
-            GcodeBuffer::String::parsed_metadata_t parsed = gcode_line_buffer.line.parse_metadata(!full_size);
-            if (parsed.first.begin == nullptr || parsed.second.begin == nullptr) {
+            if (!parsed.has_value()) {
+                parsed = gcode_line_buffer.line.parse_metadata(!full_size);
+            }
+            if (parsed->first.begin == nullptr || parsed->second.begin == nullptr) {
                 reset_buffer(); // reset buffer to fetch another line
                 continue;
             }
 
-            auto filter = meta_filter(parsed.first.c_str());
+            auto filter = meta_filter(parsed->first.c_str());
 
             // Too large headers are only handled and allowed for strings, others
             // aren't expected to exceed 80 chars.
@@ -790,7 +872,7 @@ tuple<JsonResult, size_t> GcodeMetaRenderer::render(uint8_t *buffer, size_t buff
                 // Eat the rest of the header.
                 bool error = false;
                 while (!gcode_line_buffer.line_complete) {
-                    if (gcode->get()->stream_get_line(gcode_line_buffer) != IGcodeReader::Result_t::RESULT_OK) {
+                    if (gcode->stream_get_line(gcode_line_buffer, IGcodeReader::Continuations::Split) != IGcodeReader::Result_t::RESULT_OK) {
                         error = true;
                         break;
                     }
@@ -809,20 +891,20 @@ tuple<JsonResult, size_t> GcodeMetaRenderer::render(uint8_t *buffer, size_t buff
                 break;
             case MetaFilter::String:
                 // Only the name of the field and starting "
-                result = output.output(0, "\"%s\":\"", parsed.first.c_str());
+                result = output.output(0, "\"%s\":\"", parsed->first.c_str());
                 if (result == JsonResult::Complete) {
                     // Will adjust the str_continuation as needed.
-                    result = out_str_chunk(output, parsed.second);
+                    result = out_str_chunk(output, parsed->second);
                 }
                 break;
 
             case MetaFilter::Float: {
                 char *end = nullptr;
-                double v = strtod(parsed.second.c_str(), &end);
+                double v = strtod(parsed->second.c_str(), &end);
                 if (end != nullptr && *end != '\0') {
                     // unable to parse, skip this
                 } else {
-                    result = output.output_field_float_fixed(0, parsed.first.c_str(), v, 2);
+                    result = output.output_field_float_fixed(0, parsed->first.c_str(), v, 2);
                 }
                 break;
             }
@@ -830,15 +912,15 @@ tuple<JsonResult, size_t> GcodeMetaRenderer::render(uint8_t *buffer, size_t buff
             case MetaFilter::Int:
             case MetaFilter::Bool: {
                 char *end = nullptr;
-                long v = strtol(parsed.second.c_str(), &end, 10);
+                long v = strtol(parsed->second.c_str(), &end, 10);
                 if (end != nullptr && *end != '\0') {
                     // Not really an int there. Skip this line.
                 } else {
                     if (filter == MetaFilter::Int) {
-                        result = output.output_field_int(0, parsed.first.c_str(), v);
+                        result = output.output_field_int(0, parsed->first.c_str(), v);
                     } else {
                         // The gcode encodes bools as 0/1, JSON has True and False.
-                        result = output.output_field_bool(0, parsed.first.c_str(), v);
+                        result = output.output_field_bool(0, parsed->first.c_str(), v);
                     }
                 }
                 break;
@@ -943,7 +1025,7 @@ JsonResult DirRenderer::renderState(size_t resume_point, json::JsonOutput &outpu
 
 FileExtra::FileExtra(std::unique_ptr<AnyGcodeFormatReader> gcode_reader_)
     : gcode_reader(std::move(gcode_reader_))
-    , renderer(std::move(GcodeExtra(PreviewRenderer(gcode_reader.get()), GcodeMetaRenderer(gcode_reader.get())))) {}
+    , renderer(std::move(GcodeExtra(PreviewRenderer(gcode_reader->get()), GcodeMetaRenderer(gcode_reader->get())))) {}
 
 FileExtra::FileExtra(const char *base_path, unique_dir_ptr dir)
     : renderer(move(DirRenderer(base_path, move(dir)))) {}
@@ -975,7 +1057,19 @@ RenderState::RenderState(const Printer &printer, const Action &action, optional<
 
             if (auto reader = std::make_unique<AnyGcodeFormatReader>(path); reader->is_open()) {
                 // AnyGcodeFormatReader also handles partial files - so if this is actualy directory with partial file, it will be handled here
-                file_extra = FileExtra(std::move(reader));
+                if ((*reader)->fully_valid()) {
+                    file_extra = FileExtra(std::move(reader));
+                } else {
+                    // Avoid trying to send metadata/previews from partially transfered files, because:
+                    // * We are not sure this'll succeed, maybe we don't have
+                    //   enough downloaded. In that case we would abort sending
+                    //   the data, kill the connection and do other ugly things.
+                    // * Sending the data is very expensive and competes for
+                    //   resources with the download. By postponing the send of
+                    //   the data _after_ it was fully downloaded (which we
+                    //   trigger on our own), we try to avoid some of it.
+                    file_extra = FileExtra();
+                }
             } else if (unique_dir_ptr d(opendir(path)); d.get() != nullptr) {
                 file_extra = FileExtra(path, std::move(d));
             } else if (unique_file_ptr f(fopen(path, "r")); f != nullptr) {

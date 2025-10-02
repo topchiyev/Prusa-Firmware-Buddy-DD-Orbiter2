@@ -14,28 +14,26 @@
 #endif
 
 FooterItemFinda::FooterItemFinda(window_t *parent)
-    : AddSuperWindow<FooterIconText_IntVal>(parent, &img::finda_16x16, static_makeView, static_readValue) {
+    : FooterIconText_IntVal(parent, &img::finda_16x16, static_makeView, static_readValue) {
 }
 
 int FooterItemFinda::static_readValue() {
-    return int(marlin_vars()->mmu2_finda);
+    return int(marlin_vars().mmu2_finda);
 }
 
 string_view_utf8 FooterItemFinda::static_makeView(int value) {
     //@@TODO there is a strange comment in FooterItemFSensor::static_makeView about the last character not being rendered
     // Not sure why but using the same workaround.
     // Another funny thing is that the LED in FINDA shows the exact opposite - this needs to be discussed with Content ;)
-    static const char on[] = N_("ON "); // filament present
-    static const char off[] = N_("OFF "); // filament NOT present
-    return _(value ? on : off);
+    return _(value ? N_("ON ") : N_("OFF "));
 }
 
 FooterItemCurrentTool::FooterItemCurrentTool(window_t *parent)
-    : AddSuperWindow<FooterIconText_IntVal>(parent, &img::spool_16x16, static_makeView, static_readValue) {
+    : FooterIconText_IntVal(parent, &img::spool_16x16, static_makeView, static_readValue) {
 }
 
 int FooterItemCurrentTool::static_readValue() {
-    return int(marlin_vars()->active_extruder);
+    return int(marlin_vars().active_extruder);
 }
 
 string_view_utf8 FooterItemCurrentTool::static_makeView(int value) {

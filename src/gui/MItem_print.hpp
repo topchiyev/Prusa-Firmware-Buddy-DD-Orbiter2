@@ -7,9 +7,9 @@
 #include <option/has_mmu2.h>
 #include <guiconfig/guiconfig.h>
 
-class MI_NOZZLE_ABSTRACT : public WiSpinInt {
+class MI_NOZZLE_ABSTRACT : public WiSpin {
     static constexpr const char *const generic_label =
-#ifdef USE_ST7789
+#if HAS_MINI_DISPLAY()
         N_("Nozzle"); // Generic string for no toolchanger
 #else
         N_("Nozzle Temperature");
@@ -43,7 +43,7 @@ public:
         }
 #else
         static_assert(N == 0, "For single tool printer, only 0 nozzle is allowed ");
-    #ifdef USE_ST7789
+    #if HAS_MINI_DISPLAY()
         return N_("Nozzle");
     #else
         return N_("Nozzle Temperature");
@@ -55,9 +55,9 @@ public:
         : MI_NOZZLE_ABSTRACT(N, get_label()) {}
 };
 
-class MI_HEATBED : public WiSpinInt {
+class MI_HEATBED : public WiSpin {
     constexpr static const char *label =
-#ifdef USE_ST7789
+#if HAS_MINI_DISPLAY()
         N_("Heatbed");
 #else
         N_("Heatbed Temperature");
@@ -68,9 +68,9 @@ public:
     virtual void OnClick() override;
 };
 
-class MI_PRINTFAN : public WiSpinInt {
+class MI_PRINTFAN : public WiSpin {
     constexpr static const char *label =
-#ifdef USE_ST7789
+#if HAS_MINI_DISPLAY()
         N_("Print Fan");
 #else
         N_("Print Fan Speed");
@@ -81,7 +81,7 @@ public:
     virtual void OnClick() override;
 };
 
-class MI_SPEED : public WiSpinInt {
+class MI_SPEED : public WiSpin {
     constexpr static const char *label = N_("Print Speed");
 
 public:
@@ -89,7 +89,7 @@ public:
     virtual void OnClick() override;
 };
 
-class MI_FLOWFACT_ABSTRACT : public WiSpinInt {
+class MI_FLOWFACT_ABSTRACT : public WiSpin {
     static constexpr const char *const generic_label = N_("Flow Factor"); // Generic string for no toolchanger
 
     uint8_t tool_nr;

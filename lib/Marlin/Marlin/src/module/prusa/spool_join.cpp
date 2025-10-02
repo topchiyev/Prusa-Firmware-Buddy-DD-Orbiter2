@@ -1,9 +1,9 @@
 #include "spool_join.hpp"
 #include "printers.h"
-#if PRINTER_IS_PRUSA_XL
+#if PRINTER_IS_PRUSA_XL()
     #include "Configuration_XL.h"
 #endif
-#include "log.h"
+#include <logging/log.hpp>
 #include "marlin_server.hpp"
 #include "module/motion.h"
 #include "module/prusa/tool_mapper.hpp"
@@ -15,23 +15,24 @@
 #include "marlin_vars.hpp"
 #include "module/tool_change.h"
 #include "lcd/extensible_ui/ui_api.h" // for ExtUI::onStatusChanged to send notification about spool join
-#include "filament.hpp" // for filament::set_type_in_extruder
 #include <config_store/store_instance.hpp>
 #include "mmu2_toolchanger_common.hpp"
-
-bool is_tool_enabled([[maybe_unused]] uint8_t idx) {
-#if HAS_TOOLCHANGER()
-    return prusa_toolchanger.is_tool_enabled(idx);
-#elif HAS_MMU2()
-    return MMU2::mmu2.Enabled(); // All 5 filament slots are always available
-#endif
-}
 
 SpoolJoin spool_join;
 
 LOG_COMPONENT_REF(Marlin);
 
+SpoolJoin &SpoolJoin::operator=(const SpoolJoin &other) {
+    std::scoped_lock lock(mutex, other.mutex);
+    this->num_joins = other.num_joins;
+    for (size_t i = 0; i < joins.size(); i++) {
+        this->joins[i] = other.joins[i];
+    }
+    return *this;
+}
+
 void SpoolJoin::reset() {
+    std::unique_lock lock(mutex);
     num_joins = 0;
     for (auto &join : joins) {
         join.spool_1 = join.spool_2 = reset_value;
@@ -39,6 +40,7 @@ void SpoolJoin::reset() {
 }
 
 bool SpoolJoin::add_join(uint8_t spool_1, uint8_t spool_2) {
+    std::unique_lock lock(mutex);
     if (num_joins >= joins.size() || !is_tool_enabled(spool_1) || !is_tool_enabled(spool_2) || spool_1 == spool_2) {
         return false;
     }
@@ -54,7 +56,7 @@ bool SpoolJoin::add_join(uint8_t spool_1, uint8_t spool_2) {
     }
 
     // Prevent adding loops
-    if (get_first_spool_1_from_chain(spool_2) == get_first_spool_1_from_chain(spool_1)) {
+    if (get_first_spool_1_from_chain_unlocked(spool_2) == get_first_spool_1_from_chain_unlocked(spool_1)) {
         return false;
     }
 
@@ -88,6 +90,7 @@ void SpoolJoin::remove_join_at(size_t idx) {
 }
 
 bool SpoolJoin::reroute_joins_containing(uint8_t spool) {
+    std::unique_lock lock(mutex);
     size_t preceding_idx { std::size(joins) };
     size_t followup_idx { std::size(joins) };
 
@@ -120,6 +123,11 @@ bool SpoolJoin::reroute_joins_containing(uint8_t spool) {
 }
 
 bool SpoolJoin::remove_join_chain_containing(uint8_t spool) {
+    std::unique_lock lock(mutex);
+    return remove_join_chain_containing_unlocked(spool);
+}
+
+bool SpoolJoin::remove_join_chain_containing_unlocked(uint8_t spool) {
     size_t preceding_idx { std::size(joins) };
     size_t followup_idx { std::size(joins) };
 
@@ -138,21 +146,21 @@ bool SpoolJoin::remove_join_chain_containing(uint8_t spool) {
         remove_join_at(std::max(preceding_idx, followup_idx)); // remove_join_at can reoder last item, so remove the bigger of the two indices in case one of them is last
         remove_join_at(std::min(preceding_idx, followup_idx)); // remove the other index
 
-        remove_join_chain_containing(tmp_preceding);
-        remove_join_chain_containing(tmp_followup);
+        remove_join_chain_containing_unlocked(tmp_preceding);
+        remove_join_chain_containing_unlocked(tmp_followup);
         return true;
     } else if (preceding_idx != std::size(joins)) {
         // if found && first in chain -> remove
 
         auto tmp = joins[preceding_idx].spool_1;
         remove_join_at(preceding_idx);
-        remove_join_chain_containing(tmp);
+        remove_join_chain_containing_unlocked(tmp);
         return true;
     } else if (followup_idx != std::size(joins)) {
         // if found && last in chain -> remove
         auto tmp = joins[followup_idx].spool_2;
         remove_join_at(followup_idx);
-        remove_join_chain_containing(tmp);
+        remove_join_chain_containing_unlocked(tmp);
         return true;
     } else {
         // we don't have it
@@ -161,6 +169,11 @@ bool SpoolJoin::remove_join_chain_containing(uint8_t spool) {
 }
 
 uint8_t SpoolJoin::get_first_spool_1_from_chain(uint8_t spool_2) const {
+    std::unique_lock lock(mutex);
+    return get_first_spool_1_from_chain_unlocked(spool_2);
+}
+
+uint8_t SpoolJoin::get_first_spool_1_from_chain_unlocked(uint8_t spool_2) const {
     for (size_t i = 0; i < num_joins; ++i) {
         if (joins[i].spool_2 == spool_2) {
             spool_2 = joins[i].spool_1;
@@ -171,6 +184,11 @@ uint8_t SpoolJoin::get_first_spool_1_from_chain(uint8_t spool_2) const {
 }
 
 std::optional<uint8_t> SpoolJoin::get_spool_2(uint8_t tool) const {
+    std::unique_lock lock(mutex);
+    return get_spool_2_unlocked(tool);
+}
+
+std::optional<uint8_t> SpoolJoin::get_spool_2_unlocked(uint8_t tool) const {
     for (size_t i = 0; i < num_joins; i++) {
         if (joins[i].spool_1 == tool) {
             return joins[i].spool_2;
@@ -181,7 +199,8 @@ std::optional<uint8_t> SpoolJoin::get_spool_2(uint8_t tool) const {
 }
 
 bool SpoolJoin::do_join(uint8_t current_tool) {
-    auto join_settings = spool_join.get_spool_2(current_tool);
+    std::unique_lock lock(mutex);
+    auto join_settings = spool_join.get_spool_2_unlocked(current_tool);
     if (!join_settings.has_value()) {
         return false;
     }
@@ -195,14 +214,14 @@ bool SpoolJoin::do_join(uint8_t current_tool) {
 
     xyze_pos_t return_pos = current_position;
 
-#if DISABLED(SIGNLENOZZLE) && PRINTER_IS_PRUSA_XL
+#if DISABLED(SIGNLENOZZLE) && PRINTER_IS_PRUSA_XL()
 
     // Park current tool, to get away from print
     tool_change(PrusaToolChanger::MARLIN_NO_TOOL_PICKED, tool_return_t::no_return);
 
     // transfer target temperature from one tool to another
     auto target_temp = thermalManager.degTargetHotend(current_tool);
-    float display_temp = marlin_vars()->hotend(current_tool).display_nozzle;
+    float display_temp = marlin_vars().hotend(current_tool).display_nozzle;
     thermalManager.setTargetHotend(target_temp, new_tool);
     marlin_server::set_temp_to_display(display_temp, new_tool);
 
@@ -221,7 +240,7 @@ bool SpoolJoin::do_join(uint8_t current_tool) {
     }
     tool_mapper.set_enable(true);
 
-#if DISABLED(SINGLENOZZLE) && PRINTER_IS_PRUSA_XL
+#if DISABLED(SINGLENOZZLE) && PRINTER_IS_PRUSA_XL()
     if (target_temp != 0) {
         thermalManager.wait_for_hotend(new_tool, false, true);
     }
@@ -242,6 +261,9 @@ bool SpoolJoin::do_join(uint8_t current_tool) {
 }
 
 void SpoolJoin::serialize(serialized_state_t &to) {
+    // NOTE: We do not lock here now, as it is not possible other thread would be modifying
+    // the objekt at this point (they do that before starting the print). If this ever changes
+    // we should rethink this, this is called from default task, not ISR, so it might be ok to lock.
     // init to defaults
     to = serialized_state_t();
     for (size_t i = 0; i < num_joins; i++) {
@@ -250,6 +272,7 @@ void SpoolJoin::serialize(serialized_state_t &to) {
 }
 
 void SpoolJoin::deserialize(serialized_state_t &from) {
+    // Note: both functions below already lock, so no need here
     reset();
     for (auto join : from.joins) {
         // this will fail for undefined joins and otherwise invalid joins. Only valid joins will be added

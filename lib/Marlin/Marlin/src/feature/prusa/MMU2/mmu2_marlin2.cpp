@@ -16,7 +16,7 @@
 
 namespace MMU2 {
 
-#if PRINTER_IS_PRUSA_MK3_5
+#if PRINTER_IS_PRUSA_MK3_5()
 // MK3.5 underextrudes by default to match mk3's behaviour,
 // that doesn't play nicely with the absolute move distances of the MMU
 // -> need to compensate for the slight discrepancy.
@@ -110,10 +110,15 @@ void motion_do_blocking_move_to_z(float z, float feedRate_mm_s) {
 #endif
 
     do_blocking_move_to(target_pos, feedRate_mm_s);
+
+    // But since the plan_park_move_to overrides the current position values (which are by default in
+    // native (without MBL) coordinates and we apply MBL to them) we need to reset the z height to
+    // make all the future moves correct.
+    current_position.z = z;
 }
 
 void nozzle_park() {
-    static constexpr xyz_pos_t park_point = NOZZLE_PARK_POINT_M600;
+    static constexpr xyz_pos_t park_point = { { XYZ_NOZZLE_PARK_POINT_M600 } };
     nozzle.park(2, park_point);
 }
 

@@ -8,12 +8,13 @@
 #include "selftest_frame.hpp"
 #include "status_footer.hpp"
 
-class SelftestFrameFirstLayerQuestions : public AddSuperWindow<SelftestFrameWithRadio> {
+class SelftestFrameFirstLayerQuestions : public SelftestFrameWithRadio {
     StatusFooter footer;
 
     window_text_t text; // in middle of screen
 
-    std::array<char, 21 * 9 + 1> txt_buff; // 21 columns, 9 lines + '\0' char
+    StringViewUtf8Parameters<10> params;
+
 protected:
     virtual void change() override;
 

@@ -57,7 +57,7 @@
 #include "feature/closedloop.h"
 #include "feature/safety_timer.h"
 #include "feature/bed_preheat.hpp"
-#if !BOARD_IS_DWARF
+#if !BOARD_IS_DWARF()
 #include "pause_stubbed.hpp"
 #endif
 
@@ -119,11 +119,6 @@
 
 #if ENABLED(DAC_STEPPER_CURRENT)
   #include "feature/dac/stepper_dac.h"
-#endif
-
-#if ENABLED(EXPERIMENTAL_I2CBUS)
-  #include "feature/twibus.h"
-  TWIBus i2c;
 #endif
 
 #if ENABLED(I2C_POSITION_ENCODERS)
@@ -256,18 +251,6 @@ void setup_powerhold() {
 #if HAS_STEPPER_RESET
   void disableStepperDrivers() { OUT_WRITE(STEPPER_RESET_PIN, LOW); } // Drive down to keep motor driver chips in reset
   void enableStepperDrivers()  { SET_INPUT(STEPPER_RESET_PIN); }      // Set to input, allowing pullups to pull the pin high
-#endif
-
-#if ENABLED(EXPERIMENTAL_I2CBUS) && I2C_SLAVE_ADDRESS > 0
-
-  void i2c_on_receive(int bytes) { // just echo all bytes received to serial
-    i2c.receive(bytes);
-  }
-
-  void i2c_on_request() {          // just send dummy data for now
-    i2c.reply("Hello World!\n");
-  }
-
 #endif
 
 /**
@@ -444,7 +427,7 @@ void manage_inactivity(const bool ignore_stepper_queue/*=false*/) {
       if (!already_shutdown_steppers) {
         already_shutdown_steppers = true;  // L6470 SPI will consume 99% of free time without this
 
-        #if _DEBUG && !BOARD_IS_DWARF
+        #if _DEBUG && !BOARD_IS_DWARF()
         // Report steppers being disabled to the user
         // Skip if position not trusted to avoid warnings when position is not important
         if(axis_known_position) {
@@ -771,7 +754,7 @@ void idle(
  * Kill all activity and lock the machine.
  * After this the machine will need to be reset.
  */
-void kill(PGM_P const lcd_error/*=nullptr*/, PGM_P const lcd_component/*=nullptr*/, const bool steppers_off/*=false*/) {
+void kill(PGM_P const lcd_error, PGM_P const lcd_component/*=nullptr*/, const bool steppers_off/*=false*/) {
   thermalManager.disable_all_heaters();
   
     //while connected to octoprint, this line kills whole firmware
@@ -1185,7 +1168,7 @@ void setup() {
     #if ENABLED(PRUSA_DWARF)
       test_tmc_connection(false, false, false, true); // we have the extruder only
     #else
-      test_tmc_connection(true, true, true, true);
+      initial_test_tmc_connection();
     #endif
   #endif
 
@@ -1209,7 +1192,7 @@ void loop() {
   #if !ENABLED(MARLIN_DISABLE_INFINITE_LOOP)
   for (;;) {
   #endif
-  #if !BOARD_IS_DWARF
+  #if !BOARD_IS_DWARF()
     Pause::Instance().finalize_user_stop();
   #endif
 

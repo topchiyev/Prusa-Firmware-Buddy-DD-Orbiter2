@@ -7,7 +7,6 @@
 #include "../../../lib/Marlin/Marlin/src/feature/prusa/e-stall_detector.h"
 #include "pause_stubbed.hpp"
 #include "pause_settings.hpp"
-#include <option/has_human_interactions.h>
 
 using namespace filament_gcodes;
 
@@ -31,31 +30,18 @@ using namespace filament_gcodes;
  *              - W1  - preheat with cool down option
  *              - W2  - preheat with return option
  *              - W3  - preheat with cool down and return options
- *  O<value>    - Color number corresponding to filament::Colour, RGB order
+ *  O<value>    - Color number corresponding to Color, RGB order
  *  R           - resume print if paused
  *
  *  Default values are used for omitted arguments.
  */
 void GcodeSuite::M701() {
-    auto filament_to_be_loaded = filament::Type::NONE;
-    const char *text_begin = 0;
-    if (parser.seen('S')) {
-        text_begin = strchr(parser.string_arg, '"');
-        if (text_begin) {
-            ++text_begin; // move pointer from '"' to first letter
-            const char *text_end = strchr(text_begin, '"');
-            if (text_end) {
-                auto filament = filament::get_type(text_begin, text_end - text_begin);
-                if (filament != filament::Type::NONE) {
-                    filament_to_be_loaded = filament;
-                }
-            }
-        }
-    }
+    const char *text_begin = nullptr;
+    const FilamentType filament_to_be_loaded = PrusaGcodeSuite::get_filament_type_from_command('S', &text_begin);
 
-    std::optional<filament::Colour> color_to_be_loaded = { std::nullopt };
+    std::optional<Color> color_to_be_loaded = { std::nullopt };
     if (parser.seen('O')) {
-        color_to_be_loaded = filament::Colour::from_int(parser.longval('O'));
+        color_to_be_loaded = Color::from_raw(parser.longval('O'));
     }
     const bool isL = (parser.seen('L') && (!text_begin || strchr(parser.string_arg, 'L') < text_begin));
     const std::optional<float> fast_load_length = isL ? std::optional<float>(::abs(parser.value_axis_units(E_AXIS))) : std::nullopt;
@@ -77,10 +63,6 @@ void GcodeSuite::M701() {
     const ResumePrint_t resume_print = static_cast<ResumePrint_t>(parser.seen('R'));
 
     M701_no_parser(filament_to_be_loaded, fast_load_length, min_Z_pos, op_preheat, target_extruder, mmu_slot, color_to_be_loaded, resume_print);
-
-#if !HAS_HUMAN_INTERACTIONS()
-    FSensors_instance().ClrM600Sent(); // reset filament sensor M600 sent flag
-#endif
 }
 
 /**

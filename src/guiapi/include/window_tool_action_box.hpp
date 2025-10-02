@@ -30,6 +30,7 @@ enum class Action {
     CalibrateDock,
     Park,
     Return,
+    Select,
 };
 
 enum class DialogResult {
@@ -80,6 +81,11 @@ consteval auto get_label(Tool tool, Action action) -> const char * {
         { Tool::Tool2, Action::PickInactive, N_("Pick Tool 2") },
         { Tool::Tool4, Action::PickInactive, N_("Pick Tool 4") },
         { Tool::Tool5, Action::PickInactive, N_("Pick Tool 5") },
+        { Tool::Tool1, Action::Select, N_("Pick Tool 1") },
+        { Tool::Tool3, Action::Select, N_("Pick Tool 3") },
+        { Tool::Tool2, Action::Select, N_("Pick Tool 2") },
+        { Tool::Tool4, Action::Select, N_("Pick Tool 4") },
+        { Tool::Tool5, Action::Select, N_("Pick Tool 5") },
         { Tool::Tool1, Action::PickCurrent, N_("Pick Tool 1 (Current)") },
         { Tool::Tool3, Action::PickCurrent, N_("Pick Tool 3 (Current)") },
         { Tool::Tool2, Action::PickCurrent, N_("Pick Tool 2 (Current)") },
@@ -126,6 +132,7 @@ template <Tool tool, Action action, is_closed_on_click_t close_on_click, is_hidd
 class MI_TOOL : public I_MI_TOOL {
 public:
     static constexpr ToolBox::Tool TOOL = tool;
+
     MI_TOOL()
         : I_MI_TOOL(get_label(tool, action), tool, action, hidden_if_inactive == is_hidden_if_inactive_t::yes) {
         has_return_behavior_ = (action == Action::Return);
@@ -153,6 +160,16 @@ using MenuPickPark = WinMenuContainer<MI_Return,
     MI_PickPark_ToolBox<Tool::Tool3>,
     MI_PickPark_ToolBox<Tool::Tool4>,
     MI_PickPark_ToolBox<Tool::Tool5>>;
+
+template <Tool tool>
+using MI_Select = MI_TOOL<tool, Action::Select, is_closed_on_click_t::yes, is_hidden_if_inactive_t::no>;
+
+using MenuSelect = WinMenuContainer<MI_Return,
+    MI_Select<Tool::Tool1>,
+    MI_Select<Tool::Tool2>,
+    MI_Select<Tool::Tool3>,
+    MI_Select<Tool::Tool4>,
+    MI_Select<Tool::Tool5>>;
 
 template <Tool tool>
 using MI_PickAndGo_Current = MI_TOOL<tool, Action::PickCurrent, is_closed_on_click_t::yes, is_hidden_if_inactive_t::yes>;
@@ -183,7 +200,7 @@ using MenuCalibrateDock = WinMenuContainer<MI_Return,
     MI_CalibrateDock<Tool::Tool5>>;
 
 template <typename ActionMenuT>
-concept ActionMenuC = is_any_of<ActionMenuT, MenuPickPark, MenuPickAndGo, MenuCalibrateDock>;
+concept ActionMenuC = is_any_of<ActionMenuT, MenuPickPark, MenuSelect, MenuPickAndGo, MenuCalibrateDock>;
 
 template <typename ActionMenuT>
 concept ActionMenuHasFooterC = ActionMenuC<ActionMenuT> && is_any_of<ActionMenuT, MenuPickPark>;
@@ -198,7 +215,7 @@ consteval Rect16 get_rect_screen_body() {
 }
 
 template <ActionMenuC ToolMenuT>
-class DialogToolActionBox : public AddSuperWindow<IDialog> {
+class DialogToolActionBox : public IDialog {
     ToolMenuT tool_menu;
 
     window_menu_t menu;
@@ -210,7 +227,7 @@ class DialogToolActionBox : public AddSuperWindow<IDialog> {
 
 public:
     DialogToolActionBox()
-        : AddSuperWindow<IDialog>(get_rect_screen_body<ToolMenuT>())
+        : IDialog(get_rect_screen_body<ToolMenuT>())
         , menu(this, get_rect_screen_body<ToolMenuT>(), &tool_menu)
         , header(this) {
 
@@ -256,10 +273,10 @@ public:
 
     void Preselect(size_t index) {
         // This index works only on enabled menu items, so index actually corresponds to tool number
-        menu.SetIndex(index);
+        menu.menu.move_focus_to_index(index);
     }
 
-    void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override {
+    void windowEvent(window_t *sender, GUI_event_t event, void *param) override {
         switch (event) {
         case GUI_event_t::CHILD_CLICK: {
             event_conversion_union un { .pvoid = param };
@@ -272,7 +289,7 @@ public:
             break;
         }
         default:
-            SuperWindowEvent(sender, event, param);
+            IDialog::windowEvent(sender, event, param);
         }
     }
 

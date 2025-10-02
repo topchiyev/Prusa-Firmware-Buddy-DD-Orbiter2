@@ -464,7 +464,7 @@
 #define HOMING_MAX_ATTEMPTS 10
 
 // Homing hits each endstop, retracts by these distances, then does a slower bump.
-#define X_HOME_BUMP_MM 20
+#define X_HOME_BUMP_MM 15
 #define Y_HOME_BUMP_MM 20
 #define Z_HOME_BUMP_MM 2
 #define HOMING_BUMP_DIVISOR \
@@ -477,10 +477,15 @@
 #define HOMING_BACKOFF_POST_MM { 2, 2, 0 }
 
 // When G28 is called, this option will make Y home before X
-//#define HOME_Y_BEFORE_X
+// X must be homed before Y to avoid Nozzle Cleaner
+#define HOME_Y_BEFORE_X false
 
 // Enable this if X or Y can't home without homing the other axis first.
-//#define CODEPENDENT_XY_HOMING
+#define CODEPENDENT_XY_HOMING true
+#include <option/has_nozzle_cleaner.h>
+#if HAS_NOZZLE_CLEANER()
+    #define AVOID_NOZZLE_CLEANER_Y_FIRST true
+#endif
 
 /**
  * Z Steppers Auto-Alignment
@@ -1356,13 +1361,26 @@
             { -72, 2400 }, \
             { 40, 700 }, \
             { -55, 400 }, \
+            { 85, 6000},\
+            { 3, 3000},\
+            { -25, 6000},\
+            { -20, 300},\
+            { 20, 300},\
+            { -60, 300}\
         }
     #define FILAMENT_RUNOUT_RAMMING_SEQUENCE \
         { \
-            { 7, 1500 }, \
-            { -50, 2700 }, \
-            { -5, 50 }, \
-            { -50, 1500 }, \
+            { 20, 1200 }, \
+            { 2, 2400 }, \
+            { -72, 2400 }, \
+            { 40, 700 }, \
+            { -55, 400 }, \
+            { 85, 6000},\
+            { 3, 3000},\
+            { -25, 6000},\
+            { -20, 300},\
+            { 20, 300},\
+            { -60, 300}\
         }
     #define PAUSE_PARK_RETRACT_FEEDRATE 40 // (mm/s) Initial retract feedrate.
     /**
@@ -1538,7 +1556,7 @@
 
     #if AXIS_IS_TMC(X)
         // 200 step
-        #define X_CURRENT 360 // (mA) RMS current. Multiply by 1.414 for peak current.
+        #define X_CURRENT 500 // (mA) RMS current. Multiply by 1.414 for peak current.
         #define X_MICROSTEPS 16 // 0..256
         #define X_RSENSE 0.22
         #define X_CHAIN_POS 0
@@ -1552,7 +1570,7 @@
 
     #if AXIS_IS_TMC(Y)
         // 200 step
-        #define Y_CURRENT 360
+        #define Y_CURRENT 500
         #define Y_MICROSTEPS 16
         #define Y_RSENSE 0.22
         #define Y_CHAIN_POS 0
@@ -1662,9 +1680,9 @@
    * Use Trinamic's ultra quiet stepping mode.
    * When disabled, Marlin will use spreadCycle stepping mode.
    */
-    #define STEALTHCHOP_XY
-    #define STEALTHCHOP_Z
-    #define STEALTHCHOP_E
+    //#define STEALTHCHOP_XY
+    //#define STEALTHCHOP_Z
+    //#define STEALTHCHOP_E
 
     /**
    * Optimize spreadCycle chopper parameters by using predefined parameter sets
@@ -1728,23 +1746,27 @@
  * Provides crash detection during printing and proper crash recovery.
  * Sensorless homing must be turned on and sensitivities set accordingly.
  */
-//#define CRASH_RECOVERY
+#define CRASH_RECOVERY
 #ifdef CRASH_RECOVERY
-    #define CRASH_STALL_GUARD 2 // internal value representing sensitivity
-    #define CRASH_PERIOD 210    // (steps per tick) - reciprocal value of minimal speed
-    #define CRASH_TIMER 45      // seconds before counter reset
-    #define CRASH_COUNTER_MAX 3 // max crashes with automatic recovery
+    #define CRASH_STALL_GUARD { 2, 2 } // internal value representing sensitivity
+    #define CRASH_MAX_PERIOD { STALL_THRESHOLD_TMC2130, STALL_THRESHOLD_TMC2130 }
+    #define CRASH_FILTER (false)       // Stallguard filtering for crash detection
+    #define CRASH_TIMER 45             // seconds before counter reset
+    #define CRASH_COUNTER_MAX 3        // max crashes with automatic recovery
 #endif
 
 /**
  * Recovery from power failure. This is a distinct implementation from
  * POWER_LOSS_RECOVERY specific to Prusa printers.
  */
-//#define POWER_PANIC
+#define POWER_PANIC
 
 #ifdef POWER_PANIC
     #define POWER_PANIC_Z_LIFT_CYCLES 4 // 4xFullStep cycles = ~0.64mm
     #define POWER_PANIC_MAX_BED_DIFF 10 // Maximum bed temperature (C) difference for auto-recovery
+
+    // milliseconds to wait on hold before auto-restarting during short power failures
+    #define POWER_PANIC_HOLD_RST_MS 5000
 
     #define POWER_PANIC_X_CURRENT 350 // (mA) RMS current for parking
     #define POWER_PANIC_X_FEEDRATE 200 // (mm/s, running at POWER_PANIC_X_CURRENT)
@@ -1783,12 +1805,27 @@
 //#define SENSORLESS_PROBING
 
     #if EITHER(SENSORLESS_HOMING, SENSORLESS_PROBING)
-        #define X_STALL_SENSITIVITY 1
-        #define Y_STALL_SENSITIVITY 1
-        //#define Z_STALL_SENSITIVITY  8
+        #define X_STALL_SENSITIVITY  0
+        #define Y_STALL_SENSITIVITY  0
+        #define Z_STALL_SENSITIVITY  4
 
-        #define STALL_THRESHOLD_TMC2130 0xFFFFF
-        #define STALL_THRESHOLD_TMC2209 0xFFFFF
+        // TODO: this is just a ballpark value
+        #define STALL_THRESHOLD_TMC2130 400 // (steps per tick) - reciprocal value of minimal speed
+    #endif
+
+    #ifdef IMPROVE_HOMING_RELIABILITY
+        #define XY_HOMING_ACCELERATION 1250
+        #define XY_HOMING_JERK 8
+        #define X_CURRENT_HOME X_CURRENT
+        #define Y_CURRENT_HOME Y_CURRENT
+        #ifdef PRECISE_HOMING_COREXY
+            #define XY_HOMING_HOLDING_CURRENT_A 900     // mA: holding current for motor A
+            #define XY_HOMING_ORIGIN_OFFSET -5.f        // mm: parallel distance from initial origin
+            #define XY_HOMING_ORIGIN_MAX_RETRIES 6      // count: maximum number of refinement attempts
+            #define XY_HOMING_ORIGIN_BUMPS_MAX_ERR 0.15 // mm: max error between acceptable probes
+            #define XY_HOMING_ORIGIN_SHIFT_X 5.f        // mm: post-refinement X origin shift
+            #define XY_HOMING_ORIGIN_SHIFT_Y 5.f        // mm: post-refinement Y origin shift
+        #endif
     #endif
 
     /**

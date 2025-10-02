@@ -3,7 +3,6 @@
 #include "IDialog.hpp"
 #include "window_header.hpp"
 #include "screen.hpp"
-#include "display.h"
 #include "window_text.hpp"
 #include "window_numb.hpp"
 #include "window_menu_adv.hpp"
@@ -11,12 +10,12 @@
 #include "window_arrows.hpp"
 #include <guiconfig/guiconfig.h>
 
-class DialogMoveZ : public AddSuperWindow<IDialog> {
+class DialogMoveZ : public IDialog {
 private:
     static bool DialogShown;
     constexpr static const char *const headerLabel = N_("Z AXIS MOVE");
     constexpr static const char *const axisLabel = N_("Z-axis");
-#if (PRINTER_IS_PRUSA_XL || PRINTER_IS_PRUSA_iX) // XL moves bed down while Z goes up
+#if (PRINTER_IS_PRUSA_XL() || PRINTER_IS_PRUSA_iX()) // XL moves bed down while Z goes up
     constexpr static const char *const infoTextContent = N_("Turn the knob to move Heatbed");
 #else /*PRINTER_TYPE*/
     constexpr static const char *const infoTextContent = N_("Turn the knob to move Z-axis");
@@ -49,7 +48,7 @@ private:
     static constexpr Font font { GuiDefaults::FontBig };
     static constexpr font_size_t font_size { resource_font_size(font) };
 
-#ifdef USE_ST7789
+#if HAS_MINI_DISPLAY()
     static constexpr Rect16 infoText_rc { 0, 45, 240, 60 };
     static constexpr Rect16 closeText_rc { 0, 90, 240, 60 };
     static constexpr Rect16 icon_rc { 80, 154, 81, 55 };
@@ -59,7 +58,7 @@ private:
     static constexpr Rect16 numb_rc { 126, 223, 114, 21 };
     static constexpr Rect16 arrows_rc { 113, 223, 14, 21 };
 #endif
-#ifdef USE_ILI9488
+#if HAS_LARGE_DISPLAY()
     static constexpr Rect16 infoText_rc { 0, 45, 480, 60 };
     static constexpr Rect16 closeText_rc { 0, 90, 480, 60 };
     static constexpr Rect16 icon_rc { 200, 171, 81, 55 };
@@ -75,7 +74,7 @@ private:
     DialogMoveZ();
 
 protected:
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 
 public:
     static void Show();

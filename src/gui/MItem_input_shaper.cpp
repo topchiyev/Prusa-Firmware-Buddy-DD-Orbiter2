@@ -1,6 +1,8 @@
 #include "MItem_input_shaper.hpp"
 
 #include "ScreenHandler.hpp"
+#include <MItem_tools.hpp>
+#include <window_msgbox.hpp>
 
 MI_IS_X_ONOFF::MI_IS_X_ONOFF()
     : WI_ICON_SWITCH_OFF_ON_t(false /* set in ScreenMenuInputShaper::update_gui*/, _(label), nullptr, is_enabled_t::no, is_hidden_t::dev) {
@@ -31,16 +33,7 @@ void MI_IS_Y_ONOFF::OnChange(size_t) {
 }
 
 MI_IS_X_TYPE::MI_IS_X_TYPE()
-    // clang-format off
-    : WI_SWITCH_t<6>(0 /* set in ScreenMenuInputShaper::update_gui*/, _(label), nullptr, is_enabled_t::no, is_hidden_t::no
-    , string_view_utf8::MakeCPUFLASH((const uint8_t *)input_shaper::to_string(input_shaper::Type::zv))
-    , string_view_utf8::MakeCPUFLASH((const uint8_t *)input_shaper::to_string(input_shaper::Type::zvd))
-    , string_view_utf8::MakeCPUFLASH((const uint8_t *)input_shaper::to_string(input_shaper::Type::mzv))
-    , string_view_utf8::MakeCPUFLASH((const uint8_t *)input_shaper::to_string(input_shaper::Type::ei))
-    , string_view_utf8::MakeCPUFLASH((const uint8_t *)input_shaper::to_string(input_shaper::Type::ei_2hump))
-    , string_view_utf8::MakeCPUFLASH((const uint8_t *)input_shaper::to_string(input_shaper::Type::ei_3hump))
-    ) {
-    // clang-format on
+    : WiEnumSwitch(/* index is set in ScreenMenuInputShaper::update_gui*/ _(label), input_shaper::filter_names, false, input_shaper::enabled_filters) {
 }
 
 void MI_IS_X_TYPE::OnChange(size_t) {
@@ -53,16 +46,7 @@ void MI_IS_X_TYPE::OnChange(size_t) {
 }
 
 MI_IS_Y_TYPE::MI_IS_Y_TYPE()
-    // clang-format off
-    : WI_SWITCH_t<6>(0 /* set in ScreenMenuInputShaper::update_gui*/, _(label), nullptr, is_enabled_t::no, is_hidden_t::no
-    , string_view_utf8::MakeCPUFLASH((const uint8_t *)input_shaper::to_string(input_shaper::Type::zv))
-    , string_view_utf8::MakeCPUFLASH((const uint8_t *)input_shaper::to_string(input_shaper::Type::zvd))
-    , string_view_utf8::MakeCPUFLASH((const uint8_t *)input_shaper::to_string(input_shaper::Type::mzv))
-    , string_view_utf8::MakeCPUFLASH((const uint8_t *)input_shaper::to_string(input_shaper::Type::ei))
-    , string_view_utf8::MakeCPUFLASH((const uint8_t *)input_shaper::to_string(input_shaper::Type::ei_2hump))
-    , string_view_utf8::MakeCPUFLASH((const uint8_t *)input_shaper::to_string(input_shaper::Type::ei_3hump))
-    ) {
-    // clang-format on
+    : WiEnumSwitch(/* set in ScreenMenuInputShaper::update_gui*/ _(label), input_shaper::filter_names, false, input_shaper::enabled_filters) {
 }
 
 void MI_IS_Y_TYPE::OnChange(size_t) {
@@ -74,13 +58,14 @@ void MI_IS_Y_TYPE::OnChange(size_t) {
     gui_try_gcode_with_msg("M9200");
 }
 
-static constexpr SpinConfigInt is_frequency_spin_config = makeSpinConfig<int>(
-    { static_cast<int>(input_shaper::frequency_safe_min), static_cast<int>(input_shaper::frequency_safe_max), 1 },
-    "Hz",
-    spin_off_opt_t::no);
+static constexpr NumericInputConfig is_frequency_spin_config {
+    .min_value = input_shaper::frequency_safe_min,
+    .max_value = input_shaper::frequency_safe_max,
+    .unit = Unit::hertz,
+};
 
 MI_IS_X_FREQUENCY::MI_IS_X_FREQUENCY()
-    : WiSpinInt(0 /* set in ScreenMenuInputShaper::update_gui*/, is_frequency_spin_config, _(label), nullptr, is_enabled_t::no, is_hidden_t::no) {
+    : WiSpin(0 /* set in ScreenMenuInputShaper::update_gui*/, is_frequency_spin_config, _(label), nullptr, is_enabled_t::no, is_hidden_t::no) {
 }
 
 void MI_IS_X_FREQUENCY::OnClick() {
@@ -93,7 +78,7 @@ void MI_IS_X_FREQUENCY::OnClick() {
 }
 
 MI_IS_Y_FREQUENCY::MI_IS_Y_FREQUENCY()
-    : WiSpinInt(0 /* set in ScreenMenuInputShaper::update_gui*/, is_frequency_spin_config, _(label), nullptr, is_enabled_t::no, is_hidden_t::no) {
+    : WiSpin(0 /* set in ScreenMenuInputShaper::update_gui*/, is_frequency_spin_config, _(label), nullptr, is_enabled_t::no, is_hidden_t::no) {
 }
 
 void MI_IS_Y_FREQUENCY::OnClick() {
@@ -124,13 +109,15 @@ void MI_IS_ENABLE_EDITING::click(IWindowMenu &) {
     Screens::Access()->WindowEvent(GUI_event_t::CHILD_CLICK, ftrstd::bit_cast<void *>(InputShaperMenuItemChildClickParam::enable_editing));
 }
 
+#if HAS_INPUT_SHAPER_CALIBRATION()
 MI_IS_CALIB::MI_IS_CALIB()
-    : IWindowMenuItem(_(label), nullptr, is_enabled_t::no, is_hidden_t::no) {
+    : IWindowMenuItem(_(label), nullptr, is_enabled_t::yes, marlin_client::is_printing() ? is_hidden_t::yes : is_hidden_t::no) {
 }
 
 void MI_IS_CALIB::click([[maybe_unused]] IWindowMenu &window_menu) {
-    // TODO(InputShaper)
+    marlin_client::gcode("M1959");
 }
+#endif
 
 MI_IS_RESTORE_DEFAULTS::MI_IS_RESTORE_DEFAULTS()
     : IWindowMenuItem(_(label), nullptr) {
@@ -144,6 +131,7 @@ void MI_IS_RESTORE_DEFAULTS::click([[maybe_unused]] IWindowMenu &window_menu) {
     // Restore defaults in the config store
     {
         auto &store = config_store();
+        auto transaction = store.get_backend().transaction_guard();
         store.input_shaper_axis_x_config.set_to_default();
         store.input_shaper_axis_y_config.set_to_default();
         store.input_shaper_weight_adjust_y_config.set_to_default();

@@ -2,18 +2,33 @@
 #include <algorithm>
 
 #include "display_helper.h"
-#include "display.h"
+#include "display.hpp"
 #include "gui_timer.h"
 #include "window.hpp"
 #include "gui.hpp"
 #include "../lang/string_view_utf8.hpp"
 #include "../common/str_utils.hpp"
 #include "ScreenHandler.hpp"
+#include <common/conserve_cpu.hpp>
 
 size_t txtroll_t::instance_counter = 0;
 
 // invalidate at phase change
 invalidate_t txtroll_t::Tick() {
+    if (buddy::conserve_cpu().is_requested()) {
+        // We are being asked to limit CPU, so we won't do rolling for a while.
+        switch (phase) {
+        case phase_t::uninitialized:
+        case phase_t::idle:
+        case phase_t::paused:
+        case phase_t::wait_before_roll:
+            return invalidate_t::no;
+        default:
+            phase = phase_t::init_roll;
+            break;
+        }
+    }
+
     invalidate_t ret = invalidate_t::no;
     switch (phase) {
     case phase_t::uninitialized:
@@ -63,7 +78,7 @@ static uint8_t runtime_width(Font font) {
     return resource_font(font)->w;
 }
 
-void txtroll_t::Init(Rect16 rc, string_view_utf8 text, Font font,
+void txtroll_t::Init(Rect16 rc, const string_view_utf8 &text, Font font,
     padding_ui8_t padding, Align_t alignment) {
     rect = rect_meas(rc, text, font, padding, alignment);
     count_from_init = meas(rect, text, font);
@@ -71,8 +86,8 @@ void txtroll_t::Init(Rect16 rc, string_view_utf8 text, Font font,
     phase = phase_t::init_roll;
 }
 
-void txtroll_t::RenderTextAlign(Rect16 rc, string_view_utf8 text, Font font,
-    color_t clr_back, color_t clr_text, padding_ui8_t padding, Align_t alignment, bool fill_rect) const {
+void txtroll_t::render_text(Rect16 rc, const string_view_utf8 &text, Font font,
+    Color clr_back, Color clr_text, padding_ui8_t padding, Align_t alignment, bool fill_rect) const {
     switch (phase) {
     case phase_t::uninitialized:
     case phase_t::idle:
@@ -81,17 +96,17 @@ void txtroll_t::RenderTextAlign(Rect16 rc, string_view_utf8 text, Font font,
         render_text_align(rc, text, font, clr_back, clr_text, padding, alignment, fill_rect); // normal render
         break;
     default:
-        renderTextAlign(rc, text, font, clr_back, clr_text, padding, alignment, fill_rect); // rolling render
+        render_rolling_text_align(rc, text, font, clr_back, clr_text, padding, alignment, fill_rect); // rolling render
         break;
     }
 }
 
-void txtroll_t::renderTextAlign(Rect16 rc, string_view_utf8 text, Font font,
-    color_t clr_back, color_t clr_text, [[maybe_unused]] padding_ui8_t padding, [[maybe_unused]] Align_t alignment, bool fill_rect) const {
+void txtroll_t::render_rolling_text_align(Rect16 rc, const string_view_utf8 &text, Font font,
+    Color clr_back, Color clr_text, [[maybe_unused]] padding_ui8_t padding, [[maybe_unused]] Align_t alignment, bool fill_rect) const {
 
     if (text.isNULLSTR()) {
         if (fill_rect) {
-            display::FillRect(rc, clr_back);
+            display::fill_rect(rc, clr_back);
         }
         return;
     }
@@ -100,17 +115,8 @@ void txtroll_t::renderTextAlign(Rect16 rc, string_view_utf8 text, Font font,
     if (unused_pxls) {
         Rect16 rc_unused_pxls = { int16_t(rect.Left() + rect.Width() - unused_pxls), rect.Top(), unused_pxls, rect.Height() };
         if (fill_rect) {
-            display::FillRect(rc_unused_pxls, clr_back);
+            display::fill_rect(rc_unused_pxls, clr_back);
         }
-    }
-
-    //@@TODO make rolling native ability of render text - solves also character clipping
-    //    const char *str = text;
-    //    str += progress;
-    // for now - just move to the desired starting character
-    text.rewind();
-    for (size_t i = 0; i < draw_progress; ++i) {
-        text.getUtf8Char();
     }
 
     Rect16 set_txt_rc = rect;
@@ -120,23 +126,23 @@ void txtroll_t::renderTextAlign(Rect16 rc, string_view_utf8 text, Font font,
     }
 
     if (!set_txt_rc.IsEmpty()) {
-        Rect16 text_drawn_at(set_txt_rc.TopLeft(), render_text_singleline(set_txt_rc, text, resource_font(font), clr_back, clr_text));
+        Rect16 text_drawn_at(set_txt_rc.TopLeft(), render_text_singleline(set_txt_rc, StringReaderUtf8(text).skip(draw_progress), resource_font(font), clr_back, clr_text));
         if (fill_rect) {
             fill_between_rectangles(&rc, &text_drawn_at, clr_back);
         }
     } else {
         if (fill_rect) {
-            display::FillRect(rc, clr_back);
+            display::fill_rect(rc, clr_back);
         }
     }
 }
 
-Rect16 txtroll_t::rect_meas(Rect16 rc, string_view_utf8 text, Font font, padding_ui8_t padding, Align_t alignment) {
+Rect16 txtroll_t::rect_meas(Rect16 rc, const string_view_utf8 &text, Font font, padding_ui8_t padding, Align_t alignment) {
 
     Rect16 rc_pad = rc;
     rc_pad.CutPadding(padding);
     uint16_t numOfUTF8Chars;
-    size_ui16_t txt_size = font_meas_text(font, &text, &numOfUTF8Chars);
+    size_ui16_t txt_size = font_meas_text(font, text, &numOfUTF8Chars);
     Rect16 rc_txt = { 0, 0, 0, 0 };
     if (txt_size.w && txt_size.h) {
         rc_txt = Rect16(0, 0, txt_size.w, txt_size.h);
@@ -146,9 +152,8 @@ Rect16 txtroll_t::rect_meas(Rect16 rc, string_view_utf8 text, Font font, padding
     return rc_txt;
 }
 
-uint16_t txtroll_t::meas(Rect16 rc, string_view_utf8 text, Font pf) {
-
-    uint16_t meas_x = 0, len = text.computeNumUtf8CharsAndRewind();
+uint16_t txtroll_t::meas(Rect16 rc, const string_view_utf8 &text, Font pf) {
+    uint16_t meas_x = 0, len = text.computeNumUtf8Chars();
     if (len * runtime_width(pf) > rc.Width()) {
         meas_x = len - rc.Width() / runtime_width(pf);
     }

@@ -1,15 +1,18 @@
 #pragma once
 #include "gui.hpp"
-#include "window_menu_adv.hpp"
+#include <window_filebrowser.hpp>
 #include "window_header.hpp"
 #include "screen.hpp"
 #include "window_dlg_wait.hpp"
 
-class screen_filebrowser_data_t : public AddSuperWindow<screen_t> {
+class screen_filebrowser_data_t : public screen_t {
     window_header_t header;
-    FileBrowser file_browser;
+    WindowExtendedMenu<WindowFileBrowser> file_browser;
 
-    static void clearFirstVisibleSFN(); // this method writes into pointer received from marlin_vars, it is super ugly
+    inline WindowFileBrowser &browser() {
+        return file_browser.menu;
+    }
+
     void printTheFile();
     void goHome();
 
@@ -23,5 +26,5 @@ public:
     screen_filebrowser_data_t();
 
 protected:
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 };

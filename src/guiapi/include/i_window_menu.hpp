@@ -7,9 +7,12 @@
 
 #include <stdint.h>
 
-#include "window.hpp"
+#include <window.hpp>
+#include <screen_init_variant.hpp>
 
-class IWindowMenu : public AddSuperWindow<window_t> {
+class IWindowMenuItem;
+
+class IWindowMenu : public window_t {
 
 protected:
     static constexpr uint8_t font_h_ = height(Font::normal);
@@ -29,6 +32,12 @@ public:
 public:
     /// Total item count in the menu
     virtual int item_count() const = 0;
+
+    /// \returns menu item at \p index .
+    /// Can potentially return \p nullptr if the item is outside of the visible area.
+    virtual IWindowMenuItem *item_at(int index) = 0;
+
+    virtual std::optional<int> item_index(const IWindowMenuItem *item) const = 0;
 
     /// \returns how many items fit on the screen
     inline int max_items_on_screen_count() const {
@@ -69,7 +78,7 @@ public: // Scroll related stuff
 
 public: // Focus related stuff
     /// Returns index of the focused item (if there is an focused item)
-    virtual std::optional<int> focused_item_index() const = 0;
+    std::optional<int> focused_item_index() const;
 
     inline std::optional<int> focused_slot() const {
         return index_to_slot(focused_item_index());
@@ -78,7 +87,7 @@ public: // Focus related stuff
     /// Sets $index to be focused.
     /// The implementaiton should also ensure that the focused index is on the screen afterwards
     /// \returns if successful
-    virtual bool move_focus_to_index(std::optional<int> index) = 0;
+    bool move_focus_to_index(std::optional<int> index);
 
     /// Moves the focus by $amount items. Sets the focus if there is no focus.
     /// \returns if the focus was changed
@@ -118,11 +127,19 @@ public:
         return persistent_index;
     }
 
+public:
+    /// \returns the menu current state; the menu can be restored to this state later using \p restore_state
+    screen_init_variant::menu_t get_restore_state() const;
+
+    /// Restores menu to the previously saved state (specifically focused item and scroll offset)
+    void restore_state(screen_init_variant::menu_t state);
+
 protected:
     IWindowMenu(window_t *parent, Rect16 rect);
 
 protected:
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void draw() override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 
 private:
     int max_items_on_screen_count_;
@@ -130,4 +147,7 @@ private:
     /// How many items we've scrolled down by
     /// Formwrly known as index_of_first
     int scroll_offset_ = 0;
+
+    /// To redraw last item, if it was hidden, has no effect in case entire window is invalid
+    uint8_t last_visible_slot_count_ = 0;
 };

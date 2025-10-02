@@ -20,7 +20,7 @@
 #include "window_text.hpp"
 #include "device/board.h"
 
-class SelftestFrameResult : public AddSuperWindow<SelftestFrame> {
+class SelftestFrameResult : public SelftestFrame {
     window_text_t msg;
     SelfTestView view;
     ScrollBar bar; // TODO it does not show, partially unimplemented???
@@ -45,5 +45,5 @@ class SelftestFrameResult : public AddSuperWindow<SelftestFrame> {
 
 public:
     SelftestFrameResult(window_t *parent, PhasesSelftest ph, fsm::PhaseData data);
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 };

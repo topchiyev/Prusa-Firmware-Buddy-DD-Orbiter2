@@ -1,13 +1,14 @@
 #include "metric.h"
 #include "cmsis_os.h"
 #include "timing.h"
-#include "log.h"
+#include <logging/log.hpp>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <ccm_thread.hpp>
 #include "priorities_config.h"
 #include <cstring>
+#include <atomic>
 
 extern metric_t __start_metric_definitions[]
 #if __APPLE__
@@ -29,30 +30,29 @@ osThreadCCMDef(metric_system_task, metric_system_task_run, TASK_PRIORITY_METRIC_
 static osThreadId metric_system_task;
 
 // queue definition
-#if PRINTER_IS_PRUSA_MINI
+#if PRINTER_IS_PRUSA_MINI()
 static constexpr const size_t metric_system_queue_size = 50; ///< Not enough RAM, smaller buffer for metrics, sorry Mini
 #else
 static constexpr const size_t metric_system_queue_size = 100; ///< Size of metrics buffer
-#endif /* PRINTER_IS_PRUSA_MINI */
+#endif /* PRINTER_IS_PRUSA_MINI() */
 osMailQDef(metric_system_queue, metric_system_queue_size, metric_point_t);
-static osMessageQId metric_system_queue;
+static osMailQId metric_system_queue;
 
 // internal variables
-static metric_handler_t **metric_system_handlers;
-static bool metric_system_initialized = false;
-static uint16_t dropped_points_count = 0;
+extern const metric_handler_t *const metric_system_handlers[]; ///< Defined in main.cpp
+static std::atomic<bool> metric_system_initialized = false;
+static std::atomic<uint16_t> dropped_points_count = 0;
 
 // logging component
-LOG_COMPONENT_DEF(Metrics, LOG_SEVERITY_INFO);
+LOG_COMPONENT_DEF(Metrics, logging::Severity::info);
 
 // internal metrics
 METRIC_DEF(metric_dropped_points, "points_dropped", METRIC_VALUE_INTEGER, 1000, METRIC_HANDLER_ENABLE_ALL);
 
-void metric_system_init(metric_handler_t *handlers[]) {
+void metric_system_init() {
     if (metric_system_initialized) {
         return;
     }
-    metric_system_handlers = handlers;
 
     // first create mail queue, then thread, Note that we pass nullptr as thread_id to osMailCreate, but its unused so its fine.
     metric_system_queue = osMailCreate(osMailQ(metric_system_queue), nullptr);
@@ -60,7 +60,7 @@ void metric_system_init(metric_handler_t *handlers[]) {
     metric_system_initialized = true;
 }
 
-metric_handler_t **metric_get_handlers() {
+metric_handler_list_t metric_get_handlers() {
     return metric_system_handlers;
 }
 
@@ -74,20 +74,19 @@ metric_t *metric_get_iterator_end() {
 
 static void metric_system_task_run(const void *) {
     for (;;) {
-        osEvent event = osMailGet(static_cast<osMailQId>(metric_system_queue), osWaitForever);
+        osEvent event = osMailGet(metric_system_queue, osWaitForever);
         assert(event.status == osEventMail);
         metric_point_t *point = (metric_point_t *)event.value.p;
 
-        for (metric_handler_t **handlers = metric_system_handlers; *handlers != NULL; handlers++) {
-            metric_handler_t *handler = *handlers;
-            bool handler_enabled = point->metric->enabled_handlers & (1 << handler->identifier);
-            if (handler_enabled) {
+        for (auto handlers = metric_system_handlers; *handlers; handlers++) {
+            const metric_handler_t *handler = *handlers;
+            if (is_metric_enabled_for_handler(point->metric, handler)) {
                 handler->handle_fn(point);
             }
         }
 
-        osMailFree(static_cast<osMailQId>(metric_system_queue), point);
-        metric_record_integer(&metric_dropped_points, dropped_points_count);
+        osMailFree(metric_system_queue, point);
+        metric_record_integer(&metric_dropped_points, dropped_points_count.load(std::memory_order::relaxed));
     }
 }
 
@@ -122,9 +121,9 @@ static metric_point_t *point_check_and_prepare(metric_t *metric, uint32_t timest
         return NULL; // don't try to enqueue if nobody is listening
     }
 
-    metric_point_t *point = (metric_point_t *)osMailAlloc(static_cast<osMailQId>(metric_system_queue), 0);
+    metric_point_t *point = (metric_point_t *)osMailAlloc(metric_system_queue, 0);
     if (!point) {
-        dropped_points_count += 1;
+        dropped_points_count.fetch_add(1, std::memory_order::relaxed);
         return NULL;
     }
 
@@ -136,11 +135,11 @@ static metric_point_t *point_check_and_prepare(metric_t *metric, uint32_t timest
 
 static void point_enqueue(metric_point_t *recording) {
     metric_t *metric = recording->metric;
-    if (osMailPut(static_cast<osMailQId>(metric_system_queue), (void *)recording) == osOK) {
+    if (osMailPut(metric_system_queue, (void *)recording) == osOK) {
         update_min_interval(metric);
     } else {
-        osMailFree(static_cast<osMailQId>(metric_system_queue), recording);
-        dropped_points_count += 1;
+        osMailFree(metric_system_queue, recording);
+        dropped_points_count.fetch_add(1, std::memory_order::relaxed);
     }
 }
 void metric_record_float_at_time(metric_t *metric, uint32_t timestamp, float value) {
@@ -213,11 +212,15 @@ void metric_record_error(metric_t *metric, const char *fmt, ...) {
     point_enqueue(recording);
 }
 
-void metric_enable_for_handler(metric_t *metric, metric_handler_t *handler) {
+bool is_metric_enabled_for_handler(const metric_t *metric, const metric_handler_t *handler) {
+    return metric->enabled_handlers & (1 << handler->identifier);
+}
+
+void metric_enable_for_handler(metric_t *metric, const metric_handler_t *handler) {
     metric->enabled_handlers |= (1 << handler->identifier);
 }
 
-void metric_disable_for_handler(metric_t *metric, metric_handler_t *handler) {
+void metric_disable_for_handler(metric_t *metric, const metric_handler_t *handler) {
     metric->enabled_handlers &= ~(1 << handler->identifier);
 }
 

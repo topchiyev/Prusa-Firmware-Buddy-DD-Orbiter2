@@ -16,6 +16,8 @@
 #include "config_features.h"
 #include <option/has_toolchanger.h>
 
+#include <inplace_function.hpp>
+
 /// Filament sensors manager
 /// All public functions are thread-safe
 /// All other functions can be only called from process()
@@ -43,7 +45,7 @@ public:
     bool gui_wait_for_init_with_msg();
 
     /// Calls \p f on all filament sensors
-    void for_all_sensors(const std::function<void(IFSensor &sensor, uint8_t index, bool is_side)> &f);
+    void for_all_sensors(const stdext::inplace_function<void(IFSensor &sensor, uint8_t index, bool is_side)> &f);
 
     // mmu enabled, might or might not be initialized
     inline bool HasMMU() const {
@@ -75,7 +77,7 @@ public:
     }
 
     /// \returns whether the printer knows that it HAS the filament (if should_have_filament == true) or that it HASN'T (if should_have_filament == false)
-    /// If the filament sensor is disabled, not callibrated, disconnected and such, always returns false
+    /// If the filament sensor is disabled, not calibrated, disconnected and such, always returns false
     inline bool has_filament(bool should_have_filament) {
         return logical_sensor_states_[LogicalFilamentSensor::current_extruder] == (should_have_filament ? FilamentSensorState::HasFilament : FilamentSensorState::NoFilament);
     }

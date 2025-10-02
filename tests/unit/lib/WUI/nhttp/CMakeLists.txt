@@ -1,7 +1,5 @@
 add_executable(
   nhttp_tests
-  # Test files
-  ${CMAKE_CURRENT_SOURCE_DIR}/multipart_upload.cpp
   # Not really tests, just stuffings to satisfy the linker.
   ${CMAKE_CURRENT_SOURCE_DIR}/missing_functions.c
   ${CMAKE_CURRENT_SOURCE_DIR}/random_mock.cpp
@@ -17,11 +15,9 @@ add_executable(
   # ${CMAKE_CURRENT_SOURCE_DIR}/segmented_json_rendering.cpp
   # Tested files
   ${CMAKE_SOURCE_DIR}/lib/WUI/nhttp/common_selectors.cpp
-  ${CMAKE_SOURCE_DIR}/lib/WUI/nhttp/multipart_parser.c
   ${CMAKE_SOURCE_DIR}/lib/WUI/nhttp/file_info.cpp
   ${CMAKE_SOURCE_DIR}/lib/WUI/nhttp/file_command.cpp
   ${CMAKE_SOURCE_DIR}/lib/WUI/nhttp/gcode_upload.cpp
-  ${CMAKE_SOURCE_DIR}/lib/WUI/nhttp/upload_state.cpp
   ${CMAKE_SOURCE_DIR}/lib/WUI/nhttp/gcode_preview.cpp
   ${CMAKE_SOURCE_DIR}/lib/WUI/nhttp/server.cpp
   ${CMAKE_SOURCE_DIR}/lib/WUI/nhttp/job_command.cpp
@@ -90,7 +86,6 @@ add_executable(
   ${CMAKE_SOURCE_DIR}/tests/unit/common/printer_state_mock.cpp
   ${CMAKE_SOURCE_DIR}/tests/stubs/strlcpy.c
   ${CMAKE_SOURCE_DIR}/tests/stubs/jsmn_impl.c
-  ${CMAKE_SOURCE_DIR}/tests/stubs/fake_freertos_mutex.cpp
   ${CMAKE_SOURCE_DIR}/tests/unit/mock/bsod.cpp
   ${CMAKE_CURRENT_BINARY_DIR}/http_req_automaton.cpp
   )
@@ -138,6 +133,6 @@ add_dependencies(nhttp_tests generate-http-automata-tests)
 # target_link_libraries(http_tests LwIP)
 set_target_properties(nhttp_tests PROPERTIES CXX_STANDARD 20)
 
-target_link_libraries(nhttp_tests bgcode_core mbedTLS)
+target_link_libraries(nhttp_tests bgcode_core mbedTLS SG14 freertos_tests)
 
 add_catch_test(nhttp_tests)

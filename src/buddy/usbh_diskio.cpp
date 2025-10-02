@@ -4,12 +4,15 @@
 #include "ccm_thread.hpp"
 #include "usb_host.h"
 
-#include <common/freertos_mutex.hpp>
+#include <freertos/binary_semaphore.hpp>
+#include <freertos/mutex.hpp>
 #include <common/freertos_shared_mutex.hpp>
 #include <mutex>
 #include <shared_mutex>
 #include <utility_extensions.hpp>
 #include <bit>
+#include <FreeRTOS.h>
+#include <logging/log.hpp>
 
 LOG_COMPONENT_REF(USBHost);
 using Mutex = freertos::Mutex;
@@ -44,11 +47,15 @@ UsbhMscReadahead usbh_msc_readahead;
 #endif
 
 osThreadId USBH_MSC_WorkerTaskHandle;
+
 static constexpr size_t queue_length = 5;
+
 static QueueHandle_t request_queue;
+static StaticQueue_t queue;
+static uint8_t storage_area[queue_length * sizeof(UsbhMscRequest *)];
 
 void USBH_worker_notify(USBH_StatusTypeDef, void *semaphore, void *) {
-    xSemaphoreGive(semaphore);
+    static_cast<freertos::BinarySemaphore *>(semaphore)->release();
 }
 
 // Queues the r/w request for processing (USBH_MSC_WorkerTask does it) and blocks until the end of processing is reported by the callback
@@ -56,8 +63,7 @@ void USBH_worker_notify(USBH_StatusTypeDef, void *semaphore, void *) {
 // their requests, they will be distributed fairly.
 static USBH_StatusTypeDef USBH_exec(UsbhMscRequest::UsbhMscRequestOperation operation,
     BYTE lun, BYTE *buff, DWORD sector, uint16_t count) {
-    StaticSemaphore_t semaphore_data;
-    SemaphoreHandle_t semaphore = xSemaphoreCreateBinaryStatic(&semaphore_data);
+    freertos::BinarySemaphore semaphore;
     UsbhMscRequest request {
         operation,
         lun,
@@ -66,18 +72,16 @@ static USBH_StatusTypeDef USBH_exec(UsbhMscRequest::UsbhMscRequestOperation oper
         buff,
         USBH_FAIL,
         USBH_worker_notify,
-        semaphore,
+        &semaphore,
         nullptr
     };
     UsbhMscRequest *request_ptr = &request;
 
     if (xQueueSend(request_queue, &request_ptr, USBH_MSC_RW_MAX_DELAY) != pdPASS) {
-        vSemaphoreDelete(semaphore);
         return USBH_FAIL;
     }
 
-    xSemaphoreTake(semaphore, portMAX_DELAY);
-    vSemaphoreDelete(semaphore);
+    semaphore.acquire();
 
     return request.result;
 }
@@ -161,8 +165,6 @@ static void USBH_MSC_WorkerTask(void const *) {
 }
 
 static void USBH_StartMSCWorkerTask() {
-    static StaticQueue_t queue;
-    static uint8_t storage_area[queue_length * sizeof(UsbhMscRequest *)];
     request_queue = xQueueCreateStatic(queue_length, sizeof(UsbhMscRequest *), storage_area, &queue);
     configASSERT(request_queue);
     osThreadCCMDef(USBH_MSC_WorkerTask, USBH_MSC_WorkerTask, TASK_PRIORITY_USB_MSC_WORKER_HIGH, 0U, 512);

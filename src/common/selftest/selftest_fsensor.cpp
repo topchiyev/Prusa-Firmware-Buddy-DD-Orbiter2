@@ -5,7 +5,6 @@
  */
 
 #include "selftest_fsensor.h"
-#include <guiconfig/wizard_config.hpp>
 #include "marlin_server.hpp"
 #include "selftest_log.hpp"
 #include "i_selftest.hpp"
@@ -47,10 +46,11 @@ CSelftestPart_FSensor::CSelftestPart_FSensor(IPartHandler &state_machine, const 
     , log_fast(500)
     , extruder(GetExtruderFSensor(rConfig.extruder_id))
     , side(
-// for MMU the side sensor exists, but we don't calibrate it, it's just a very simple interface for MMU finda
-#if HAS_MMU2()
+#if HAS_MMU2() || PRINTER_IS_PRUSA_iX()
+          // MKx has the MMU "side sensor" and iX has a side sensor too, but neither is calibrated
           nullptr
 #else
+          // The side sensors are calibrated only on XL atm.
           GetSideFSensor(rConfig.extruder_id)
 #endif
       ) {
@@ -294,7 +294,9 @@ LoopResult CSelftestPart_FSensor::state_insertion_wait() {
                         rConfig.partname, (double)extruder_move_limit);
                     return LoopResult::Fail;
                 }
+#if ENABLED(PREVENT_COLD_EXTRUSION)
                 AutoRestore ar_ce(thermalManager.allow_cold_extrude, true);
+#endif
                 extruder_moved_amount += mapi::extruder_schedule_turning(extruder_fr); // make extruder turn at 4mm/s
             }
             return LoopResult::RunCurrent;
@@ -399,8 +401,9 @@ LoopResult CSelftestPart_FSensor::state_enforce_remove_mmu_move() {
     if (extruder->get_state() == FilamentSensorState::HasFilament) {
         // For MMU filament sensor - move back the same amount we moved forward
         if (mmu_mode) {
-            AutoRestore<bool> CE(thermalManager.allow_cold_extrude);
-            thermalManager.allow_cold_extrude = true;
+#if ENABLED(PREVENT_COLD_EXTRUSION)
+            AutoRestore<bool> CE(thermalManager.allow_cold_extrude, true);
+#endif
             mapi::extruder_move(-extruder_moved_amount, extruder_fr);
         }
     }

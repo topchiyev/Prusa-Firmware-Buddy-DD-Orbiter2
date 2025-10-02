@@ -1,21 +1,20 @@
 #include <screen_menu_bed_level_correction.hpp>
-#include <menu_spin_config.hpp>
+#include <WindowMenuSpin.hpp>
 #include <ScreenHandler.hpp>
 
+static constexpr NumericInputConfig correction_range_spin_config {
+    .min_value = -100,
+    .max_value = 100,
+    .unit = Unit::micrometer,
+};
+
 I_MI_CORRECT::I_MI_CORRECT(CorrectionIndex index)
-    : WiSpinInt(get_correction_value(index), SpinCnf::correction_range, _(correction_label(index)), nullptr, is_enabled_t::yes, is_hidden_t::no)
+    : WiSpin(get_correction_value(index), correction_range_spin_config, _(correction_label(index)), nullptr, is_enabled_t::yes, is_hidden_t::no)
     , index(index) {
 }
 
 void I_MI_CORRECT::Reset() {
     SetVal(0);
-    // TODO It would be great if we could invalidate just the extension.
-    //      Unfortunately extension width is incorrectly recalculated
-    //      inside IWiSpin based on the new value. It would best be solved
-    //      by not recomputing the width at all. Such a change is too large
-    //      for a bugfix build so we are keeping it simple. For now,
-    //      we invalidate entire menu item and suffer some flickering.
-    Invalidate();
 }
 
 void I_MI_CORRECT::OnClick() {
@@ -32,7 +31,7 @@ void MI_RESET::click(IWindowMenu & /*window_menu*/) {
 ScreenMenuBedLevelCorrection::ScreenMenuBedLevelCorrection()
     : ScreenMenu(_(label)) {}
 
-void ScreenMenuBedLevelCorrection::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void ScreenMenuBedLevelCorrection::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     if (event == GUI_event_t::CHILD_CLICK) {
         set_correction_value(LEFT, 0);
         set_correction_value(RIGHT, 0);
@@ -43,6 +42,6 @@ void ScreenMenuBedLevelCorrection::windowEvent(EventLock /*has private ctor*/, w
         Item<MI_CORRECT<FRONT>>().Reset();
         Item<MI_CORRECT<REAR>>().Reset();
     } else {
-        SuperWindowEvent(sender, event, param);
+        ScreenMenu::windowEvent(sender, event, param);
     }
 }

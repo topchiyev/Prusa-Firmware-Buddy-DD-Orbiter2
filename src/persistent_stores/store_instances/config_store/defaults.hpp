@@ -13,9 +13,10 @@
 #include <module/prusa/tool_offset.hpp>
 #include <filament_sensors_remap_data.hpp>
 #include <printers.h>
+#include <common/hw_check.hpp>
+#include <filament.hpp>
 
 #include "constants.hpp"
-#include <common/nozzle_type.hpp>
 #include <common/hotend_type.hpp>
 
 #include <option/has_sheet_support.h>
@@ -25,19 +26,6 @@ namespace config_store_ns {
 
 // Holds default constants so they can be referenced by store item. Placing these constants in another header where it's more meaningful is welcome. These defaults could be passed directly as template parameter to store items from gcc 11 onwards (and store items would accept them as value instead of as a const ref).
 namespace defaults {
-    // Variables without a distinct default values can use these shared ones
-    inline constexpr bool bool_true { true };
-    inline constexpr bool bool_false { false };
-
-    inline constexpr float float_zero { 0.0f };
-    inline constexpr uint8_t uint8_t_zero { 0 };
-    inline constexpr uint16_t uint16_t_zero { 0 };
-    inline constexpr uint32_t uint32_t_zero { 0 };
-    inline constexpr int8_t int8_t_zero { 0 };
-    inline constexpr uint8_t uint8_t_10 { 10 };
-    inline constexpr uint8_t uint8_t_6 { 6 };
-    inline constexpr uint8_t uint8_t_ff { 0xff };
-
     // default values for variables that have distinct requirements
     inline constexpr float pid_nozzle_p {
 #ifdef DEFAULT_Kp
@@ -137,21 +125,26 @@ namespace defaults {
 
     inline constexpr std::array<char, connect_host_size + 1> connect_host { "buddy-a.\x01\x01" }; // "Compressed" - this means buddy-a.connect.prusa3d.com.
     inline constexpr std::array<char, connect_token_size + 1> connect_token { "" };
+    inline constexpr std::array<char, connect_proxy_size + 1> connect_proxy_host { "" };
     inline constexpr uint16_t connect_port { 443 };
 
+    // Defaults for metrics
+#if DEVELOPMENT_ITEMS()
+    // Development build has metrics allowed
+    inline constexpr std::array<char, metrics_host_size + 1> metrics_host { "matrix.prusa.vc" };
+    inline constexpr bool enable_metrics { true };
+#else /*DEVELOPMENT_ITEMS()*/
     // Production build need user to intentionally allow them
-    inline constexpr MetricsAllow metrics_allow { MetricsAllow::None };
     inline constexpr std::array<char, metrics_host_size + 1> metrics_host { "" };
-    inline constexpr bool metrics_init { false };
-    inline constexpr uint16_t metrics_port { 8514 };
-    inline constexpr uint16_t syslog_port { 13514 };
+    inline constexpr bool enable_metrics { false };
+#endif /*DEVELOPMENT_ITEMS()*/
 
     inline constexpr bool crash_enabled {
-#if (PRINTER_IS_PRUSA_MK4 || PRINTER_IS_PRUSA_MK3_5 || PRINTER_IS_PRUSA_XL)
+#if (PRINTER_IS_PRUSA_MK4() || PRINTER_IS_PRUSA_MK3_5() || PRINTER_IS_PRUSA_iX() || PRINTER_IS_PRUSA_XL())
         false
 #else
         true
-#endif // (( PRINTER_IS_PRUSA_MK4) || ( PRINTER_IS_PRUSA_MK3_5))
+#endif // (( PRINTER_IS_PRUSA_MK4()) || ( PRINTER_IS_PRUSA_MK3_5()))
     };
 
     inline constexpr int16_t crash_sens[2] =
@@ -197,9 +190,9 @@ namespace defaults {
     inline constexpr int32_t extruder_fs_ref_ins_value { std::numeric_limits<int32_t>::min() };
 
     inline constexpr uint32_t extruder_fs_value_span {
-#if (BOARD_IS_XBUDDY && defined LOVEBOARD_HAS_PT100)
+#if (BOARD_IS_XBUDDY() && defined LOVEBOARD_HAS_PT100)
         100
-#elif (BOARD_IS_XLBUDDY)
+#elif (BOARD_IS_XLBUDDY())
         1000
 #else
         350000
@@ -216,7 +209,7 @@ namespace defaults {
     inline constexpr uint32_t side_fs_value_span { 310 };
 
     inline constexpr bool fsensor_enabled {
-#if PRINTER_IS_PRUSA_MINI || PRINTER_IS_PRUSA_MK3_5
+#if PRINTER_IS_PRUSA_MINI() || PRINTER_IS_PRUSA_MK3_5()
         true // MINI and 3.5 do not require any calibration
 #else
         false
@@ -230,9 +223,8 @@ namespace defaults {
     inline constexpr DockPosition dock_position { 0, 0 };
     inline constexpr ToolOffset tool_offset { 0, 0, 0 };
 
-    inline constexpr filament::Type filament_type { filament::Type::NONE };
     inline constexpr float nozzle_diameter {
-#if PRINTER_IS_PRUSA_XL
+#if PRINTER_IS_PRUSA_XL()
         0.60f
 #else
         0.40f
@@ -279,25 +271,53 @@ namespace defaults {
     inline constexpr int16_t homing_sens_x { stallguard_sensitivity_unset };
     inline constexpr int16_t homing_sens_y { stallguard_sensitivity_unset };
 
-    inline constexpr bool xy_motors_400_step {
-#if PRINTER_IS_PRUSA_MK4
-        true
-#else
-        false
-#endif
-    };
     inline constexpr HotendType hotend_type {
-#if PRINTER_IS_PRUSA_iX
+#if PRINTER_IS_PRUSA_iX()
         HotendType::stock_with_sock
 #else
         HotendType::stock
 #endif
     };
-    inline constexpr NozzleType nozzle_type {
-        NozzleType::Normal
-    };
     inline constexpr uint8_t uint8_percentage_80 { 80 };
     inline constexpr int64_t int64_zero { 0 };
+
+    // This is a bit wonky, but std::bitset "is not structural", so we cannot pass it directly as a template argument.
+    // So instead, we pass this empty struct that converts to the bitset.
+    // The struct intializes everything to one.
+    struct VisiblePresetFilamentTypes {
+        constexpr operator std::bitset<max_preset_filament_type_count>() const {
+            return ~std::bitset<max_preset_filament_type_count>();
+        }
+    };
+    inline constexpr VisiblePresetFilamentTypes visible_preset_filament_types;
+
+    /// By default, no user filaments are enabled
+    inline constexpr uint8_t visible_user_filament_types = 0;
+
+    inline constexpr auto user_filament_parameters = [] {
+        std::array<FilamentTypeParameters, user_filament_type_count> result;
+        for (size_t i = 0; i < result.size(); i++) {
+            const size_t display_ix = i + 1;
+            result[i] = FilamentTypeParameters {
+                .name = {
+                    'U', 'S', 'E', 'R',
+                    static_cast<char>('0' + (display_ix >= 10 ? display_ix / 10 : display_ix % 10)),
+                    static_cast<char>(display_ix >= 10 ? ('0' + display_ix % 10) : '\0'),
+                    '\0' },
+                .nozzle_temperature = 215,
+                .nozzle_preheat_temperature = 170,
+                .heatbed_temperature = 0,
+                .requires_filtration = false,
+            };
+        }
+        return result;
+    }();
+
+    inline constexpr FilamentTypeParameters adhoc_filament_parameters = {
+        .name = "NAME",
+        .nozzle_temperature = 215,
+        .nozzle_preheat_temperature = 170,
+    };
 } // namespace defaults
 
 } // namespace config_store_ns

@@ -1,16 +1,15 @@
 #pragma once
+
 #include "window_file_list.hpp"
 #include "gcode_info.hpp"
+#include <window_menu_adv.hpp>
 
-class WindowFileBrowser : public AddSuperWindow<window_file_list_t> {
-    static char root[FILE_PATH_BUFFER_LEN]; // we currently do not support multiple file browsers
-
+class WindowFileBrowser : public window_file_list_t {
 public:
     WindowFileBrowser(window_t *parent, Rect16 rect, const char *media_SFN_path);
 
-    static void SetRoot(const char *path);
-    static void CopyRootTo(char *path);
     void SaveTopSFN();
+    void clear_first_visible_sfn();
 
     int WriteNameToPrint(char *buff, size_t sz);
 
@@ -23,7 +22,7 @@ public:
     };
 
 protected:
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 
 private:
     /// Handles clicking on a focused item

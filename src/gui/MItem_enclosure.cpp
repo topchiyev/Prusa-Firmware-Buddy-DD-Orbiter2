@@ -1,11 +1,13 @@
 
 #include "MItem_enclosure.hpp"
 #include "img_resources.hpp"
-#include "menu_spin_config.hpp"
+#include "WindowMenuSpin.hpp"
 #include "xl_enclosure.hpp"
 #include "ScreenHandler.hpp"
 #include "screen_change_filter.hpp"
 #include <str_utils.hpp>
+#include <screen_menu_enclosure.hpp>
+#include <window_dlg_wait.hpp>
 
 /* Once is Enclosure enabled in menu with ON/OFF switch (MI_ENCLOSURE_ENABLED), it tests the fan and after that Enclosure is declared Active */
 /* If test was passed, MI_ENCLOSURE_ENABLE is swapped with MI_ENCLOSURE and enclosure settings can be accessed */
@@ -80,16 +82,29 @@ MI_ENCLOSURE_FILTER_COUNTER::MI_ENCLOSURE_FILTER_COUNTER()
     ChangeInformation(info_text_builder.str());
 }
 
+static constexpr NumericInputConfig enclosure_fan_spin_config {
+    .min_value = xl_enclosure.MIN_FAN_PWM,
+    .max_value = 100,
+    .step = 10.0F,
+    .unit = Unit::percent,
+};
+
 MI_ENCLOSURE_FAN_SETTING::MI_ENCLOSURE_FAN_SETTING()
-    : WiSpinInt(config_store().xl_enclosure_fan_manual.get(), SpinCnf::enclosure_fan, _(label), &img::fan_16x16, is_enabled_t::yes, is_hidden_t::no) {
+    : WiSpin(config_store().xl_enclosure_fan_manual.get(), enclosure_fan_spin_config, _(label), &img::fan_16x16, is_enabled_t::yes, is_hidden_t::no) {
 }
 
 void MI_ENCLOSURE_FAN_SETTING::OnClick() {
     xl_enclosure.setUserFanRPM(GetVal());
 }
 
+static constexpr NumericInputConfig enclosure_post_print_spin_config {
+    .min_value = 1,
+    .max_value = 10,
+    .unit = Unit::minute,
+};
+
 MI_ENCLOSURE_POST_PRINT_DURATION::MI_ENCLOSURE_POST_PRINT_DURATION()
-    : WiSpinInt(config_store().xl_enclosure_post_print_duration.get(), SpinCnf::enclosure_post_print, _(label), &img::fan_16x16, is_enabled_t::yes, is_hidden_t::no) {
+    : WiSpin(config_store().xl_enclosure_post_print_duration.get(), enclosure_post_print_spin_config, _(label), &img::fan_16x16, is_enabled_t::yes, is_hidden_t::no) {
 }
 
 void MI_ENCLOSURE_POST_PRINT_DURATION::OnClick() {

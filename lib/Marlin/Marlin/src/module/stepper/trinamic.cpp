@@ -95,7 +95,7 @@ enum StealthIndex : uint8_t { STEALTH_AXIS_XY, STEALTH_AXIS_Z, STEALTH_AXIS_E };
   TMC_SPI_DEFINE(Z3, Z);
 #endif
 #if AXIS_HAS_SPI(E0)
-  #if BOARD_IS_XLBUDDY
+  #if BOARD_IS_XLBUDDY()
     TMCMarlin<TMC2130Stepper> stepperE0('E', '0', E_AXIS, TMC2130Stepper::Connection::Remote, E0_RSENSE);
   #else
     TMC_SPI_DEFINE_E(0);
@@ -143,7 +143,7 @@ enum StealthIndex : uint8_t { STEALTH_AXIS_XY, STEALTH_AXIS_Z, STEALTH_AXIS_E };
     pwmconf.pwm_freq = 0b01; // f_pwm = 2/683 f_clk
 
 #if ENABLED(USE_PRUSA_EEPROM_AS_SOURCE_OF_DEFAULT_VALUES)
-    const bool motors_400_step = config_store().xy_motors_400_step.get();
+    const bool motors_400_step = get_has_400step_xy_motors();
 #else
     constexpr bool motors_400_step = false;
 #endif
@@ -676,7 +676,7 @@ void restore_trinamic_drivers() {
 }
 
 void reset_trinamic_drivers() {
-  assert(!phase_stepping::any_axis_active());
+  assert(!phase_stepping::any_axis_enabled());
 
   static constexpr bool stealthchop_by_axis[] = {
     #if ENABLED(STEALTHCHOP_XY)
@@ -856,6 +856,7 @@ TMCStepper &stepper_axis(const AxisEnum axis)
 
 uint16_t stepper_microsteps(const AxisEnum axis, uint16_t new_microsteps)
 {
+    assert(!phase_stepping::is_enabled(axis));
     uint16_t cur_microsteps = stepper_axis(axis).microsteps();
     if (new_microsteps) {
         stepper_axis(axis).microsteps(new_microsteps);

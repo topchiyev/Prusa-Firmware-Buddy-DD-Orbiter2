@@ -142,16 +142,16 @@ extern uint32_t SystemCoreClock;
 
 // #define configUSE_LIST_DATA_INTEGRITY_CHECK_BYTES 1
 
-#define configNUM_THREAD_LOCAL_STORAGE_POINTERS 2
-#define THREAD_LOCAL_STORAGE_SYSLOG_IDX         1
-#define THREAD_LOCAL_STORAGE_USB_LOGGING_IDX    2
+#define configNUM_THREAD_LOCAL_STORAGE_POINTERS 0
 
+#define configCHECK_FOR_STACK_OVERFLOW   2
+#define configUSE_TRACE_FACILITY         1
 #define configMAX_TASK_NAME_LEN          (16)
 #define configUSE_16_BIT_TICKS           0
 #define configUSE_MUTEXES                1
 #define configUSE_RECURSIVE_MUTEXES      1
 #define INCLUDE_xSemaphoreGetMutexHolder 1
-#define configQUEUE_REGISTRY_SIZE        8
+#define configQUEUE_REGISTRY_SIZE        0
 #if MCU_IS_STM32F4()
     #define configUSE_PORT_OPTIMISED_TASK_SELECTION 1
 #else
@@ -164,9 +164,10 @@ extern uint32_t SystemCoreClock;
  * priority to be high so that the events are delivered timely. Otherwise
  * high priority tasks might end up waiting for their events until low priority
  * tasks yield.*/
-#define configTIMER_TASK_PRIORITY    ((configMAX_PRIORITIES - 1) - 1)
-#define configTIMER_QUEUE_LENGTH     10
-#define configTIMER_TASK_STACK_DEPTH configMINIMAL_STACK_SIZE
+#define configTIMER_TASK_PRIORITY     ((configMAX_PRIORITIES - 1) - 1)
+#define configTIMER_QUEUE_LENGTH      10
+#define configTIMER_TASK_STACK_DEPTH  configMINIMAL_STACK_SIZE
+#define configTIMER_SERVICE_TASK_NAME "TmrSvc" // Must be without space because of metrics
 
 /* Co-routine definitions. */
 #define configUSE_CO_ROUTINES           0

@@ -1,8 +1,9 @@
 #include <window_colored_rect.hpp>
-#include <color_grayscale.hpp>
+
+#include "display.hpp"
 
 window_colored_rect::window_colored_rect(window_t *parent, Rect16 rect)
-    : AddSuperWindow<window_t>(parent, rect) {
+    : window_t(parent, rect) {
 }
 
 void window_colored_rect::set_border_thickness(uint8_t new_thickness) {
@@ -10,19 +11,16 @@ void window_colored_rect::set_border_thickness(uint8_t new_thickness) {
     Invalidate();
 }
 
-void window_colored_rect::set_parent_color(color_t new_parent_color) {
+void window_colored_rect::set_parent_color(Color new_parent_color) {
     parent_color = new_parent_color;
     Invalidate();
 }
 
 void window_colored_rect::unconditionalDraw() {
-
-    // roughly convert the color to grayscale and check whether it's closer to black or white
-    color_t color = GetBackColor();
-
     static constexpr uint8_t threshold_adjustment { 64 }; // used so that for example only really black colours will have a white background instead of all that are beyond halfway point
 
-    auto lum = grayscale::to_grayscale(color & 0xff, (color & 0xff00) >> 8, (color & 0xff0000) >> 16);
+    // roughly convert the color to grayscale and check whether it's closer to black or white
+    auto lum = GetBackColor().to_grayscale();
 
     bool is_closer_to_white = [&]() {
         if (parent_color == COLOR_BLACK) {
@@ -38,9 +36,9 @@ void window_colored_rect::unconditionalDraw() {
 
     // draw the border rect
     if (flags.has_round_corners) {
-        display::DrawRoundedRect(rect, parent_color, is_closer_to_white ? COLOR_BLACK : COLOR_WHITE, GuiDefaults::MenuItemCornerRadius, MIC_ALL_CORNERS);
+        display::draw_rounded_rect(rect, parent_color, is_closer_to_white ? COLOR_BLACK : COLOR_WHITE, GuiDefaults::MenuItemCornerRadius, MIC_ALL_CORNERS);
     } else {
-        display::DrawRect(rect, is_closer_to_white ? COLOR_BLACK : COLOR_WHITE);
+        display::draw_rect(rect, is_closer_to_white ? COLOR_BLACK : COLOR_WHITE);
     }
 
     // shrink the rect for the actual color
@@ -51,9 +49,9 @@ void window_colored_rect::unconditionalDraw() {
 
     // draw the actual rect
     if (flags.has_round_corners) {
-        display::DrawRoundedRect(rect,
+        display::draw_rounded_rect(rect,
             is_closer_to_white ? COLOR_BLACK : COLOR_WHITE, GetBackColor(), GuiDefaults::MenuItemCornerRadius, MIC_ALL_CORNERS);
     } else {
-        display::FillRect(rect, GetBackColor());
+        display::fill_rect(rect, GetBackColor());
     }
 }

@@ -47,39 +47,24 @@ inline constexpr const char *m109_wait_hotend_temp = "M109";
 /// Check code in PrintPreview::Loop for an example.
 class GCodeInfo {
 public:
-    enum class StartLoadResult {
-        None,
-        Started,
-        Failed
-    };
     static constexpr uint32_t gcode_level = GCODE_LEVEL;
 
-#if PRINTER_IS_PRUSA_MK4
-    static constexpr std::array<const char *, 3> printer_compatibility_list = { PRINTER_MODEL, "MK3.9" }; ///< Basic compatibility for M862.3 G-code
-#else
-    static constexpr std::array<const char *, 1> printer_compatibility_list = { PRINTER_MODEL }; ///< Basic compatibility for M862.3 G-code
-#endif
-
-    static constexpr std::array<const char *, 1> supported_features = { "Input shaper" };
+    static constexpr auto supported_features = std::to_array({ "Input shaper" });
 
     // search this many g-code at the beginning of the file for the various g-codes (M862.x nozzle size, bed heating, nozzle heating)
     static constexpr size_t search_first_x_gcodes = 200;
 
     using time_buff = std::array<char, 16>;
-    using filament_buff = std::array<char, 8>;
+    using filament_buff = std::array<char, filament_name_buffer_size>;
 
     struct ExtruderInfo {
-        struct Colour {
-            uint8_t red;
-            uint8_t green;
-            uint8_t blue;
-        };
-
         std::optional<filament_buff> filament_name; /**< stores string representation of filament type */
         std::optional<float> filament_used_g; /**< stores how much filament will be used for this print (weight) */
         std::optional<float> filament_used_mm; /**< stores how much filament will be used for this print (distance) */
         std::optional<float> nozzle_diameter; /**< stores diameter of nozzle*/
-        std::optional<Colour> extruder_colour; /**< stores colour of extruder*/
+        std::optional<Color> extruder_colour; /**< stores colour of extruder*/
+        std::optional<bool> requires_hardened_nozzle;
+        std::optional<bool> requires_high_flow_nozzle;
 
         inline bool used() const {
             /// At least this much filament [g] to be considered used (just purge is about 0.06 g on both XL and MK3)
@@ -109,25 +94,22 @@ public:
         };
 
         Feature wrong_tools { HWCheckSeverity::Abort }; // Tools that are used, are not connected (toolchanger only). Can be handled by tools mapping screen
-        Feature wrong_nozzle_diameter { config_store().hw_check_nozzle.get() }; // M862.1 disagree (or M862.10 - M862.15 for multihotend gcode). Can be handled by tools mapping screen
+        Feature wrong_nozzle_diameter { config_store().hw_check_nozzle.get() }; // M862.1 disagree. Can be handled by tools mapping screen
+        Feature nozzle_not_hardened { config_store().hw_check_nozzle.get() }; // M862.1 disagree. Can be handled by tools mapping screen
+        Feature nozzle_not_high_flow { config_store().hw_check_nozzle.get() }; // M862.1 disagree. Can be handled by tools mapping screen
         Feature wrong_printer_model { config_store().hw_check_model.get() }; // M862.2 or M862.3 or printer_model (from comments) disagree
         Feature wrong_gcode_level { config_store().hw_check_gcode.get() }; // M862.5 disagree
         Feature wrong_firmware { config_store().hw_check_firmware.get() }; // M862.4 Px.yy.z disagrees
-        Feature mk3_compatibility_mode { config_store().hw_check_compatibility.get() };
+#if ENABLED(GCODE_COMPATIBILITY_MK3)
+        Feature gcode_compatibility_mode { config_store().hw_check_compatibility.get() };
+#endif
+#if ENABLED(FAN_COMPATIBILITY_MK4_MK3)
+        Feature fan_compatibility_mode { config_store().hw_check_fan_compatibility.get() };
+#endif
         Feature outdated_firmware { config_store().hw_check_firmware.get() }; // M115 Ux.yy.z disagrees (TODO: Separate EEVAR?)
         bool unsupported_features { false };
         char unsupported_features_text[37] { "" };
         void add_unsupported_feature(const char *feature, size_t length);
-
-        /**
-         * @brief Firmware version read from G-code M115 Ux.yy.z.
-         */
-        struct GcodeFwVersion {
-            unsigned major = 0;
-            unsigned minor = 0;
-            unsigned patch = 0;
-            unsigned build_number = 0;
-        };
 
         char latest_fw_version[sizeof("99.99.99-alpha99+999999")];
 
@@ -149,11 +131,8 @@ public:
     using GCodePerExtruderInfo = std::array<ExtruderInfo, EXTRUDERS>;
 
 private:
-    uint32_t printer_model_code; ///< model code (see printer_model2code())
-
     // atomic flags to signal to other thread, the progress of gcode loading
     std::atomic<bool> is_loaded_ = false; ///< did the load() function finish?
-    std::atomic<StartLoadResult> start_load_result_ = {}; ///< None if nt started yet, Failed - opening gcode failed, Started - success
     std::atomic<bool> is_printable_ = false; ///< is it valid for print?, checked by gcode reader "valid_for_print" function
 
     std::atomic<const char *> error_str_ = nullptr; ///< If there is an error, this variable can be used to report the error string
@@ -172,11 +151,21 @@ private:
     std::optional<uint16_t> hotend_preheat_temp { std::nullopt }; ///< Holds hotend preheat temperature
 
 public:
+    /**
+     * Reset loaded gcode info to empty value
+     */
+    void reset_info();
+
     const time_buff &get_printing_time() const { return printing_time; } ///< Get string representation of printing time left
     bool is_loaded() const { return is_loaded_; } ///< Check if file has preview thumbnail
 
     inline bool has_error() const { return error_str_; } ///< Returns whether there is an (unrecoverable) error detected. The error message can then be obtained using error_str
     inline const char *error_str() const { return error_str_; } ///< If there is any reportable error, returns it. Otherwise returns nullptr.
+
+    inline void set_error(const char *error) {
+        assert(error);
+        error_str_ = error;
+    }
 
     bool has_preview_thumbnail() const { return has_preview_thumbnail_; } ///< Check if file has preview thumbnail
     bool has_progress_thumbnail() const { return has_progress_thumbnail_; } ///< Check if file has progress thumbnail
@@ -223,33 +212,15 @@ public:
      */
     int GivenExtrudersCount() const;
 
-    /** Set variables for gcode filename and filepath
-     *  @param[in] fname - aquired filename
-     *  @param[in] fpath - aquired filepath
-     */
-    void Init(const char *fname, const char *fpath);
-
-    /** Get static variable gcode filename
-     *  @param[in] fname - aquired filename
-     */
+    /// Returns LFN of the file (without path) - display purposes
     const char *GetGcodeFilename();
 
-    /** Get static variable gcode filepath
-     *  @param[in] fpath - aquired filename
-     */
+    /// Returns SFN filepath - referencing purposes, do not display
     const char *GetGcodeFilepath();
 
-    /**
-     * @brief Start loading of gcode (open file).
-     * @param file_reader gcode file reader, it cannot be accessed by other threads at the same time
-     */
-    bool start_load(AnyGcodeFormatReader &file_reader);
-
-    /**
-     * @brief End loading of gcode (close file).
-     * @param file_reader gcode file reader, it cannot be accessed by other threads at the same time
-     */
-    void end_load(AnyGcodeFormatReader &file_reader);
+    /// Set the filename (LFN) and filepath (SFN) of the gcode we're going to store the info for in GCodeInfo
+    /// The strings get copied into member variables, so no lifetime requirements.
+    void set_gcode_file(const char *filepath_sfn, const char *filename_lfn);
 
     /**
      * @brief Checks if the file still exists and can be potentially printed.
@@ -263,14 +234,7 @@ public:
      * @brief Check if file is ready for print. Updates \c is_printable and \c error_str.
      * @param file_reader gcode file reader, it cannot be accessed by other threads at the same time
      */
-    bool check_valid_for_print(AnyGcodeFormatReader &file_reader);
-
-    /**
-     * @brief Checks validity of the file (possibly CRC and such).
-     * Returns if the file is valid. Updates error_str if the file is not valid.
-     * @param file_reader gcode file reader, it cannot be accessed by other threads at the same time
-     */
-    bool verify_file(AnyGcodeFormatReader &file_reader);
+    bool check_valid_for_print(IGcodeReader &reader);
 
     /**
      * @brief Check the printable flag.
@@ -281,40 +245,26 @@ public:
     bool can_be_printed() { return is_printable_; }
 
     /**
-     * @brief Check the result of starting the load.
-     *
-     * To be used concurently to `start_load`,
-     * which does the starting.
-     */
-    StartLoadResult start_load_result() { return start_load_result_; }
-
-    /**
      * @brief Sets up gcode file and sets up info member variables for print preview.
      * @note start_load and end_load shall be called before&after
-     * @param file_reader gcode file reader, it cannot be accessed by other threads at the same time
+     * @param reader gcode file reader, it cannot be accessed by other threads at the same time
      */
-    void load(AnyGcodeFormatReader &file_reader);
+    void load(IGcodeReader &reader);
 
     /** Evaluates tool compatibility*/
     void EvaluateToolsValid();
 
-    /** Getter for printer_model_code
-     */
-    uint32_t getPrinterModelCode() const;
-
 private:
-    /**
-     * @brief Parse G-code file for comments and info codes.
-     * This cannot be run from Marlin thread, because it takes too long for watchdog.
-     * @param[in] reader - gcode file reader reference
-     */
-    void PreviewInit(IGcodeReader &reader);
-
     /** Iterate over items separated by some delimeter character */
-    std::optional<std::span<char>> iterate_items(std::span<char> &buffer, char separator);
+    std::optional<std::string_view> iterate_items(std::span<char> &buffer, char separator);
 
-    const char *gcode_file_path; /**< stores current gcode file path */
-    const char *gcode_file_name; /**< stores current gcode file name */
+    /// stores current gcode file path
+    /// SFN filepath (used for referencing the file)
+    std::array<char, FILE_PATH_BUFFER_LEN> gcode_file_path = { '\0' };
+
+    /// stores current gcode file name
+    /// LFN filename (used for display)
+    std::array<char, FILE_NAME_BUFFER_LEN> gcode_file_name = { '\0' };
 
 #if HAS_GUI()
     /** Set static variable for gcode filename
@@ -332,23 +282,4 @@ private:
     void parse_gcode(GcodeBuffer::String cmd, uint32_t &gcode_counter);
     void parse_comment(GcodeBuffer::String cmd);
     bool is_up_to_date(const char *new_version);
-
-    /**
-     * @brief Test printer model with a list of compatible models.
-     * @tparam SIZE size of the compatibility_list
-     * @param printer printer model to test
-     * @param compatibility_list list of compatible models
-     * @return true if printer is compatible with any of the models in compatibility_list
-     */
-    template <std::size_t SIZE>
-    bool is_printer_compatible(const GcodeBuffer::String &printer, const std::array<const char *, SIZE> &compatibility_list) {
-        return std::any_of(begin(compatibility_list),
-            end(compatibility_list),
-            [&](const auto &v) { return printer == v; });
-    }
-
-    /**
-     * Reset loaded gcode info to empty value
-     */
-    void reset_info();
 };

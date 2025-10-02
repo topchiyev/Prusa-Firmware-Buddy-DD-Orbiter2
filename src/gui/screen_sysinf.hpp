@@ -14,7 +14,7 @@
     #include "wui_api.h"
 #endif
 
-struct screen_sysinfo_data_t : public AddSuperWindow<screen_t> {
+struct screen_sysinfo_data_t : public screen_t {
     window_text_t textMenuName;
     window_text_t textCPU_load;
     window_numb_t textCPU_load_val;
@@ -31,5 +31,5 @@ public:
     screen_sysinfo_data_t();
 
 protected:
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 };

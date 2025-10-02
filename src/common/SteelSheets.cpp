@@ -23,7 +23,7 @@ uint32_t SteelSheets::NextSheet() {
 
 bool SteelSheets::IsSheetCalibrated(uint32_t index) {
     auto sheet = getSheet(index);
-    return std::isfinite(sheet.z_offset) && sheet.z_offset < zOffsetMax && sheet.z_offset > zOffsetMin;
+    return std::isfinite(sheet.z_offset) && sheet.z_offset <= zOffsetMax && sheet.z_offset >= zOffsetMin;
 }
 
 bool SteelSheets::SelectSheet(uint32_t index) {
@@ -37,7 +37,7 @@ bool SteelSheets::SelectSheet(uint32_t index) {
     // update marlin vars
     auto sheet = getSheet(index);
     // don't need to check validity of sheet, we have checked the sheet index
-    updateMarlin(sheet.z_offset);
+    marlin_client::set_z_offset(sheet.z_offset);
     return true;
 }
 
@@ -68,25 +68,20 @@ uint32_t SteelSheets::NumOfCalibrated() {
     return count;
 }
 
-uint32_t SteelSheets::ActiveSheetName(char *buffer, uint32_t length) {
-    if (!buffer || !length) {
-        return 0;
-    }
+uint32_t SteelSheets::ActiveSheetName(std::span<char, SHEET_NAME_BUFFER_SIZE> target) {
     uint8_t index = GetActiveSheetIndex();
-    return SheetName(index, buffer, length);
+    return SheetName(index, target);
 }
 
-uint32_t SteelSheets::SheetName(uint32_t index, char *buffer, uint32_t length) {
-    if (index >= config_store_ns::sheets_num || !buffer || !length) {
+uint32_t SteelSheets::SheetName(uint32_t index, std::span<char, SHEET_NAME_BUFFER_SIZE> target) {
+    if (index >= config_store_ns::sheets_num) {
         return 0;
     }
-    uint32_t l = length < static_cast<uint32_t>(MAX_SHEET_NAME_LENGTH) ? length : static_cast<uint32_t>(MAX_SHEET_NAME_LENGTH);
     auto sheet = getSheet(index);
-    memcpy(buffer, sheet.name, l);
-    while (l > 0 && !buffer[l - 1]) {
-        --l;
-    }
-    return l;
+    memcpy(target.data(), sheet.name, sizeof(sheet.name));
+    // Make sure the string is null terminated
+    target[target.size() - 1] = '\0';
+    return strlen(target.data());
 }
 
 uint32_t SteelSheets::RenameSheet(uint32_t index, const char *buffer, uint32_t length) {
@@ -111,11 +106,6 @@ void SteelSheets::setSheet(uint32_t index, Sheet sheet) {
     return config_store().set_sheet(index, sheet);
 }
 
-void SteelSheets::updateMarlin(float offset) {
-    offset = std::clamp(offset, zOffsetMin, zOffsetMax);
-    marlin_client::set_z_offset(offset);
-}
-
 void SteelSheets::SetZOffset(float offset) {
     if (!std::isfinite(offset)) {
         offset = 0.F;
@@ -123,7 +113,7 @@ void SteelSheets::SetZOffset(float offset) {
     offset = std::clamp(offset, zOffsetMin, zOffsetMax);
 
     uint8_t index = GetActiveSheetIndex();
-    updateMarlin(offset);
+    marlin_client::set_z_offset(offset);
     setSheetOffset(index, offset);
 }
 

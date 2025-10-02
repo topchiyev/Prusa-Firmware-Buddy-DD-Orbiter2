@@ -1,11 +1,15 @@
 #include "planner.hpp"
+#include "netdev.h"
 #include "printer.hpp"
 
 #include <filename_type.hpp>
-#include <log.h>
+#include <logging/log.hpp>
 #include <transfers/transfer.hpp>
 #include <option/websocket.h>
-#include <common/general_response.hpp>
+#include <general_response.hpp>
+#include <wui.h>
+#include <netif_settings.h>
+#include <config_store/store_instance.hpp>
 #if XL_ENCLOSURE_SUPPORT()
     #include <xl_enclosure.hpp>
 #endif
@@ -69,8 +73,11 @@ namespace {
     // Don't send telemetry more often than this even if things change.
     const constexpr Duration TELEMETRY_INTERVAL_MIN = 750;
 #if WEBSOCKET()
-    // Max of 2 minutes of telemetry silence.
-    const constexpr Duration TELEMETRY_INTERVAL_LONG = 2 * 60 * 1000;
+    // ~~~Max of 2 minutes of telemetry silence.~~~
+    //
+    // Switching to 4 seconds for websockets temporarily too, as requested by
+    // the server side.
+    const constexpr Duration TELEMETRY_INTERVAL_LONG = 1000 * 4;
 #else
     // Telemetry every 4 seconds. We may want to have something more clever later on.
     const constexpr Duration TELEMETRY_INTERVAL_LONG = 1000 * 4;
@@ -191,7 +198,22 @@ namespace {
         strcat(buffer, enc_suffix);
     }
 
-    Transfer::BeginResult init_transfer(Printer &, const Printer::Config &config, const StartEncryptedDownload &download) {
+    Transfer::BeginResult init_transfer(const StartInlineDownload &download) {
+        const char *dpath = download.path.path();
+        if (!path_allowed(dpath)) {
+            return Storage { "Not allowed outside /usb" };
+        }
+
+        if (!filename_is_transferrable(dpath)) {
+            return Storage { "Unsupported file type" };
+        }
+
+        auto request = Download::Request(download.hash, download.team_id, download.orig_size);
+
+        return Transfer::begin(dpath, request);
+    }
+
+    Transfer::BeginResult init_transfer(const Printer::Config &config, const StartEncryptedDownload &download) {
         const char *dpath = download.path.path();
         if (!path_allowed(dpath)) {
             return Storage { "Not allowed outside /usb" };
@@ -217,6 +239,19 @@ namespace {
 
     bool command_is_error_whitelisted(const Command &command) {
         return holds_alternative<SendInfo>(command.command_data) || holds_alternative<SetToken>(command.command_data) || holds_alternative<ResetPrinter>(command.command_data) || holds_alternative<SendStateInfo>(command.command_data);
+    }
+
+    const char *set_hostname(const char *new_hostname) {
+        if (strlen(new_hostname) > HOSTNAME_LEN) {
+            return "Hostname too long";
+        }
+
+        if (strcmp(config_store().hostname.get_c_str(), new_hostname) != 0) {
+            log_info(connect, "Changing hostname to: %s", new_hostname);
+            config_store().hostname.set(new_hostname);
+            notify_reconfigure();
+        }
+        return nullptr;
     }
 } // namespace
 
@@ -277,6 +312,11 @@ void Planner::reset() {
     cooldown = nullopt;
     perform_cooldown = false;
     failed_attempts = 0;
+}
+
+void Planner::reset_telemetry() {
+    last_telemetry = nullopt;
+    telemetry_changes.mark_dirty();
 }
 
 Sleep Planner::sleep(Duration amount, http::Connection *wake_on_readable, bool cooldown) {
@@ -361,6 +401,7 @@ Action Planner::next_action(SharedBuffer &buffer, http::Connection *wake_on_read
         return *planned_event;
     }
 
+    printer.set_can_start_download(transfer_recovery != TransferRecoveryState::WaitingForUSB);
     if (info_changes.set_hash(printer.info_fingerprint())) {
         planned_event = Event {
             EventType::Info,
@@ -466,6 +507,15 @@ Action Planner::next_action(SharedBuffer &buffer, http::Connection *wake_on_read
     const bool send_telemetry = since_telemetry >= TELEMETRY_INTERVAL_MIN && (changes || since_telemetry >= telemetry_interval);
     const bool want_full = changes || since_full >= TELEMETRY_INTERVAL_FULL;
 
+    if (!send_telemetry && transfer.has_value() && transfer->download.has_value()) {
+        // This call "consumes" the request, so we won't use it next time.
+        // Nevertheless, if the connection fails (we are unable to deliver it),
+        // the old download is discarded anyway and a new one is born.
+        if (auto request = transfer->download->inline_request(); request.has_value()) {
+            return *request;
+        }
+    }
+
     if (send_telemetry) {
         last_telemetry_mode = want_full ? SendTelemetry::Mode::Full : SendTelemetry::Mode::Reduced;
         return SendTelemetry { last_telemetry_mode };
@@ -487,52 +537,7 @@ bool Planner::can_receive_command() const {
 }
 
 void Planner::action_done(ActionResult result) {
-    switch (result) {
-    case ActionResult::Refused:
-        // In case of refused, we also remove the event, won't try to send it again.
-    case ActionResult::Ok: {
-        const Timestamp n = now();
-        last_success = n;
-        perform_cooldown = false;
-        cooldown = nullopt;
-        failed_attempts = 0;
-        if (planned_event.has_value()) {
-            if (planned_event->type == EventType::Info) {
-                info_changes.mark_clean();
-            } else if (planned_event->type == EventType::CancelableChanged) {
-                cancellable_objects.mark_clean();
-            } else if (planned_event->type == EventType::StateChanged) {
-                state_info.mark_clean();
-            }
-            planned_event = nullopt;
-#if !WEBSOCKET()
-            // Enforce telemetry now. We may get a new command with it.
-            // Websocket doesn't need this, commands can come independently from telemetry.
-            last_telemetry = nullopt;
-#endif
-        } else {
-            last_telemetry = n;
-            if (last_telemetry_mode == SendTelemetry::Mode::Full) {
-                last_full_telemetry = n;
-                telemetry_changes.mark_clean();
-            }
-        }
-        break;
-    }
-    case ActionResult::Failed:
-        if (++failed_attempts >= GIVE_UP_AFTER_ATTEMPTS) {
-            // Give up after too many failed attemts when trying to send the
-            // same thing. The failure may be related to the specific event in
-            // some way (we have seen a "payload too large" error from the
-            // server, for example, which, due to our limitations, we are
-            // unable to distinguish from just a network error while sending
-            // the data), so avoid some kind of infinite loop/blocked state.
-            if (planned_event.has_value() && planned_event->type != EventType::Info) {
-                planned_event.reset();
-            }
-            failed_attempts = 0;
-        }
-
+    auto exponential_backoff = [&]() {
         if (const auto since_success = since(last_success); since_success.value_or(0) >= RECONNECT_AFTER && !planned_event.has_value()) {
             // We have talked to the server long time ago (it's probably in
             // a galaxy far far away), so next time we manage to do so,
@@ -547,6 +552,71 @@ void Planner::action_done(ActionResult result) {
         // Failed to talk to the server. Retry after a while (with a back-off), but otherwise keep stuff the same.
         cooldown = min(COOLDOWN_MAX, cooldown.value_or(COOLDOWN_BASE / 2) * 2);
         perform_cooldown = true;
+    };
+
+    auto reset_backoff = [&]() {
+        perform_cooldown = false;
+        cooldown = nullopt;
+    };
+
+    auto cleanups = [&]() {
+        // In case of refused, we also remove the event, won't try to send it again.
+        failed_attempts = 0;
+
+        if (planned_event.has_value()) {
+            if (planned_event->type == EventType::Info) {
+                info_changes.mark_clean();
+            } else if (planned_event->type == EventType::CancelableChanged) {
+                cancellable_objects.mark_clean();
+            } else if (planned_event->type == EventType::StateChanged) {
+                state_info.mark_clean();
+            }
+            // Enforce telemetry now. We may get a new command with it.
+            // Websocket still need this, even tho commands can come independently from telemetry,
+            // because the telemetry might change as a result of the event, that was finished.
+            last_telemetry = nullopt;
+        } else {
+            const Timestamp n = now();
+            last_telemetry = n;
+            if (last_telemetry_mode == SendTelemetry::Mode::Full) {
+                last_full_telemetry = n;
+                telemetry_changes.mark_clean();
+            }
+        }
+        planned_event.reset();
+    };
+
+    switch (result) {
+    case ActionResult::Refused:
+        cleanups();
+        exponential_backoff();
+        break;
+    case ActionResult::RefusedFast:
+        cleanups();
+        reset_backoff();
+        break;
+    case ActionResult::Ok: {
+        const Timestamp n = now();
+        last_success = n;
+        reset_backoff();
+        cleanups();
+        break;
+    }
+    case ActionResult::Failed:
+        if (++failed_attempts >= GIVE_UP_AFTER_ATTEMPTS) {
+            // Give up after too many failed attemts when trying to send the
+            // same thing. The failure may be related to the specific event in
+            // some way (we have seen a "payload too large" error from the
+            // server, for example, which, due to our limitations, we are
+            // unable to distinguish from just a network error while sending
+            // the data), so avoid some kind of infinite loop/blocked state.
+            if (planned_event.has_value() && planned_event->type != EventType::Info) {
+                cleanups();
+            }
+            failed_attempts = 0;
+        }
+
+        exponential_backoff();
         break;
     }
 }
@@ -600,8 +670,8 @@ void Planner::command(const Command &command, const StartPrint &params) {
         reason = "Forbidden path";
     } else if (!file_exists(path)) {
         reason = "File not found";
-    } else if (!printer.start_print(path)) {
-        reason = "Can't print now";
+    } else if (const char *error = printer.start_print(path, params.tool_mapping); error != nullptr) {
+        reason = error;
     }
 
     if (reason == nullptr) {
@@ -675,25 +745,7 @@ void Planner::command(const Command &, const ProcessingThisCommand &) {
     assert(0);
 }
 
-void Planner::command(const Command &command, const StartEncryptedDownload &download) {
-    // Get the config (we need it for the connection); don't reset the "changed" flag.
-    auto [config, config_changed] = printer.config(false);
-    if (config_changed) {
-        // If the config changed, there's a chance the old server send us a
-        // command to download stuff and we would download it from the new one,
-        // which a) wouldn't have it, b) we could leak some info to the new
-        // server we are not supposed to. Better safe than sorry.
-        planned_event = Event { EventType::Rejected, command.id, nullopt, nullopt, nullopt, "Switching config" };
-        return;
-    }
-
-    if (transfer_recovery == TransferRecoveryState::WaitingForUSB) {
-        planned_event = Event { EventType::Rejected, command.id, nullopt, nullopt, nullopt, "Not ready" };
-        return;
-    }
-
-    auto down_result = init_transfer(printer, config, download);
-
+void Planner::handle_transfer_result(const Command &command, Transfer::BeginResult result) {
     visit([&](auto &&arg) {
         using T = std::decay_t<decltype(arg)>;
         if constexpr (is_same_v<T, transfers::Transfer>) {
@@ -717,7 +769,40 @@ void Planner::command(const Command &command, const StartEncryptedDownload &down
             static_assert(always_false_v<T>, "non-exhaustive visitor!");
         }
     },
-        down_result);
+        result);
+}
+
+void Planner::command(const Command &command, const StartInlineDownload &download) {
+    if (transfer_recovery == TransferRecoveryState::WaitingForUSB) {
+        planned_event = Event { EventType::Rejected, command.id, nullopt, nullopt, nullopt, "Not ready" };
+        return;
+    }
+
+    auto down_result = init_transfer(download);
+
+    handle_transfer_result(command, std::move(down_result));
+}
+
+void Planner::command(const Command &command, const StartEncryptedDownload &download) {
+    // Get the config (we need it for the connection); don't reset the "changed" flag.
+    auto [config, config_changed] = printer.config(false);
+    if (config_changed) {
+        // If the config changed, there's a chance the old server send us a
+        // command to download stuff and we would download it from the new one,
+        // which a) wouldn't have it, b) we could leak some info to the new
+        // server we are not supposed to. Better safe than sorry.
+        planned_event = Event { EventType::Rejected, command.id, nullopt, nullopt, nullopt, "Switching config" };
+        return;
+    }
+
+    if (transfer_recovery == TransferRecoveryState::WaitingForUSB) {
+        planned_event = Event { EventType::Rejected, command.id, nullopt, nullopt, nullopt, "Not ready" };
+        return;
+    }
+
+    auto down_result = init_transfer(config, download);
+
+    handle_transfer_result(command, std::move(down_result));
 }
 
 void Planner::command(const Command &command, const DeleteFile &params) {
@@ -817,23 +902,34 @@ void Planner::command(const Command &command, const DialogAction &params) {
     }
 }
 
-#if XL_ENCLOSURE_SUPPORT()
 void Planner::command(const Command &command, const SetValue &params) {
     const char *err = nullptr;
+
+    auto adjust_nozzle = [&](size_t idx, auto cback) {
+        auto slot = printer.params().slots[idx];
+        cback(slot);
+        printer.set_slot_info(idx, slot);
+    };
+
     switch (params.name) {
+    case connect_client::PropertyName::HostName:
+        err = set_hostname(reinterpret_cast<const char *>(get<SharedBorrow>(params.value)->data()));
+        break;
+#if XL_ENCLOSURE_SUPPORT()
     case connect_client::PropertyName::EnclosureEnabled:
-        xl_enclosure.setEnabled(params.bool_value);
+        xl_enclosure.setEnabled(get<bool>(params.value));
         break;
     case connect_client::PropertyName::EnclosurePrintingFiltration:
-        xl_enclosure.setPrintFiltration(params.bool_value);
+        xl_enclosure.setPrintFiltration(get<bool>(params.value));
         break;
     case connect_client::PropertyName::EnclosurePostPrint:
-        xl_enclosure.setPostPrintFiltration(params.bool_value);
+        xl_enclosure.setPostPrintFiltration(get<bool>(params.value));
         break;
-    case connect_client::PropertyName::EnclosurePostPrintFiltrationTime:
+    case connect_client::PropertyName::EnclosurePostPrintFiltrationTime: {
         // we recieve it in seconds, but this function expects minutes
-        uint32_t minutes = params.int_value / 60;
-        if (params.int_value % 60 != 0) {
+        uint32_t raw_value = get<uint32_t>(params.value);
+        uint32_t minutes = raw_value / 60;
+        if (raw_value % 60 != 0) {
             err = "Value should be whole minutes";
         } else if (minutes >= 1 && minutes <= 10) {
             xl_enclosure.setPostPrintFiltrationDuration(minutes);
@@ -842,12 +938,72 @@ void Planner::command(const Command &command, const SetValue &params) {
         }
         break;
     }
+#endif
+    case connect_client::PropertyName::NozzleHighFlow:
+        adjust_nozzle(params.idx, [&](auto &slot) {
+            slot.high_flow = get<bool>(params.value);
+        });
+        break;
+    case connect_client::PropertyName::NozzleHardened:
+        adjust_nozzle(params.idx, [&](auto &slot) {
+            slot.hardened = get<bool>(params.value);
+        });
+        break;
+    case connect_client::PropertyName::NozzleDiameter:
+        adjust_nozzle(params.idx, [&](auto &slot) {
+            slot.nozzle_diameter = get<float>(params.value);
+        });
+        break;
+    }
 
     if (err != nullptr) {
         planned_event = Event { EventType::Rejected, command.id, nullopt, nullopt, nullopt, err };
     } else {
         planned_event = { EventType::Finished, command.id };
     }
+}
+
+#if ENABLED(CANCEL_OBJECTS)
+void Planner::command(const Command &command, const CancelObject &params) {
+    printer.cancel_object(params.id);
+    // Reset the hash to the current (modified) cancel mask.
+    // We don't need to do .renew on the printer, the marlin vars are propagated "instantly"
+    cancellable_objects.set_hash(printer.cancelable_fingerprint());
+    // We confirm the command by sending the current cancellable state
+    // (even if it didn't change by this modification - like if it was already canceled, etc)
+    planned_event = Event {
+        EventType::CancelableChanged,
+        command.id,
+    };
+}
+
+void Planner::command(const Command &command, const UncancelObject &params) {
+    printer.uncancel_object(params.id);
+    // Reset the hash to the current (modified) cancel mask.
+    // We don't need to do .renew on the printer, the marlin vars are propagated "instantly"
+    cancellable_objects.set_hash(printer.cancelable_fingerprint());
+    // We confirm the command by sending the current cancellable state
+    // (even if it didn't change by this modification - like if it was already canceled, etc)
+    planned_event = Event {
+        EventType::CancelableChanged,
+        command.id,
+    };
+}
+#else
+void Planner::command(const Command &command, const CancelObject &) {
+    planned_event = Event {
+        EventType::Rejected,
+        command.id,
+    };
+    planned_event->reason = "Not supported on this printer type";
+}
+
+void Planner::command(const Command &command, const UncancelObject &) {
+    planned_event = Event {
+        EventType::Rejected,
+        command.id,
+    };
+    planned_event->reason = "Not supported on this printer type";
 }
 #endif
 
@@ -955,6 +1111,20 @@ void Planner::download_done(Transfer::State result) {
 void Planner::transfer_cleanup_finished(bool success) {
     // Retry in case of failure.
     need_transfer_cleanup = !success;
+}
+
+bool Planner::transfer_chunk(const Download::InlineChunk &chunk) {
+    if (transfer.has_value() && transfer->download.has_value()) {
+        return transfer->download->inline_chunk(chunk);
+    } else {
+        return false;
+    }
+}
+
+void Planner::transfer_reset() {
+    if (transfer.has_value() && transfer->download.has_value()) {
+        transfer->download->network_failed();
+    }
 }
 
 } // namespace connect_client

@@ -12,18 +12,18 @@
 #include <array>
 #include <option/has_side_fsensor.h>
 #include <option/has_mmu2.h>
+#include <option/has_sheet_profiles.h>
 #include "i18n.h"
 #include <bsod.h>
 #include <device/board.h>
 
 // sadly this must be macros, it is used in preprocessor
-#if (defined(PRINTER_TYPE) && PRINTER_IS_PRUSA_MINI) || defined(USE_MOCK_DISPLAY)
+#if (defined(PRINTER_TYPE) && PRINTER_IS_PRUSA_MINI()) || HAS_MOCK_DISPLAY()
     #define FOOTER_HAS_LIVE_Z
-    #define FOOTER_HAS_SHEETS
     #define FOOTER_LINES__          2
     #define FOOTER_ITEMS_PER_LINE__ 3
-#else // if defined(USE_ILI9488)
-    #if (defined(PRINTER_TYPE) && PRINTER_IS_PRUSA_XL)
+#else
+    #if (defined(PRINTER_TYPE) && PRINTER_IS_PRUSA_XL())
         #define FOOTER_HAS_TOOL_NR
     #endif
     #define FOOTER_LINES__          1
@@ -79,17 +79,17 @@ enum class Item : uint8_t { // stored in eeprom, must fit to footer::eeprom::val
  * @brief Holds all items that are not be available for specific configurations - see Item brief for why this exists
  * Note: if it were to happen that a specific configuration would have no items, ifdef it so that instead of std::to_array there's just plain std::array<Item,0>
  */
-inline constexpr auto disabled_items { std::to_array<Item>({
+inline constexpr std::array disabled_items {
 #if not defined(FOOTER_HAS_LIVE_Z)
     Item::live_z,
 #endif
-#if not defined(FOOTER_HAS_SHEETS)
+#if !HAS_SHEET_PROFILES()
         Item::sheets,
 #endif
 #if not HAS_MMU2()
         Item::finda,
 #endif
-#if PRINTER_IS_PRUSA_MINI || PRINTER_IS_PRUSA_MK3_5
+#if PRINTER_IS_PRUSA_MINI() || PRINTER_IS_PRUSA_MK3_5()
         Item::heatbreak_temp,
 #endif
 #if not defined(FOOTER_HAS_TOOL_NR)
@@ -107,7 +107,7 @@ inline constexpr auto disabled_items { std::to_array<Item>({
 #if not XL_ENCLOSURE_SUPPORT()
         Item::enclosure_temp,
 #endif
-}) };
+};
 
 consteval bool all_disabled_items_are_unique() {
     auto items_copy = disabled_items;
@@ -151,7 +151,7 @@ constexpr const char *to_string(Item item) {
     case Item::print_fan:
         return N_("Print fan");
     case Item::heatbreak_fan:
-#if PRINTER_IS_PRUSA_MK3_5 || PRINTER_IS_PRUSA_MINI
+#if PRINTER_IS_PRUSA_MK3_5() || PRINTER_IS_PRUSA_MINI()
         return N_("Hotend Fan");
 #else
         return N_("Heatbreak Fan");
@@ -169,7 +169,7 @@ constexpr const char *to_string(Item item) {
     case Item::heatbreak_temp:
         return N_("Heatbreak");
     case Item::sheets:
-#if defined(FOOTER_HAS_SHEETS)
+#if HAS_SHEET_PROFILES()
         return N_("Sheets");
 #else
         break;

@@ -8,7 +8,7 @@
 
 #include "IDialog.hpp"
 
-class DialogTimed : public AddSuperWindow<IDialog> {
+class DialogTimed : public IDialog {
     const uint32_t open_period;
     uint32_t time_of_last_action;
 
@@ -35,7 +35,7 @@ protected:
     enum class visibility_changed_t : bool { no,
         yes };
 
-    void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param);
+    void windowEvent(window_t *sender, GUI_event_t event, void *param);
     virtual void updateLoop(visibility_changed_t visibility_changed) = 0;
     bool isShowBlocked() const;
 };

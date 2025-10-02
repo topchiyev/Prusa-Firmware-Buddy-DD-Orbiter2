@@ -7,6 +7,7 @@
 #include "selftest_axis_config.hpp"
 #include "selftest_log.hpp"
 
+#include <printers.h>
 namespace selftest {
 
 inline constexpr char axis_to_letter(uint32_t axis) {
@@ -33,7 +34,9 @@ class CSelftestPart_Axis {
     uint16_t m_SGCount = 0;
     uint8_t m_Step = 0;
     uint8_t m_SGOrig_mask;
-    bool homed = false;
+#if !PRINTER_IS_PRUSA_XL()
+    float unmeasured_distance = 0; // Distance traveled before axis measuring is started
+#endif
     bool coils_ok = false; // Initially false, set to true when any coil check passes
     static CSelftestPart_Axis *m_pSGAxis;
 
@@ -62,15 +65,10 @@ public:
         SelftestSingleAxis_t &result);
     ~CSelftestPart_Axis();
 
-    // states for 200/400 step switching algorithm
-    LoopResult stateSwitchTo400step();
-    LoopResult stateCycleMark0() { return LoopResult::MarkLoop0; }
     LoopResult stateActivateHomingReporter();
     LoopResult stateHomeXY(); ///< Enqueue homing
     LoopResult stateWaitHomingReporter(); ///< Alternative state to stateWaitHome, in case reporter is used
     LoopResult stateEvaluateHomingXY();
-    LoopResult stateCycleMark1() { return LoopResult::MarkLoop1; }
-    LoopResult stateSwitchTo200stepAndRetry();
 
     LoopResult stateHomeZ(); ///< Enqueue homing and toolchange
     LoopResult stateWaitHome(); ///< Wait for homing and toolchange to finish
@@ -80,7 +78,6 @@ public:
     LoopResult stateCycleMark2() { return LoopResult::MarkLoop2; }
     LoopResult stateMove();
     LoopResult stateMoveFinishCycle();
-    LoopResult stateMoveFinishCycleWithMotorSwitch();
     LoopResult stateParkAxis();
     LoopResult state_verify_coils(); ///< Report error when coils were never seen ok
 

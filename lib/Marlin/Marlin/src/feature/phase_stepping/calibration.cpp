@@ -2,7 +2,7 @@
 #include "phase_stepping.hpp"
 #include "calibration_config.hpp"
 
-#include <log.h>
+#include <logging/log.hpp>
 #include <module/planner.h>
 #include <module/motion.h>
 #include <gcode/gcode.h>
@@ -271,8 +271,8 @@ static void move_to_calibration_start(AxisEnum axis, const PrinterCalibrationCon
 }
 
 static void reset_compensation(AxisEnum axis) {
-    phase_stepping::axis_states[axis]->forward_current.clear();
-    phase_stepping::axis_states[axis]->backward_current.clear();
+    phase_stepping::axis_states[axis].forward_current.clear();
+    phase_stepping::axis_states[axis].backward_current.clear();
 }
 
 // Return a tuple <motor_period_count, relevant_samples_count> that gives a
@@ -299,7 +299,7 @@ float phase_stepping::capture_samples(AxisEnum axis, float speed, float revs,
 
     Planner::synchronize();
 
-    phase_stepping::AxisState &axis_state = *phase_stepping::axis_states[axis];
+    phase_stepping::AxisState &axis_state = phase_stepping::axis_states[axis];
 
     // Find move target that corresponds to given number of revs
     auto [measurement_revs, vibration_delay] = sample_capture_revs(revs, speed);
@@ -328,8 +328,8 @@ float phase_stepping::capture_samples(AxisEnum axis, float speed, float revs,
 
     int counter = 0;
     PrusaAccelerometer accelerometer;
-    if (accelerometer.get_error() != PrusaAccelerometer::Error::none) {
-        log_error(PhaseStepping, "Cannot initialize accelerometer %u", static_cast<unsigned>(accelerometer.get_error()));
+    if (PrusaAccelerometer::Error error = accelerometer.get_error(); error != PrusaAccelerometer::Error::none) {
+        log_error(PhaseStepping, "Cannot initialize accelerometer %u", static_cast<unsigned>(error));
         return 0;
     }
     accelerometer.clear();
@@ -341,8 +341,8 @@ float phase_stepping::capture_samples(AxisEnum axis, float speed, float revs,
             yield_sample(sample);
         }
     }
-    if (accelerometer.get_error() != PrusaAccelerometer::Error::none) {
-        log_error(PhaseStepping, "Accelerometer reading failed %u", static_cast<unsigned>(accelerometer.get_error()));
+    if (PrusaAccelerometer::Error error = accelerometer.get_error(); error != PrusaAccelerometer::Error::none) {
+        log_error(PhaseStepping, "Accelerometer reading failed %u", static_cast<unsigned>(error));
         return 0;
     }
     return accelerometer.get_sampling_rate();
@@ -435,7 +435,7 @@ class CalibrationPhaseExecutor {
         InterruptableGoldenSearch backward_search,
         int iterations,
         F apply_x) {
-        auto &axis_state = *phase_stepping::axis_states[_axis];
+        auto &axis_state = phase_stepping::axis_states[_axis];
 
         // Calibration is quite CPU-heavy, we gotta release the processor to do other stuff from time to time
         // Also GUI thread is waiting for marlin server acks, so we gotta do marlin idling
@@ -504,11 +504,11 @@ class CalibrationPhaseExecutor {
     }
 
     const SpectralItem &_get_fwd_item() const {
-        return axis_states[_axis]->forward_current.get_correction()[_phase_config.harmonic];
+        return axis_states[_axis].forward_current.get_correction()[_phase_config.harmonic];
     }
 
     const SpectralItem &_get_bwd_item() const {
-        return axis_states[_axis]->backward_current.get_correction()[_phase_config.harmonic];
+        return axis_states[_axis].backward_current.get_correction()[_phase_config.harmonic];
     }
 
 public:
@@ -614,13 +614,53 @@ phase_stepping::calibrate_axis(AxisEnum axis, CalibrateAxisHooks &hooks) {
     hooks.on_termination();
 
     r.emplace();
-    std::get<0>(*r) = phase_stepping::axis_states[axis]->forward_current.get_correction();
-    std::get<1>(*r) = phase_stepping::axis_states[axis]->backward_current.get_correction();
+    std::get<0>(*r) = phase_stepping::axis_states[axis].forward_current.get_correction();
+    std::get<1>(*r) = phase_stepping::axis_states[axis].backward_current.get_correction();
     return r;
 }
 
 PrinterCalibrationConfig phase_stepping::get_printer_calibration_config() {
-#if PRINTER_IS_PRUSA_XL
+#if PRINTER_IS_PRUSA_XL()
+    static constexpr std::array phases = {
+        CalibrationPhase {
+            .harmonic = 2,
+            .speed = 3.f,
+            .pha = 3.14f,
+            .pha_window = 4.f,
+            .mag = 0.02f,
+            .mag_window = 0.05f,
+            .iteration_count = 10,
+        },
+        CalibrationPhase {
+            .harmonic = 4,
+            .speed = 1.5f,
+            .pha = 0.f,
+            .pha_window = 4.f,
+            .mag = 0.015f,
+            .mag_window = 0.04f,
+            .iteration_count = 10,
+        },
+        CalibrationPhase {
+            .harmonic = 2,
+            .speed = 3.f,
+            .pha_window = 1.f,
+            .mag_window = 0.02f,
+            .iteration_count = 16,
+        },
+        CalibrationPhase {
+            .harmonic = 4,
+            .speed = 1.5f,
+            .pha_window = 1.5f,
+            .mag_window = 0.02f,
+            .iteration_count = 16,
+        },
+    };
+
+    return PrinterCalibrationConfig {
+        .calib_revs = 0.5f,
+        .phases = std::vector(phases.begin(), phases.end()),
+    };
+#elif PRINTER_IS_PRUSA_iX() // TODO for now it is just copy-paste of XL values; needs changes when iX specific values are measured
     static constexpr std::array phases = {
         CalibrationPhase {
             .harmonic = 2,

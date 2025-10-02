@@ -67,7 +67,7 @@ xlBuddy:
         Y3 - ambient_temp
  */
 
-#if BOARD_IS_XLBUDDY
+#if BOARD_IS_XLBUDDY()
     #define ADC_MULTIPLEXER
 #endif
 
@@ -76,7 +76,7 @@ xlBuddy:
  */
 namespace AdcChannel {
 
-#if (BOARD_IS_BUDDY)
+#if (BOARD_IS_BUDDY())
 enum AD1 { // ADC1 channels
     hotend_T,
     heatbed_T,
@@ -87,7 +87,7 @@ enum AD1 { // ADC1 channels
     vref,
     ADC1_CH_CNT
 };
-#elif (BOARD_IS_XBUDDY && PRINTER_IS_PRUSA_MK3_5)
+#elif (BOARD_IS_XBUDDY() && PRINTER_IS_PRUSA_MK3_5())
 enum AD1 { // ADC1 channels
     hotend_T,
     heatbed_T,
@@ -107,7 +107,7 @@ enum AD3 { // ADC3 channels
     ADC3_CH_CNT
 };
 
-#elif (BOARD_IS_XBUDDY)
+#elif (BOARD_IS_XBUDDY())
 enum AD1 { // ADC1 channels
     hotend_T,
     heatbed_T,
@@ -125,10 +125,13 @@ enum AD3 { // ADC3 channels
     hotend_I,
     board_I,
     case_T,
+    #if PRINTER_IS_PRUSA_MK4()
+    door_sensor,
+    #endif
     ADC3_CH_CNT
 };
 
-#elif (BOARD_IS_XLBUDDY)
+#elif (BOARD_IS_XLBUDDY())
 enum AD1 { // ADC1 channels
     dwarf_I,
     mux1_y,
@@ -169,7 +172,7 @@ enum SideFilamnetSensorsAndTempMux { // Multiplexer channels
     SFS_AND_TEMP_CH_CNT
 };
 
-#elif BOARD_IS_DWARF
+#elif BOARD_IS_DWARF()
 enum AD1 {
     picked1,
     picked0,
@@ -212,7 +215,7 @@ public:
         assert(adc.Init.Resolution == ADC_RESOLUTION_12B);
 
         HAL_ADC_Init(&adc);
-#if BOARD_IS_DWARF
+#if BOARD_IS_DWARF()
         HAL_ADCEx_Calibration_Start(&adc);
         HAL_ADCEx_Calibration_SetValue(&adc, HAL_ADC_GetValue(&adc));
 #endif
@@ -417,7 +420,7 @@ extern AdcMultiplexer<AdcDma3, DMA2_Stream0_IRQn, AdcChannel::SFS_AND_TEMP_CH_CN
 namespace AdcGet {
 static constexpr uint16_t undefined_value = AdcDma1::reset_value;
 
-#if (BOARD_IS_BUDDY)
+#if (BOARD_IS_BUDDY())
 inline uint16_t nozzle() { return adcDma1.get_and_shift_channel(AdcChannel::hotend_T); }
 inline uint16_t bed() { return adcDma1.get_and_shift_channel(AdcChannel::heatbed_T); }
 inline uint16_t boardTemp() { return adcDma1.get_and_shift_channel(AdcChannel::board_T); }
@@ -427,7 +430,7 @@ inline uint16_t vref() { return adcDma1.get_channel(AdcChannel::vref); } ///< In
 inline uint16_t mcuTemperature() { return adcDma1.get_channel(AdcChannel::mcu_temperature); } ///< Raw sensor, use getMCUTemp() instead
 #endif
 
-#if (BOARD_IS_XBUDDY)
+#if (BOARD_IS_XBUDDY())
 static constexpr size_t nozzle_buff_size { 128 };
 extern SumRingBuffer<uint32_t, nozzle_buff_size> nozzle_ring_buff;
 static_assert((adcDma1.sample_max * nozzle_buff_size) <= std::numeric_limits<decltype(nozzle_ring_buff)::sum_type>::max(),
@@ -462,7 +465,7 @@ inline void sampleNozzle() {
 }
 
 inline uint16_t bed() { return adcDma1.get_and_shift_channel(AdcChannel::heatbed_T); }
-    #if (!PRINTER_IS_PRUSA_MK3_5)
+    #if (!PRINTER_IS_PRUSA_MK3_5())
 inline uint16_t heatbreakTemp() { return adcDma1.get_and_shift_channel(AdcChannel::heatbreak_T); }
     #endif
 inline uint16_t boardTemp() { return adcDma3.get_and_shift_channel(AdcChannel::board_T); }
@@ -471,6 +474,14 @@ inline uint16_t heaterVoltage() { return adcDma1.get_and_shift_channel(AdcChanne
 inline uint16_t inputVoltage() {
     return adcDma1.get_and_shift_channel(AdcChannel::heatbed_U);
 }
+
+    #if PRINTER_IS_PRUSA_iX()
+inline uint16_t psu_temp() { return adcDma1.get_and_shift_channel(AdcChannel::heatbed_T); }
+inline uint16_t ambient_temp() { return adcDma3.get_and_shift_channel(AdcChannel::case_T); }
+    #elif PRINTER_IS_PRUSA_MK4()
+inline uint16_t door_sensor() { return adcDma3.get_channel(AdcChannel::door_sensor); }
+    #endif
+
 inline uint16_t MMUCurrent() { return adcDma3.get_and_shift_channel(AdcChannel::MMU_I); }
 inline uint16_t heaterCurrent() { return adcDma3.get_and_shift_channel(AdcChannel::hotend_I); }
 inline uint16_t inputCurrent() { return adcDma3.get_and_shift_channel(AdcChannel::board_I); }
@@ -479,7 +490,7 @@ inline uint16_t vref() { return adcDma1.get_channel(AdcChannel::vref); } ///< In
 inline uint16_t mcuTemperature() { return adcDma1.get_channel(AdcChannel::mcu_temperature); } ///< Raw sensor, use getMCUTemp() instead
 #endif
 
-#if BOARD_IS_XLBUDDY
+#if BOARD_IS_XLBUDDY()
 inline uint16_t dwarfsCurrent() { return adcDma1.get_and_shift_channel(AdcChannel::dwarf_I); };
 inline uint16_t boardTemp() { return adcDma3.get_and_shift_channel(AdcChannel::board_T); };
 inline uint16_t inputVoltage24V() { return PowerHWIDAndTempMux.get_and_shift_channel(AdcChannel::board_U24); };
@@ -506,21 +517,13 @@ inline uint16_t vref() { return adcDma1.get_channel(AdcChannel::vref); } ///< In
 inline uint16_t mcuTemperature() { return adcDma1.get_channel(AdcChannel::mcu_temperature); } ///< Raw sensor, use getMCUTemp() instead
 #endif
 
-#if BOARD_IS_DWARF
+#if BOARD_IS_DWARF()
 inline uint16_t inputf24V() { return adcDma1.get_and_shift_channel(AdcChannel::dwarf_24V); }
-    #if (BOARD_VER_EQUAL_TO(0, 4, 0))
-inline uint16_t nozzle() { return adcDma1.get_and_shift_channel(AdcChannel::ntc2); }
-    #else
 inline uint16_t nozzle() { return adcDma1.get_and_shift_channel(AdcChannel::ntc); }
-    #endif
 inline uint16_t heaterCurrent() { return adcDma1.get_and_shift_channel(AdcChannel::heater_current); }
 inline uint16_t picked0() { return adcDma1.get_channel(AdcChannel::picked0); }
 inline uint16_t picked1() { return adcDma1.get_channel(AdcChannel::picked1); }
-    #if (BOARD_VER_EQUAL_TO(0, 4, 0))
-inline uint16_t heatbreakTemp() { return adcDma1.get_and_shift_channel(AdcChannel::ntc); }
-    #else
 inline uint16_t heatbreakTemp() { return adcDma1.get_and_shift_channel(AdcChannel::ntc2); }
-    #endif
 inline uint16_t boardTemp() { return adcDma1.get_and_shift_channel(AdcChannel::ntc_internal); }
 inline uint16_t toolFimalentSensor() { return adcDma1.get_channel(AdcChannel::TFS); }
 inline uint16_t mcuTemperature() { return adcDma1.get_channel(AdcChannel::mcu_temperature); } ///< Raw sensor, use getMCUTemp() instead

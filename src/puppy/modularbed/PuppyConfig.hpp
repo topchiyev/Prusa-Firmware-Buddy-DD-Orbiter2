@@ -71,6 +71,8 @@ inline constexpr uint8_t ADC_BATCH_SIZE = 34; // please do not change this value
 #define ENABLE_TEMPERATURE_CHECKS 1
 #define TURN_OFF_HEATING_ON_ERROR 1
 
+#define CURRENT_MIN 0.1f
+
 #define TEMPERATURE_MIN 5
 #define TEMPERATURE_MAX 120
 
@@ -81,7 +83,7 @@ inline constexpr uint8_t ADC_BATCH_SIZE = 34; // please do not change this value
 #define TEMPERATURE_DROP_THRESHOLD_WITHOUT_FAN_DEGREES 10
 #define TEMPERATURE_DROP_THRESHOLD_SECONDS             360
 
-#define TEMPERATURE_PEAK_THRESHOLD_DEGREES 3
+#define TEMPERATURE_PEAK_THRESHOLD_DEGREES 5
 #define TEMPERATURE_PEAK_THRESHOLD_SECONDS 60
 #define TEMPERATURE_PEAK_AMBIENT_DEGREES   50
 
@@ -103,8 +105,9 @@ inline constexpr std::array<float, Branch::count> UNEXPECTED_CURRENT_TOLERANCE {
 
 #define MIN_HB_RESISTANCE 4.5f // for checking of "HeaterShortCircuit" error
 #define MAX_HB_RESISTANCE 40.0f // for checking of "HeaterDisconnected" error
+#define INF_RESISTANCE    (MAX_HB_RESISTANCE * 1000)
 
-#if PRINTER_IS_PRUSA_iX
+#if PRINTER_IS_PRUSA_iX()
 inline constexpr bool is_used_bedlet(uint32_t heatbedletIndex) {
     uint32_t connector_nr = heatbedletIndex + 1;
     switch (connector_nr) {
@@ -121,7 +124,7 @@ inline constexpr bool is_used_bedlet(uint32_t heatbedletIndex) {
     }
 }
 inline constexpr std::array<float, Branch::count> PWM_MAX_CURRENT_AMPS { 4, 5 }; // {4x HeatBedLet on 24V_A, 5x HeatBedLet on 24V_B}
-#elif PRINTER_IS_PRUSA_XL
+#elif PRINTER_IS_PRUSA_XL()
 inline constexpr bool is_used_bedlet(uint32_t) {
     return true;
 }

@@ -1,43 +1,14 @@
 // guitypes.hpp
 #pragma once
 
-#include "general_response.hpp"
+#include "marlin_server_types/general_response.hpp"
 
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <optional>
 
-typedef uint32_t color_t; // ??BBGGRR first byte unused currently
-
-inline color_t to_color_t(uint32_t red, uint32_t green, uint32_t blue) {
-    return blue << 16 | green << 8 | red;
-}
-
-// color constants
-static const color_t COLOR_BLACK = 0x00000000L;
-static const color_t COLOR_WHITE = 0x00ffffffL;
-static const color_t COLOR_RED = 0x000000ffL;
-static const color_t COLOR_RED_ALERT = 0x002646e7L;
-static const color_t COLOR_LIME = 0x0000ff00L;
-static const color_t COLOR_BLUE = 0x00ff0000L;
-static const color_t COLOR_AZURE = 0x00ff9d12L;
-static const color_t COLOR_YELLOW = 0x0000ffffL;
-static const color_t COLOR_CYAN = 0x00ffff00L;
-static const color_t COLOR_MAGENTA = 0x00ff00ffL;
-static const color_t COLOR_SILVER = 0x00c0c0c0L;
-static const color_t COLOR_GRAY = 0x00808080L;
-static const color_t COLOR_DARK_GRAY = 0x005B5B5BL;
-static const color_t COLOR_MAROON = 0x00000080L;
-static const color_t COLOR_OLIVE = 0x00008080L;
-static const color_t COLOR_GREEN = 0x00008000L;
-static const color_t COLOR_DARK_GREEN = 0x00006000L;
-static const color_t COLOR_LIGHT_GREEN = 0x0040b040L;
-static const color_t COLOR_PURPLE = 0x00800080L;
-static const color_t COLOR_TEAL = 0x00808000L;
-static const color_t COLOR_NAVY = 0x00800000L;
-static const color_t COLOR_ORANGE = 0x001B65F8L;
-static const color_t COLOR_DARK_KHAKI = 0x006BD7DBL;
+#include <utils/color.hpp>
 
 // Menu item corners - background rounded corners
 enum {
@@ -148,8 +119,9 @@ union event_conversion_union {
 static_assert(sizeof(event_conversion_union::point) <= sizeof(event_conversion_union::pvoid), "event_conversion_union is broken");
 
 struct size_ui16_t {
-    uint16_t w;
-    uint16_t h;
+    uint16_t w = 0;
+    uint16_t h = 0;
+
     constexpr bool operator==(const size_ui16_t &rhs) const {
         return (w == rhs.w) && (h == rhs.h);
     }
@@ -158,10 +130,10 @@ struct size_ui16_t {
 
 template <class T>
 struct padding_t {
-    T left;
-    T top;
-    T right;
-    T bottom;
+    T left = 0;
+    T top = 0;
+    T right = 0;
+    T bottom = 0;
 
     constexpr bool operator==(const padding_t &rhs) const {
         return (left == rhs.left) && (top == rhs.top) && (right == rhs.right) && (bottom == rhs.bottom);
@@ -201,4 +173,3 @@ inline padding_ui8_t padding_ui8(uint8_t l, uint8_t t, uint8_t r, uint8_t b) {
 }
 
 point_ui16_t icon_meas(const uint8_t *pi);
-size_ui16_t icon_size(const uint8_t *pi);

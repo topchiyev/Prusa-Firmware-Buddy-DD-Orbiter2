@@ -5,6 +5,7 @@
 #include "selftest_frame_firstlayer_questions.hpp"
 #include "i18n.h"
 #include <guiconfig/wizard_config.hpp>
+#include <option/has_sheet_profiles.h>
 #include "selftest_firstlayer_type.hpp"
 #include "marlin_client.hpp"
 
@@ -18,13 +19,13 @@ constexpr const char *text_question_use_val = N_("Do you want to use the current
 } // namespace
 
 SelftestFrameFirstLayerQuestions::SelftestFrameFirstLayerQuestions(window_t *parent, PhasesSelftest ph, fsm::PhaseData data)
-    : AddSuperWindow<SelftestFrameWithRadio>(parent, ph, data, 2)
+    : SelftestFrameWithRadio(parent, ph, data, 2)
     , footer(this
 #if defined(FOOTER_HAS_LIVE_Z)
           ,
           footer::Item::live_z
 #endif
-#if defined(FOOTER_HAS_SHEETS)
+#if HAS_SHEET_PROFILES()
           ,
           footer::Item::sheets
 #endif
@@ -39,7 +40,6 @@ void SelftestFrameFirstLayerQuestions::change() {
     SelftestFirstLayer_t dt(data_current);
 
     const char *txt = nullptr;
-
     // texts
     switch (phase_current) {
     case PhasesSelftest::FirstLayer_filament_known_and_not_unsensed:
@@ -53,15 +53,10 @@ void SelftestFrameFirstLayerQuestions::change() {
     case PhasesSelftest::FirstLayer_calib:
         txt = N_("Now, let's calibrate the distance between the tip of the nozzle and the print sheet.");
         break;
-    case PhasesSelftest::FirstLayer_use_val: {
-        std::array<char, 256> buffer;
-        [[maybe_unused]] const auto copied = _(text_question_use_val).copyToRAM(buffer.data(), buffer.size());
-        snprintf(txt_buff.begin(), txt_buff.size(),
-            buffer.data(),
-            (double)dt.current_offset, (double)z_offset_def);
-        txt = txt_buff.begin();
-        break;
-    }
+    case PhasesSelftest::FirstLayer_use_val:
+        text.Show();
+        text.SetText(_(text_question_use_val).formatted(params, (double)dt.current_offset, (double)z_offset_def));
+        return;
     case PhasesSelftest::FirstLayer_start_print:
         txt = N_("In the next step, use the knob to adjust the nozzle height. Check the pictures in the handbook for reference.");
         break;

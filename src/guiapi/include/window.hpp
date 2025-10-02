@@ -24,7 +24,7 @@ private:
     // if enabled and set != nullptr
     //   window automatically draws differently when selected or shadowed
     union {
-        color_t color_back;
+        Color color_back = GuiDefaults::ColorBack;
         const color_scheme *pBackColorScheme;
     };
 
@@ -71,7 +71,7 @@ public:
     bool IsVisible() const; // visible and not hidden by dialog
     bool HasVisibleFlag() const; // visible, but still can be hidden behind dialog
     bool IsHiddenBehindDialog() const;
-    bool IsEnabled() const;
+
     bool IsInvalid() const;
     bool HasValidBackground() const;
     bool IsFocused() const;
@@ -95,8 +95,17 @@ public:
     void SetHasTimer();
     void ClrHasTimer();
     void SetFocus();
-    void Enable();
-    void Disable();
+
+    inline bool IsEnabled() const {
+        return flags.enabled;
+    }
+    void set_enabled(bool set);
+    inline void Enable() {
+        set_enabled(true);
+    }
+    inline void Disable() {
+        set_enabled(false);
+    }
 
     void set_visible(bool set);
     inline void Show() {
@@ -115,9 +124,9 @@ public:
 
     void HideBehindDialog();
     virtual void ShowAfterDialog();
-    void SetBackColor(color_t clr);
+    void SetBackColor(Color clr);
     void SetBackColor(const color_scheme &clr);
-    color_t GetBackColor() const;
+    Color GetBackColor() const;
     void SetRelativeSubwins() { flags.has_relative_subwins = true; }
     void SetRoundCorners() { flags.has_round_corners = true; }
     void SetHasIcon();
@@ -127,8 +136,8 @@ public:
     void SetBlackLayout();
     void SetBlueLayout();
 
+    window_t() = default;
     window_t(window_t *parent, Rect16 rect, win_type_t type = win_type_t::normal, is_closed_on_click_t close = is_closed_on_click_t::no);
-    virtual ~window_t();
 
     bool RegisterSubWin(window_t &win);
     void UnregisterSubWin(window_t &win);
@@ -155,9 +164,12 @@ public:
     inline window_t *GetLastPopUp() const { return get_child_dialog(ChildDialogParam::last_popup); }
 
 protected:
+    // Make the destructor protected to prevent accidentally calling this through a base class now that it's non-virtual (for flash saving reasons - BFW-5031)
+    ~window_t();
+
     virtual void unconditionalDraw();
     virtual void draw();
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *const param);
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *const param);
     virtual void screenEvent(window_t *sender, GUI_event_t event, void *const param);
 
     virtual bool registerSubWin(window_t &win);
@@ -183,26 +195,22 @@ public:
     static void ResetFocusedWindow();
 };
 
-// all children of window_t and their children must use AddSuperWindow<parent_window> for inheritance
-template <class Base>
-struct AddSuperWindow : public Base {
-    template <class... Args>
-    AddSuperWindow(Args &&...args)
-        : Base(std::forward<Args>(args)...) {}
-
-protected:
-    typedef Base super;
-    void SuperWindowEvent(window_t *sender, GUI_event_t event, void *const param) {
-        static const char txt[] = "WindowEvent via super";
-        super::windowEvent(EventLock(txt, sender, event), sender, event, param);
-    }
+/// Final variant of window_t, to get around the window_t protected destructor
+class BasicWindow final : public window_t {
+public:
+    using window_t::window_t;
 };
 
 /*****************************************************************************/
 // window_aligned_t
 // uses window_t flags to store alignment (saves RAM)
-struct window_aligned_t : public AddSuperWindow<window_t> {
+class window_aligned_t : public window_t {
+
+public:
+    window_aligned_t() = default;
     window_aligned_t(window_t *parent, Rect16 rect, win_type_t type = win_type_t::normal, is_closed_on_click_t close = is_closed_on_click_t::no);
+
+public:
     /// alignment constants are in guitypes.hpp
     Align_t GetAlignment() const;
     void SetAlignment(Align_t alignment);

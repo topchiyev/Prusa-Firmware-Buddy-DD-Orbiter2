@@ -1,4 +1,5 @@
 #include "migrations.hpp"
+#include <common/utils/algorithm_extensions.hpp>
 #include <footer_def.hpp>
 #include <footer_eeprom.hpp>
 
@@ -29,11 +30,11 @@ namespace migrations {
         // Create new data from the temporaries
         SelftestResult new_selftest_result { sr_pre23 };
 
-        backend.save_migration_item(journal::hash("Selftest Result V23"), new_selftest_result); // Save the new data into the backend
+        backend.save_migration_item<SelftestResult>(journal::hash("Selftest Result V23"), new_selftest_result); // Save the new data into the backend
     }
 #endif
 
-#if PRINTER_IS_PRUSA_XL and HAS_GUI() // MINI goes directly from old eeprom to multiple footer items, MK4 gets its footer reset
+#if PRINTER_IS_PRUSA_XL() and HAS_GUI() // MINI goes directly from old eeprom to multiple footer items, MK4 gets its footer reset
     void footer_setting_v1(journal::Backend &backend) {
         // See selftest_result_pre_23 (above) for in-depth commentary
         using FooterSettingsV1 = decltype(DeprecatedStore::footer_setting_v1);
@@ -47,18 +48,18 @@ namespace migrations {
 
         auto decoded_rec { footer::eeprom::decode_from_old_eeprom_v22(footer_setting_v1) };
 
-        backend.save_migration_item(journal::hash("Footer Setting 0"), decoded_rec[0]);
+        backend.save_migration_item<footer::Item>(journal::hash("Footer Setting 0"), decoded_rec[0]);
     #if FOOTER_ITEMS_PER_LINE__ > 1
-        backend.save_migration_item(journal::hash("Footer Setting 1"), decoded_rec[1]);
+        backend.save_migration_item<footer::Item>(journal::hash("Footer Setting 1"), decoded_rec[1]);
     #endif
     #if FOOTER_ITEMS_PER_LINE__ > 2
-        backend.save_migration_item(journal::hash("Footer Setting 2"), decoded_rec[2]);
+        backend.save_migration_item<footer::Item>(journal::hash("Footer Setting 2"), decoded_rec[2]);
     #endif
     #if FOOTER_ITEMS_PER_LINE__ > 3
-        backend.save_migration_item(journal::hash("Footer Setting 3"), decoded_rec[3]);
+        backend.save_migration_item<footer::Item>(journal::hash("Footer Setting 3"), decoded_rec[3]);
     #endif
     #if FOOTER_ITEMS_PER_LINE__ > 4
-        backend.save_migration_item(journal::hash("Footer Setting 4"), decoded_rec[4]);
+        backend.save_migration_item<footer::Item>(journal::hash("Footer Setting 4"), decoded_rec[4]);
     #endif
     }
 #endif
@@ -113,7 +114,7 @@ namespace migrations {
         });
 
         for (const auto &migration_rec : migration_mapping) {
-            backend.save_migration_item(migration_rec.newID, values[migration_rec.index]);
+            backend.save_migration_item<Value>(migration_rec.newID, values[migration_rec.index]);
         }
     }
 
@@ -129,7 +130,7 @@ namespace migrations {
         };
         backend.read_items_for_migrations(callback);
         SelftestResult new_selftest_result { sr_pre_gears };
-        backend.save_migration_item(journal::hash("Selftest Result Gears"), new_selftest_result);
+        backend.save_migration_item<SelftestResult>(journal::hash("Selftest Result Gears"), new_selftest_result);
     }
 #endif
 
@@ -144,7 +145,70 @@ namespace migrations {
         };
         backend.read_items_for_migrations(callback);
         bool new_fs_enabled { fs_enabled_v1 };
-        backend.save_migration_item(journal::hash("FSensor Enabled V2"), new_fs_enabled);
+        backend.save_migration_item<bool>(journal::hash("FSensor Enabled V2"), new_fs_enabled);
+    }
+
+#if PRINTER_IS_PRUSA_MK4()
+    void extended_printer_type(journal::Backend &backend) {
+        // See selftest_result_pre_23 (above) for in-depth commentary
+        using OldItem = decltype(DeprecatedStore::xy_motors_400_step);
+        bool has_400_motors = true;
+
+        auto callback = [&](journal::Backend::ItemHeader header, std::array<uint8_t, journal::Backend::MAX_ITEM_SIZE> &buffer) -> void {
+            if (header.id == OldItem::hashed_id) {
+                memcpy(&has_400_motors, buffer.data(), header.len);
+            }
+        };
+        backend.read_items_for_migrations(callback);
+
+        static_assert(extended_printer_type_model[0] == PrinterModel::mk4);
+        static_assert(extended_printer_type_model[2] == PrinterModel::mk3_9);
+        backend.save_migration_item<uint8_t>(journal::hash("Extended Printer Type"), has_400_motors ? 0 : 2);
+    }
+#endif
+
+    void hostname(journal::Backend &backend) {
+        // See selftest_result_pre_23 (above) for in-depth commentary
+        using NewItem = decltype(CurrentStore::hostname);
+        NewItem::value_type hostname { 0 };
+
+        auto callback = [&](journal::Backend::ItemHeader header, std::array<uint8_t, journal::Backend::MAX_ITEM_SIZE> &buffer) -> void {
+            // Copy either hostname that's not empty
+            if ((header.id == decltype(DeprecatedStore::wifi_hostname)::hashed_id || header.id == decltype(DeprecatedStore::lan_hostname)::hashed_id) && strnlen(reinterpret_cast<const char *>(buffer.data()), sizeof(hostname)) != 0) {
+                memcpy(&hostname, buffer.data(), header.len);
+            }
+        };
+        backend.read_items_for_migrations(callback);
+
+        if (strlen(hostname.data()) > 0) {
+            backend.save_migration_item<NewItem::value_type>(NewItem::hashed_id, hostname);
+        }
+    }
+
+    void loaded_filament_type(journal::Backend &backend) {
+        // See BFW-6236
+        using NewItem = decltype(CurrentStore::loaded_filament_type);
+
+        std::array<NewItem::value_type, EXTRUDERS> filament_types;
+
+        auto callback = [&](journal::Backend::ItemHeader header, std::array<uint8_t, journal::Backend::MAX_ITEM_SIZE> &buffer) -> void {
+            const auto ix = stdext::index_of(deprecated_ids::loaded_filament_type, static_cast<uint16_t>(header.id));
+            if (ix >= filament_types.size()) {
+                return;
+            }
+
+            EncodedFilamentType ft;
+            assert(header.len == sizeof(ft));
+            memcpy(&ft, buffer.data(), sizeof(ft));
+            filament_types[ix] = ft;
+        };
+        backend.read_items_for_migrations(callback);
+
+        for (uint8_t i = 0; i < filament_types.size(); i++) {
+            if (filament_types[i] != EncodedFilamentType {}) {
+                backend.save_migration_item<NewItem::value_type>(NewItem::hashed_id_first + i, filament_types[i]);
+            }
+        }
     }
 } // namespace migrations
 } // namespace config_store_ns

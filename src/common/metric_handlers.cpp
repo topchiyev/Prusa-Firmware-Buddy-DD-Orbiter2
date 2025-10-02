@@ -2,13 +2,12 @@
 #include <stdbool.h>
 #include <string.h>
 #include <stdio.h>
-#include "log.h"
+#include <logging/log.hpp>
 #include "metric_handlers.h"
 #include "stm32f4xx_hal.h"
 #include "timing.h"
 #include "syslog_transport.hpp"
 #include "otp.hpp"
-#include "sensor_data_buffer.h"
 #include <option/development_items.h>
 #include <config_store/store_instance.hpp>
 #include <atomic>
@@ -83,49 +82,25 @@ static int textprotocol_append_point(char *buffer, int buffer_len, metric_point_
 }
 
 //
-// UART Handler
-//
-
-// TODO: encapsulate huart6 access in hwio.h (and get rid of externs!)
-// extern UART_HandleTypeDef huart6;
-
-static void uart_send_line([[maybe_unused]] const char *line) {
-    // TODO: Use DMA
-    // @@TODO solve usart clash with MMU
-    //    HAL_UART_Transmit(&huart6, (uint8_t *)line, strlen(line), HAL_MAX_DELAY);
-    //    HAL_UART_Transmit(&huart6, (uint8_t *)"\r\n", 2, HAL_MAX_DELAY);
-}
-
-static void uart_handler(metric_point_t *point) {
-    static int last_reported_timestamp = 0;
-    int timestamp_diff = point->timestamp - last_reported_timestamp;
-    last_reported_timestamp = point->timestamp;
-
-    char line[TEXTPROTOCOL_POINT_MAXLEN + 1];
-    textprotocol_append_point(line, sizeof(line), point, timestamp_diff);
-    uart_send_line(line);
-}
-
-metric_handler_t metric_handler_uart = {
-    .identifier = METRIC_HANDLER_UART_ID,
-    .name = "UART",
-    .handle_fn = uart_handler,
-};
-
-//
 // SysLog Handler
 //
 // Note: This is not required to be in CCMRAM and can be moved to regular RAM if needed.
 static __attribute__((section(".ccmram"))) SyslogTransport syslog_transport;
 
-void metric_handlers_init() {
-    // Init syslog handler address and port from eeprom
-    const MetricsAllow metrics_allow = config_store().metrics_allow.get();
-    if ((metrics_allow == MetricsAllow::One || metrics_allow == MetricsAllow::All)
-        && config_store().metrics_init.get()) {
-        const char *host = config_store().metrics_host.get_c_str();
-        const uint16_t port = config_store().metrics_port.get();
-        metric_handler_syslog_configure(host, port);
+void metrics_reconfigure() {
+    const auto host = config_store().metrics_host.get();
+
+    // One symbol is not enough (for cases where people put in "-" or "x" or something there)
+    if (strlen(host.data()) < 2) {
+        config_store().enable_metrics.set(false);
+    }
+
+    if (config_store().enable_metrics.get()) {
+        const auto port = config_store().metrics_port.get();
+        syslog_transport.reopen(host.data(), port);
+
+    } else {
+        syslog_transport.reopen(nullptr, 0);
     }
 }
 
@@ -178,6 +153,8 @@ static void syslog_handler(metric_point_t *point) {
 
     // send the buffer if it's full or old enough
     if (buffer_full || buffer_becoming_old) {
+        // Allow blocking - that allows the transport _not_ to copy the big
+        // buffer and we run in our own thread.
         syslog_transport.send(buffer, buffer_used);
         buffer_used = 0;
         buffer_has_header = false;
@@ -191,26 +168,8 @@ static void syslog_handler(metric_point_t *point) {
     }
 }
 
-void metric_handler_syslog_configure(const char *ip, uint16_t port) {
-    syslog_transport.reopen(ip, port);
-}
-
-const char *metric_handler_syslog_get_host() {
-    return syslog_transport.get_remote_host();
-}
-
-uint16_t metric_handler_syslog_get_port() {
-    return syslog_transport.get_remote_port();
-}
-
-metric_handler_t metric_handler_syslog = {
+const metric_handler_t metric_handler_syslog = {
     .identifier = METRIC_HANDLER_SYSLOG_ID,
     .name = "SYSLOG",
     .handle_fn = syslog_handler,
-};
-
-metric_handler_t metric_handler_info_screen = {
-    .identifier = METRIC_HANDLER_INFO_SCREEN,
-    .name = "SENSOR_INFO_SCREEN",
-    .handle_fn = info_screen_handler,
 };

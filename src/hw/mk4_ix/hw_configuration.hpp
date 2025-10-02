@@ -46,10 +46,11 @@ MMU_RESET logic inverted
 
 namespace buddy::hw {
 class Configuration : public ConfigurationCommon {
-    Configuration(std::pair<LoveBoardEeprom, OtpStatus> loveboard_);
+    Configuration();
     Configuration(const Configuration &) = delete;
 
-    std::pair<LoveBoardEeprom, OtpStatus> loveboard;
+    LoveBoardEeprom loveboard_eeprom;
+    OtpStatus loveboard_status;
 
 public:
     /**
@@ -58,9 +59,9 @@ public:
      */
     static Configuration &Instance();
 
-    const LoveBoardEeprom &get_love_board() const { return std::get<LoveBoardEeprom>(loveboard); }
+    const LoveBoardEeprom &get_love_board() const { return loveboard_eeprom; }
 
-    const OtpStatus &get_loveboard_status() const { return std::get<OtpStatus>(loveboard); }
+    const OtpStatus &get_loveboard_status() const { return loveboard_status; }
 
     bool has_inverted_fans() const { return get_board_bom_id() < 37; }
 
@@ -69,7 +70,10 @@ public:
     // xBuddy scheme says: Revisions older than 34 must use open drain only.
     bool needs_push_pull_mmu_reset_pin() const { return get_board_bom_id() >= 34; }
 
-    bool can_power_up_mmu_without_pulses() const { return get_board_bom_id() >= 37; }
+    bool has_mmu_power_up_hw() const { return get_board_bom_id() >= 37; }
+
+    // TODO: When we have a new bom this should be edited
+    bool needs_software_mmu_powerup() const { return true; }
 
     bool has_trinamic_oscillators() const { return get_board_bom_id() >= 37; }
 

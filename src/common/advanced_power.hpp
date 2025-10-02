@@ -4,16 +4,18 @@
 #include "stdlib.h"
 #include <option/has_mmu2.h>
 
-#if BOARD_IS_XLBUDDY
+#if BOARD_IS_XLBUDDY()
     #include "hw_configuration.hpp"
     #include "puppies/Dwarf.hpp"
 #endif
+
+#include <option/has_modularbed.h>
 
 class AdvancedPower {
 public:
     AdvancedPower();
 
-#if BOARD_IS_XBUDDY
+#if BOARD_IS_XBUDDY()
     inline int GetBedVoltageRaw() const {
         return AdcGet::inputVoltage();
     }
@@ -52,7 +54,7 @@ public:
 
     bool OvercurrentFaultDetected() const;
 
-#elif BOARD_IS_XLBUDDY
+#elif BOARD_IS_XLBUDDY()
     inline float GetDwarfSplitter5VCurrent() const {
         return ((RawValueToVoltage(AdcGet::dwarfsCurrent()) / CurrentSenseGain) / RSense);
     }
@@ -90,12 +92,7 @@ public:
         assert(index >= 0 && index < buddy::puppies::dwarfs.size());
         return buddy::puppies::dwarfs[index].get_heater_pwm();
     }
-
-    // Get bed heater current [A]
-    // Would be nice to have this inline, but it would drag a modbus includes.
-    float get_bed_current();
-
-#elif BOARD_IS_DWARF
+#elif BOARD_IS_DWARF()
     inline float GetDwarfNozzleCurrent() const {
         return ((RawValueToVoltage(AdcGet::heaterCurrent()) / CurrentSenseGain) / RSense);
     }
@@ -103,6 +100,12 @@ public:
     inline float Get24VVoltage() const {
         return beforeVoltageDivider11(RawValueToVoltage(AdcGet::inputf24V()));
     }
+#endif
+
+#if HAS_MODULARBED()
+    // Get bed heater current [A]
+    // Would be nice to have this inline, but it would drag a modbus includes.
+    float get_bed_current();
 #endif
 
 #if HAS_MMU2()
@@ -123,7 +126,7 @@ public:
 
     void ResetOvercurrentFault();
 
-#if !(BOARD_IS_DWARF)
+#if !(BOARD_IS_DWARF())
     void Update();
 #endif
 
@@ -142,7 +145,7 @@ private:
         return (voltage * ((R1 + R2) / R2));
     }
 
-#if BOARD_IS_XLBUDDY
+#if BOARD_IS_XLBUDDY()
     float beforeVoltageDividerSandwich5V(float voltage) const {
         return voltage * SandwichConfiguration::Instance().divider_5V_coefficient();
     }

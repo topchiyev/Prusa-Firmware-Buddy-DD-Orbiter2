@@ -1,12 +1,11 @@
-/**
- * @file
- */
 #include <dirent.h>
 
 #include "../../lib/Marlin/Marlin/src/gcode/gcode.h"
+#include "../src/common/print_utils.hpp"
 #include "marlin_server.hpp"
-#include "media.hpp"
+#include <usb_host.h>
 #include "marlin_vars.hpp"
+#include <str_utils.hpp>
 
 /** \addtogroup G-Codes
  * @{
@@ -53,7 +52,7 @@ void GcodeSuite::M23() {
             *fn = '\0';
         }
     }
-    marlin_vars()->media_SFN_path.set(parser.string_arg);
+    marlin_vars().media_SFN_path.set(parser.string_arg);
     // Do not remove. Used by third party tools to detect that a file has been selected
     SERIAL_ECHOLNPGM(MSG_SD_FILE_SELECTED);
 }
@@ -67,15 +66,9 @@ void GcodeSuite::M24() {
 
 /**
  * @brief Pause SD print
- *
- * - `U` - Unload filament when paused
  */
 void GcodeSuite::M25() {
-    if (parser.seen('U')) {
-        marlin_server::print_pause_unload();
-    } else {
-        marlin_server::print_pause();
-    }
+    marlin_server::print_pause();
 }
 
 /**
@@ -86,8 +79,8 @@ void GcodeSuite::M25() {
  * - `S` - [value] Specific position
  */
 void GcodeSuite::M26() {
-    if ((media_get_state() == media_state_INSERTED) && parser.seenval('S')) {
-        media_print_set_position(parser.value_ulong());
+    if (usb_host::is_media_inserted() && parser.seenval('S')) {
+        marlin_server::set_media_position(parser.value_ulong());
     }
 }
 
@@ -101,17 +94,24 @@ void GcodeSuite::M26() {
 void GcodeSuite::M27() {
     if (parser.seen('C')) {
         SERIAL_ECHOPGM("Current file: ");
-        SERIAL_ECHOLN(marlin_vars()->media_SFN_path.get_ptr());
+        SERIAL_ECHOLN(marlin_vars().media_SFN_path.get_ptr());
+
+    } else if (marlin_server::is_printing_state(marlin_vars().print_state.get())) {
+        SERIAL_ECHOPGM(MSG_SD_PRINTING_BYTE);
+        SERIAL_ECHO(marlin_vars().media_position.get());
+        SERIAL_CHAR('/');
+        SERIAL_ECHOLN(marlin_vars().media_size_estimate.get());
     } else {
-        if (media_print_get_state() != media_print_state_NONE) {
-            SERIAL_ECHOPGM(MSG_SD_PRINTING_BYTE);
-            SERIAL_ECHO(media_print_get_position());
-            SERIAL_CHAR('/');
-            SERIAL_ECHOLN(media_print_get_size());
-        } else {
-            SERIAL_ECHOLNPGM(MSG_SD_NOT_PRINTING);
-        }
+        SERIAL_ECHOLNPGM(MSG_SD_NOT_PRINTING);
     }
+}
+
+/**
+ *  M32 - Select file and start SD print
+ */
+void GcodeSuite::M32() {
+    M23();
+    M24();
 }
 
 /** @}*/
@@ -128,13 +128,15 @@ void GcodeSuite::M29() {
 
 // M30 - Delete a file on the SD card
 void GcodeSuite::M30() {
-    // TODO
-}
-
-// M32 - Select file and start SD print
-void GcodeSuite::M32() {
-    M23();
-    M24();
+    ArrayStringBuilder<FF_MAX_LFN> filepath;
+    filepath.append_printf("/usb/%s", parser.string_arg);
+    DeleteResult result = DeleteResult::GeneralError;
+    if (filepath.is_ok()) {
+        result = remove_file(filepath.str());
+    }
+    SERIAL_ECHOPGM(result == DeleteResult::Success ? "File deleted:" : "Deletion failed:");
+    SERIAL_ECHO(parser.string_arg);
+    SERIAL_ECHOLN(".");
 }
 
 //

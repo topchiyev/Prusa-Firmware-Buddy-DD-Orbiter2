@@ -2,22 +2,25 @@
 
 #include <gui.hpp>
 #include <window_header.hpp>
-#include <window_qr.hpp>
 #include "radio_button.hpp"
+#include <gui/qr.hpp>
 #include <guiconfig/wizard_config.hpp>
 
 #include <connect/status.hpp>
+#include <connect/registrator.hpp>
 
-class DialogConnectRegister : public AddSuperWindow<IDialog> {
+class DialogConnectRegister : public IDialog {
 private:
-    char attempt_buffer[30];
+    StringViewUtf8Parameters<10> attempt_params;
+
     char detail_buffer[70];
     char error_buffer[90];
+
+    StringViewUtf8Parameters<connect_client::CODE_SIZE + 1> code_params;
 
     // TODO: Doesn't fit
     constexpr static const char *const headerLabel = N_("PRUSA CONNECT");
     constexpr static const char *const moreDetailTxt = N_("More detail at");
-    constexpr static const char *const attemptTxt = N_("Attempt");
 
     // TODO: Stolen from selftest_frame_esp_qr.hpp ‒ unify to a common place.
     /** @brief Calculates the position of individual elements of the frame
@@ -66,9 +69,10 @@ private:
 
     window_header_t header;
     window_icon_t icon_phone;
-    window_qr_t qr;
+    QRDynamicStringWindow<128> qr_registration_code;
+    QRErrorUrlWindow qr_error;
     window_text_t title;
-    window_t line;
+    BasicWindow line;
     window_text_t text_state;
     window_text_t text_attempt;
     window_text_t text_detail;
@@ -77,12 +81,12 @@ private:
     DialogConnectRegister();
 
     void hideDetails();
-    void showQR();
+    void showQR(window_t &qr);
 
 protected:
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 
 public:
     static void Show();
-    virtual ~DialogConnectRegister();
+    ~DialogConnectRegister();
 };

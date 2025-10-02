@@ -27,7 +27,7 @@ static constexpr const uint8_t label_height = 16;
 static constexpr const uint8_t button_cnt = 2;
 
 RadioButtonPreview::RadioButtonPreview(window_t *parent, Rect16 rect)
-    : AddSuperWindow<RadioButtonFsm<PhasesPrintPreview>>(parent, rect, PhasesPrintPreview::main_dialog) {
+    : RadioButtonFsm<PhasesPrintPreview>(parent, rect, PhasesPrintPreview::main_dialog) {
 }
 
 Rect16 RadioButtonPreview::getVerticalIconRect(uint8_t idx) const {
@@ -69,7 +69,7 @@ void RadioButtonPreview::unconditionalDraw() {
     }
 }
 
-void RadioButtonPreview::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void RadioButtonPreview::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     switch (event) {
 
     case GUI_event_t::CLICK: {
@@ -102,6 +102,6 @@ void RadioButtonPreview::windowEvent(EventLock /*has private ctor*/, window_t *s
     } break;
 
     default:
-        SuperWindowEvent(sender, event, param);
+        RadioButtonFsm::windowEvent(sender, event, param);
     }
 }

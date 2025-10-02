@@ -80,9 +80,9 @@ public:
 
 class MI_LEFT_ALIGN_TEMP : public WI_SWITCH_t<3> {
     constexpr static const char *const label = N_("Temp. style");
-    constexpr static const char *str_0 = "Static";
-    constexpr static const char *str_1 = "Static-left";
-    constexpr static const char *str_2 = "Dynamic";
+    constexpr static const char *str_0 = N_("Static");
+    constexpr static const char *str_1 = N_("Static-left");
+    constexpr static const char *str_2 = N_("Dynamic");
 
 public:
     MI_LEFT_ALIGN_TEMP();
@@ -97,7 +97,7 @@ public:
     virtual void OnChange(size_t old_index) override;
 };
 
-class MI_FOOTER_CENTER_N : public WiSpinInt {
+class MI_FOOTER_CENTER_N : public WiSpin {
     constexpr static const char *const label = N_("Center N and Fewer Items");
 
 public:
@@ -129,7 +129,7 @@ using ScreenMenuFooterSettings__ = ScreenMenu<EFooter::On, MI_RETURN, MI_FOOTER<
     MI_FOOTER_SETTINGS_ADV, MI_FOOTER_RESET>;
 
 class ScreenMenuFooterSettings : public ScreenMenuFooterSettings__ {
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 
 public:
     constexpr static const char *label = N_("FOOTER");

@@ -20,13 +20,14 @@ void AdjustLayout(window_text_t &text, window_icon_t &icon) {
 
 /*****************************************************************************/
 // MsgBoxBase
-MsgBoxBase::MsgBoxBase(Rect16 rect, const PhaseResponses &resp, size_t def_btn, const PhaseTexts *labels, string_view_utf8 txt,
+MsgBoxBase::MsgBoxBase(Rect16 rect, const PhaseResponses &resp, size_t def_btn, const PhaseTexts *labels, const string_view_utf8 &txt,
     is_multiline multiline, is_closed_on_click_t close)
-    : AddSuperWindow<IDialog>(rect)
+    : IDialog(rect)
     , text(this, getTextRect(), multiline, is_closed_on_click_t::no, txt)
-    , pButtons(new(&radio_mem_space) RadioButton(this, GuiDefaults::GetButtonRect(rect), resp, labels))
     , result(Response::_none) {
     flags.close_on_click = close;
+    static_assert(sizeof(RadioButton) <= std::tuple_size_v<RadioMemSpace>);
+    pButtons = make_static_unique_ptr<RadioButton>(&radio_mem_space, this, GuiDefaults::GetButtonRect(rect), resp, labels);
     pButtons->SetBtnIndex(def_btn);
     CaptureNormalWindow(*pButtons);
 }
@@ -57,7 +58,7 @@ void MsgBoxBase::set_text_font(Font font) {
     text.set_font(font);
 }
 
-void MsgBoxBase::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void MsgBoxBase::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     switch (event) {
 
     case GUI_event_t::CHILD_CLICK: {
@@ -69,7 +70,7 @@ void MsgBoxBase::windowEvent(EventLock /*has private ctor*/, window_t *sender, G
         break;
     }
 
-    SuperWindowEvent(sender, event, param);
+    IDialog::windowEvent(sender, event, param);
 }
 
 static constexpr Font TitleFont = GuiDefaults::FontBig;
@@ -77,8 +78,8 @@ static constexpr Font TitleFont = GuiDefaults::FontBig;
 /*****************************************************************************/
 // MsgBoxTitled
 MsgBoxTitled::MsgBoxTitled(Rect16 rect, const PhaseResponses &resp, size_t def_btn, const PhaseTexts *labels,
-    string_view_utf8 txt, is_multiline multiline, string_view_utf8 tit, const img::Resource *title_icon, is_closed_on_click_t close, dense_t dense)
-    : AddSuperWindow<MsgBoxIconned>(rect, resp, def_btn, labels, txt, multiline, title_icon, close)
+    const string_view_utf8 &txt, is_multiline multiline, const string_view_utf8 &tit, const img::Resource *title_icon, is_closed_on_click_t close, dense_t dense)
+    : MsgBoxIconned(rect, resp, def_btn, labels, txt, multiline, title_icon, close)
     , title(this, GetRect(), is_multiline::no, is_closed_on_click_t::no, tit) {
     title.set_font(TitleFont);
     title.SetRect(getTitleRect());
@@ -136,8 +137,8 @@ Rect16 MsgBoxTitled::getIconRect() {
 /*****************************************************************************/
 // MsgBoxIconned
 MsgBoxIconned::MsgBoxIconned(Rect16 rect, const PhaseResponses &resp, size_t def_btn, const PhaseTexts *labels,
-    string_view_utf8 txt, is_multiline multiline, const img::Resource *icon_res, is_closed_on_click_t close)
-    : AddSuperWindow<MsgBoxBase>(rect, resp, def_btn, labels, txt, multiline, close)
+    const string_view_utf8 &txt, is_multiline multiline, const img::Resource *icon_res, is_closed_on_click_t close)
+    : MsgBoxBase(rect, resp, def_btn, labels, txt, multiline, close)
     , icon(this, icon_res, { int16_t(rect.Left()), int16_t(rect.Top()) }, GuiDefaults::Padding) {
     text.SetRect(getTextRect()); // reinit text, icon and title must be initialized
     if (GuiDefaults::EnableDialogBigLayout) {
@@ -170,30 +171,10 @@ Rect16 MsgBoxIconned::getTextRect() {
 }
 
 /*****************************************************************************/
-// MsgBoxIconPepa
-MsgBoxIconPepa::MsgBoxIconPepa(Rect16 rect, const PhaseResponses &resp, size_t def_btn, const PhaseTexts *labels,
-    string_view_utf8 txt, is_multiline multiline, const img::Resource *ic)
-    : AddSuperWindow<MsgBoxIconned>(rect, resp, def_btn, labels, txt, multiline, ic) {
-    icon.SetRect(getIconRect());
-    icon.SetAlignment(Align_t::CenterTop());
-
-    text.SetRect(getTextRect());
-    text.SetAlignment(Align_t::LeftBottom());
-}
-
-Rect16 MsgBoxIconPepa::getTextRect() {
-    return Rect16(60, GuiDefaults::HeaderHeight + 170, 380, 23); // This is reserved for one-lined text: "All tests finished successfully!"
-}
-
-Rect16 MsgBoxIconPepa::getIconRect() {
-    return Rect16(0, GuiDefaults::HeaderHeight, display::GetW(), 140);
-}
-
-/*****************************************************************************/
 // MsgBoxIconPepaCentered
 MsgBoxIconPepaCentered::MsgBoxIconPepaCentered(Rect16 rect, const PhaseResponses &resp, size_t def_btn, const PhaseTexts *labels,
-    string_view_utf8 txt, is_multiline multiline, const img::Resource *ic)
-    : AddSuperWindow<MsgBoxIconned>(rect, resp, def_btn, labels, txt, multiline, ic) {
+    const string_view_utf8 &txt, is_multiline multiline, const img::Resource *ic)
+    : MsgBoxIconned(rect, resp, def_btn, labels, txt, multiline, ic) {
     icon.SetRect(getIconRect());
     icon.SetAlignment(Align_t::CenterTop());
 
@@ -202,17 +183,17 @@ MsgBoxIconPepaCentered::MsgBoxIconPepaCentered(Rect16 rect, const PhaseResponses
 }
 
 Rect16 MsgBoxIconPepaCentered::getTextRect() {
-    return Rect16(10, GuiDefaults::HeaderHeight + 147, display::GetW() - 10, 23 * 4);
+    return Rect16(10, GuiDefaults::HeaderHeight + 147, GuiDefaults::ScreenWidth - 10, 23 * 4);
 }
 
 Rect16 MsgBoxIconPepaCentered::getIconRect() {
-    return Rect16(0, GuiDefaults::HeaderHeight, display::GetW(), 140);
+    return Rect16(0, GuiDefaults::HeaderHeight, GuiDefaults::ScreenWidth, 140);
 }
 
 /*****************************************************************************/
 // MsgBoxIconnedError
-MsgBoxIconnedError::MsgBoxIconnedError(Rect16 rect, const PhaseResponses &resp, size_t def_btn, const PhaseTexts *labels, string_view_utf8 txt, is_multiline multiline, const img::Resource *icon_res)
-    : AddSuperWindow<MsgBoxIconned>(rect, resp, def_btn, labels, txt, multiline, icon_res) {
+MsgBoxIconnedError::MsgBoxIconnedError(Rect16 rect, const PhaseResponses &resp, size_t def_btn, const PhaseTexts *labels, const string_view_utf8 &txt, is_multiline multiline, const img::Resource *icon_res)
+    : MsgBoxIconned(rect, resp, def_btn, labels, txt, multiline, icon_res) {
     SetRoundCorners();
     text.SetRect(getTextRect()); // reinit text, icon and title must be initialized
     text.SetAlignment(Align_t::LeftCenter());
@@ -233,53 +214,13 @@ MsgBoxIconnedError::MsgBoxIconnedError(Rect16 rect, const PhaseResponses &resp, 
 /*****************************************************************************/
 // MsgBoxIconnedWait
 MsgBoxIconnedWait::MsgBoxIconnedWait(Rect16 rect, const PhaseResponses &resp, size_t def_btn, const PhaseTexts *labels,
-    string_view_utf8 txt, is_multiline multiline)
-    : AddSuperWindow<MsgBoxIconned>(rect, resp, def_btn, labels, txt, multiline, &img::hourglass_26x39) {
-    icon.SetRect(Rect16(0, GuiDefaults::HeaderHeight, display::GetW(), 140));
+    const string_view_utf8 &txt, is_multiline multiline)
+    : MsgBoxIconned(rect, resp, def_btn, labels, txt, multiline, &img::hourglass_26x39) {
+    icon.SetRect(Rect16(0, GuiDefaults::HeaderHeight, GuiDefaults::ScreenWidth, 140));
     icon.SetAlignment(Align_t::Center());
 
-    text.SetRect(Rect16(10, GuiDefaults::HeaderHeight + 147, display::GetW() - 10, 23 * 4));
+    text.SetRect(Rect16(10, GuiDefaults::HeaderHeight + 147, GuiDefaults::ScreenWidth - 10, 23 * 4));
     text.SetAlignment(Align_t::Center());
-}
-
-/*****************************************************************************/
-// MsgBoxIS
-MsgBoxIS::MsgBoxIS(Rect16 rect, const PhaseResponses &resp, size_t def_btn, const PhaseTexts *labels,
-    string_view_utf8 txt, is_multiline multiline, const img::Resource *icon_res, is_closed_on_click_t close)
-    : AddSuperWindow<MsgBoxBase>(rect, resp, def_btn, labels, txt, multiline, close)
-    , icon(this, icon_res, {}, GuiDefaults::Padding)
-    , qr(this, {}, QR_ADDR) {
-    if (GuiDefaults::EnableDialogBigLayout) {
-        uint16_t w = rect.Width();
-        uint16_t h = rect.Height();
-
-        uint16_t icon_w = w / 10 * 2;
-        uint16_t text_w = w / 10 * 5;
-        uint16_t qr_w = w / 10 * 3 - 8;
-
-        icon.SetRect({ 3, 30, icon_w, icon_w });
-        text.SetRect({ int16_t(icon_w + 3), 0, text_w, h });
-        qr.SetRect({ int16_t(icon_w + text_w + 3), 50, qr_w, qr_w });
-
-        text.SetAlignment(Align_t::LeftCenter());
-    } else {
-        text.SetRect(getTextRect());
-        icon -= Rect16::Width_t(GuiDefaults::Padding.left + GuiDefaults::Padding.right);
-        icon += Rect16::Left_t((Width() / 2) - (icon.Width() / 2)); // center icon
-    }
-}
-
-Rect16 MsgBoxIS::getTextRect() {
-    if (GuiDefaults::EnableDialogBigLayout) {
-        return GuiDefaults::MessageTextRect;
-    } else {
-        Rect16 text_rect = GetRect();
-        text_rect -= icon.Height();
-        text_rect -= GuiDefaults::GetButtonRect(GetRect()).Height();
-
-        text_rect += Rect16::Top_t(icon.Height());
-        return text_rect;
-    }
 }
 
 /*****************************************************************************/
@@ -290,10 +231,7 @@ enum class MsgBoxDialogClass {
     MsgBoxTitled,
     MsgBoxIconned,
     MsgBoxIconnedError,
-    MsgBoxIconPepa,
     MsgBoxIconPepaCentered,
-    MsgBoxIS,
-    MsgBoxISSpecial,
     _count,
 };
 
@@ -304,53 +242,60 @@ struct MsgBoxImplicitConfig {
 };
 
 constexpr bool big_layout = GuiDefaults::EnableDialogBigLayout;
-const MsgBoxImplicitConfig msb_box_implicit_configs[static_cast<int>(MsgBoxType::_count)] = {
-    MsgBoxImplicitConfig {
-        // MsgBoxType::standard
-        .dialog_class = MsgBoxDialogClass::MsgBoxBase,
+
+constexpr const char *nullstr = nullptr;
+
+constexpr EnumArray<MsgBoxType, MsgBoxImplicitConfig, MsgBoxType::_count> msb_box_implicit_configs {
+    {
+        MsgBoxType::standard,
+        MsgBoxImplicitConfig {
+            .dialog_class = MsgBoxDialogClass::MsgBoxBase,
+        },
     },
-    MsgBoxImplicitConfig {
-        // MsgBoxType::titled
-        .dialog_class = MsgBoxDialogClass::MsgBoxTitled,
+    {
+        MsgBoxType::titled,
+        MsgBoxImplicitConfig {
+            .dialog_class = MsgBoxDialogClass::MsgBoxTitled,
+        },
     },
-    MsgBoxImplicitConfig {
-        // MsgBoxType::error
-        .dialog_class = big_layout ? MsgBoxDialogClass::MsgBoxIconnedError : MsgBoxDialogClass::MsgBoxTitled,
-        .icon = big_layout ? &img::error_white_48x48 : &img::error_16x16,
-        .title = big_layout ? nullptr : N_("Error"),
+    {
+        MsgBoxType::error,
+        MsgBoxImplicitConfig {
+            .dialog_class = big_layout ? MsgBoxDialogClass::MsgBoxIconnedError : MsgBoxDialogClass::MsgBoxTitled,
+            .icon = big_layout ? &img::error_white_48x48 : &img::error_16x16,
+            .title = big_layout ? nullstr : N_("Error"),
+        },
     },
-    MsgBoxImplicitConfig {
-        // MsgBoxType::question
-        .dialog_class = big_layout ? MsgBoxDialogClass::MsgBoxIconned : MsgBoxDialogClass::MsgBoxTitled,
-        .icon = big_layout ? &img::question_48x48 : &img::question_16x16,
-        .title = big_layout ? nullptr : N_("Question"),
+    {
+        MsgBoxType::question,
+        MsgBoxImplicitConfig {
+            .dialog_class = big_layout ? MsgBoxDialogClass::MsgBoxIconned : MsgBoxDialogClass::MsgBoxTitled,
+            .icon = big_layout ? &img::question_48x48 : &img::question_16x16,
+            .title = big_layout ? nullstr : N_("Question"),
+        },
     },
-    MsgBoxImplicitConfig {
-        // MsgBoxType::warning
-        .dialog_class = big_layout ? MsgBoxDialogClass::MsgBoxIconned : MsgBoxDialogClass::MsgBoxTitled,
-        .icon = big_layout ? &img::warning_48x48 : &img::warning_16x16,
-        .title = big_layout ? nullptr : N_("Warning"),
+    {
+        MsgBoxType::warning,
+        MsgBoxImplicitConfig {
+            .dialog_class = big_layout ? MsgBoxDialogClass::MsgBoxIconned : MsgBoxDialogClass::MsgBoxTitled,
+            .icon = big_layout ? &img::warning_48x48 : &img::warning_16x16,
+            .title = big_layout ? nullstr : N_("Warning"),
+        },
     },
-    MsgBoxImplicitConfig {
-        // MsgBoxType::info
-        .dialog_class = big_layout ? MsgBoxDialogClass::MsgBoxIconned : MsgBoxDialogClass::MsgBoxTitled,
-        .icon = big_layout ? &img::info_48x48 : &img::info_16x16,
-        .title = big_layout ? nullptr : N_("Information"),
+    {
+        MsgBoxType::info,
+        MsgBoxImplicitConfig {
+            .dialog_class = big_layout ? MsgBoxDialogClass::MsgBoxIconned : MsgBoxDialogClass::MsgBoxTitled,
+            .icon = big_layout ? &img::info_48x48 : &img::info_16x16,
+            .title = big_layout ? nullstr : N_("Information"),
+        },
     },
-    MsgBoxImplicitConfig {
-        // MsgBoxType::pepa
-        .dialog_class = big_layout ? MsgBoxDialogClass::MsgBoxIconPepa : MsgBoxDialogClass::MsgBoxIconned,
-        .icon = big_layout ? &img::pepa_92x140 : &img::pepa_42x64,
-    },
-    MsgBoxImplicitConfig {
-        // MsgBoxType::pepa_centered
-        .dialog_class = big_layout ? MsgBoxDialogClass::MsgBoxIconPepaCentered : MsgBoxDialogClass::MsgBoxIconPepaCentered,
-        .icon = big_layout ? &img::pepa_92x140 : &img::pepa_42x64,
-    },
-    MsgBoxImplicitConfig {
-        // MsgBoxType::input_shaper_warning
-        .dialog_class = big_layout ? MsgBoxDialogClass::MsgBoxIS : MsgBoxDialogClass::MsgBoxISSpecial,
-        .icon = big_layout ? &img::error_white_48x48 : nullptr,
+    {
+        MsgBoxType::pepa_centered,
+        MsgBoxImplicitConfig {
+            .dialog_class = MsgBoxDialogClass::MsgBoxIconPepaCentered,
+            .icon = big_layout ? &img::pepa_92x140 : &img::pepa_42x64,
+        },
     },
 };
 
@@ -370,12 +315,6 @@ Response MsgBoxBuilder::exec() const {
 
     const auto box_f = [&]<typename T, MsgBoxDialogClass CS = MsgBoxDialogClass::_count, typename... Args>(Args... args) {
         T msgbox(rect, responses, static_cast<size_t>(default_button), &labels, text, multiline, args...);
-
-        if constexpr (CS == MsgBoxDialogClass::MsgBoxISSpecial) {
-            msgbox.set_text_alignment(Align_t::Center());
-            msgbox.set_title_alignment(Align_t::Center());
-        }
-
         Screens::Access()->gui_loop_until_dialog_closed(loop_callback);
         return msgbox.GetResult();
     };
@@ -394,24 +333,15 @@ Response MsgBoxBuilder::exec() const {
     case MsgBoxDialogClass::MsgBoxIconnedError:
         return box_f.operator()<MsgBoxIconnedError>(used_icon);
 
-    case MsgBoxDialogClass::MsgBoxIconPepa:
-        return box_f.operator()<MsgBoxIconPepa>(used_icon);
-
     case MsgBoxDialogClass::MsgBoxIconPepaCentered:
         return box_f.operator()<MsgBoxIconPepaCentered>(used_icon);
-
-    case MsgBoxDialogClass::MsgBoxIS:
-        return box_f.operator()<MsgBoxIS>(used_icon);
-
-    case MsgBoxDialogClass::MsgBoxISSpecial:
-        return box_f.operator()<MsgBoxTitled, MsgBoxDialogClass::MsgBoxISSpecial>(used_title, used_icon, is_closed_on_click_t::yes, dense_t::yes);
 
     default:
         bsod("Invalid MsgBoxDialogClass");
     }
 }
 
-Response msg_box(MsgBoxType type, string_view_utf8 txt, const PhaseResponses &resp, MsgBoxDefaultButton default_button) {
+Response msg_box(MsgBoxType type, const string_view_utf8 &txt, const PhaseResponses &resp, MsgBoxDefaultButton default_button) {
     return MsgBoxBuilder {
         .type = type,
         .text = txt,
@@ -421,34 +351,26 @@ Response msg_box(MsgBoxType type, string_view_utf8 txt, const PhaseResponses &re
         .exec();
 }
 
-Response MsgBox(string_view_utf8 txt, const PhaseResponses &resp, size_t def_btn) {
+Response MsgBox(const string_view_utf8 &txt, const PhaseResponses &resp, size_t def_btn) {
     return msg_box(MsgBoxType::standard, txt, resp, static_cast<MsgBoxDefaultButton>(def_btn));
 }
 
-Response MsgBoxError(string_view_utf8 txt, const PhaseResponses &resp, size_t def_btn) {
+Response MsgBoxError(const string_view_utf8 &txt, const PhaseResponses &resp, size_t def_btn) {
     return msg_box(MsgBoxType::error, txt, resp, static_cast<MsgBoxDefaultButton>(def_btn));
 }
 
-Response MsgBoxQuestion(string_view_utf8 txt, const PhaseResponses &resp, size_t def_btn) {
+Response MsgBoxQuestion(const string_view_utf8 &txt, const PhaseResponses &resp, size_t def_btn) {
     return msg_box(MsgBoxType::question, txt, resp, static_cast<MsgBoxDefaultButton>(def_btn));
 }
 
-Response MsgBoxWarning(string_view_utf8 txt, const PhaseResponses &resp, size_t def_btn) {
+Response MsgBoxWarning(const string_view_utf8 &txt, const PhaseResponses &resp, size_t def_btn) {
     return msg_box(MsgBoxType::warning, txt, resp, static_cast<MsgBoxDefaultButton>(def_btn));
 }
 
-Response MsgBoxInfo(string_view_utf8 txt, const PhaseResponses &resp, size_t def_btn) {
+Response MsgBoxInfo(const string_view_utf8 &txt, const PhaseResponses &resp, size_t def_btn) {
     return msg_box(MsgBoxType::info, txt, resp, static_cast<MsgBoxDefaultButton>(def_btn));
 }
 
-Response MsgBoxPepa(string_view_utf8 txt, const PhaseResponses &resp, size_t def_btn) {
-    return msg_box(MsgBoxType::pepa, txt, resp, static_cast<MsgBoxDefaultButton>(def_btn));
-}
-
-Response MsgBoxPepaCentered(string_view_utf8 txt, const PhaseResponses &resp, size_t def_btn) {
+Response MsgBoxPepaCentered(const string_view_utf8 &txt, const PhaseResponses &resp, size_t def_btn) {
     return msg_box(MsgBoxType::pepa_centered, txt, resp, static_cast<MsgBoxDefaultButton>(def_btn));
-}
-
-Response MsgBoxISWarning(string_view_utf8 txt, const PhaseResponses &resp, size_t def_btn) {
-    return msg_box(MsgBoxType::input_shaper_warning, txt, resp, static_cast<MsgBoxDefaultButton>(def_btn));
 }

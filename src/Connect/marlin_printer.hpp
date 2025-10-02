@@ -44,7 +44,7 @@ public:
     virtual std::optional<NetInfo> net_info(Iface iface) const override;
     virtual NetCreds net_creds() const override;
     virtual bool job_control(JobControl) override;
-    virtual bool start_print(const char *path) override;
+    virtual const char *start_print(const char *path, const std::optional<ToolMapping> &tools_mapping) override;
     // If the state of the printer is "Finished" and we are
     // trying to delete the file, that just got printed,
     // this first exits the print and then deletes the file.
@@ -57,10 +57,15 @@ public:
     virtual void init_connect(const char *token) override;
     virtual uint32_t cancelable_fingerprint() const override;
 #if ENABLED(CANCEL_OBJECTS)
+    virtual void cancel_object(uint8_t id) override;
+    virtual void uncancel_object(uint8_t id) override;
     virtual const char *get_cancel_object_name(char *buffer, size_t size, size_t index) const override;
 #endif
     virtual void reset_printer() override;
     virtual const char *dialog_action(uint32_t dialog_id, Response response) override;
+    virtual std::optional<FinishedJobResult> get_prior_job_result(uint16_t job_id) const override;
+
+    virtual void set_slot_info(size_t idx, const SlotInfo &info) override;
 
     static bool load_cfg_from_ini();
 

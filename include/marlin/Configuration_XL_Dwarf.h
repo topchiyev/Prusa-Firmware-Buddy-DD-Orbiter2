@@ -353,22 +353,14 @@
  *
  * :{ '0': "Not used", '1':"100k / 4.7k - EPCOS", '2':"200k / 4.7k - ATC Semitec 204GT-2", '3':"Mendel-parts / 4.7k", '4':"10k !! do not use for a hotend. Bad resolution at high temp. !!", '5':"100K / 4.7k - ATC Semitec 104GT-2 (Used in ParCan & J-Head)", '501':"100K Zonestar (Tronxy X3A)", '6':"100k / 4.7k EPCOS - Not as accurate as Table 1", '7':"100k / 4.7k Honeywell 135-104LAG-J01", '8':"100k / 4.7k 0603 SMD Vishay NTCS0603E3104FXT", '9':"100k / 4.7k GE Sensing AL03006-58.2K-97-G1", '10':"100k / 4.7k RS 198-961", '11':"100k / 4.7k beta 3950 1%", '12':"100k / 4.7k 0603 SMD Vishay NTCS0603E3104FXT (calibrated for Makibox hot bed)", '13':"100k Hisens 3950  1% up to 300°C for hotend 'Simple ONE ' & hotend 'All In ONE'", '20':"PT100 (Ultimainboard V2.x)", '51':"100k / 1k - EPCOS", '52':"200k / 1k - ATC Semitec 204GT-2", '55':"100k / 1k - ATC Semitec 104GT-2 (Used in ParCan & J-Head)", '60':"100k Maker's Tool Works Kapton Bed Thermistor beta=3950", '61':"100k Formbot / Vivedino 3950 350C thermistor 4.7k pullup", '66':"Dyze Design 4.7M High Temperature thermistor", '67':"Slice Engineering 450C High Temperature thermistor", '70':"the 100K thermistor found in the bq Hephestos 2", '71':"100k / 4.7k Honeywell 135-104LAF-J01", '147':"Pt100 / 4.7k", '1047':"Pt1000 / 4.7k", '110':"Pt100 / 1k (non-standard)", '1010':"Pt1000 / 1k (non standard)", '-4':"Thermocouple + AD8495", '-3':"Thermocouple + MAX31855 (only for sensor 0)", '-2':"Thermocouple + MAX6675 (only for sensor 0)", '-1':"Thermocouple + AD595",'998':"Dummy 1", '999':"Dummy 2", '2000':"100k / 4k7" }
  */
-#if (BOARD_VER_EQUAL_TO(0, 4, 0))
-#define TEMP_SENSOR_0 2007 // 100K NTC, 620ohm divider, B=4267
-#else
 #define TEMP_SENSOR_0 2005 // 100K NTC, 1K divider, B=4267
-#endif
 #define TEMP_SENSOR_1 0
 #define TEMP_SENSOR_2 0
 #define TEMP_SENSOR_3 0
 #define TEMP_SENSOR_4 0
 #define TEMP_SENSOR_5 0
 #define TEMP_SENSOR_BED 1
-#if (BOARD_VER_EQUAL_TO(0, 4, 0))
-#define TEMP_SENSOR_HEATBREAK 5 // 100K NTC, 4K7 divider, B=4267
-#else
 #define TEMP_SENSOR_HEATBREAK 2008 // 100K NTC, 33K divider, B=4267
-#endif
 
 #define TEMP_SENSOR_BOARD 2000
 #define TEMP_SENSOR_CHAMBER 0
@@ -458,21 +450,11 @@
     #define DEFAULT_Kd 100.00
 
     #define STEADY_STATE_HOTEND // Enable support for STEADY_STATE_HOTEND (feed-forward thermal management)
-    #define STEADY_STATE_HOTEND_LINEAR_COOLING_TERM 0.422
+
+    // Values measured and determined for the Dwarf in BFW-7058 (script attached)
+    #define STEADY_STATE_HOTEND_LINEAR_COOLING_TERM 0.1555
     #define STEADY_STATE_HOTEND_QUADRATIC_COOLING_TERM 0.00027
-    #define STEADY_STATE_HOTEND_FAN_COOLING_TERM 4.0
-    /**
-     * this adds an experimental additional term to the heating power, regulation constants are hard coded for PRUSA MINI printer
-     * there is no sense to enable it for any else printer
-     */
-    #define MODEL_BASED_HOTEND_REGULATOR
-    #if ENABLED(MODEL_BASED_HOTEND_REGULATOR)
-        /**
-         * This check detect the state, when temperature reading stuck
-         * below target temperature but still inside THERMAL_PROTECTION_HYSTERESIS
-         */
-        #define MODEL_DETECT_STUCK_THERMISTOR
-    #endif
+    #define STEADY_STATE_HOTEND_FAN_COOLING_TERM 3.0529
 #endif // PIDTEMP
 
 //===========================================================================
@@ -611,9 +593,6 @@
 // Specify here all the endstop connectors that are connected to any endstop or probe.
 // Almost all printers will be using one per axis. Probes will use one or more of the
 // extra connectors. Leave undefined any used for non-endstop and non-probe purposes.
-#if _DEBUG
-//    #define MINDA_BROKEN_CABLE_DETECTION
-#endif
 #define USE_XMIN_PLUG
 #define USE_YMIN_PLUG
 #define USE_ZMIN_PLUG
@@ -1014,12 +993,7 @@
 #define DEFAULT_INVERT_X_DIR false
 #define DEFAULT_INVERT_Y_DIR false
 #define DEFAULT_INVERT_Z_DIR true
-
-#if (BOARD_VER_EQUAL_TO(0, 4, 0))
-#define DEFAULT_INVERT_E0_DIR true
-#else
 #define DEFAULT_INVERT_E0_DIR false
-#endif
 
 #ifdef USE_PRUSA_EEPROM_AS_SOURCE_OF_DEFAULT_VALUES
     //this part if header is accesible only from C++ because of bool
@@ -1471,11 +1445,6 @@
 //
 //#define INCH_MODE_SUPPORT
 
-/**
- * R1 Redirect gcode support
- */
-//#define REDIRECT_GCODE_SUPPORT
-
 //
 // M149 Set temperature units support
 //
@@ -1515,10 +1484,18 @@
     #define X_AXIS_LOAD_POS  ((X_MAX_POS) / 4)
     #define X_AXIS_UNLOAD_POS  ((X_MAX_POS) / 4)
     // Specify a park position as { X, Y, Z }
-    #define NOZZLE_PARK_POINT \
-        { (X_MAX_POS - 10), (Y_MAX_POS - 10), 20 }
-        #define NOZZLE_PARK_POINT_M600 \
-        { X_AXIS_LOAD_POS, (Y_MIN_POS + 10), 20 }
+    #define X_NOZZLE_PARK_POINT (X_MAX_POS - 10)
+    #define Y_NOZZLE_PARK_POINT (Y_MAX_POS - 10)
+    #define Z_NOZZLE_PARK_POINT 20
+    #define XYZ_NOZZLE_PARK_POINT \
+        {X_NOZZLE_PARK_POINT, Y_NOZZLE_PARK_POINT, Z_NOZZLE_PARK_POINT}
+
+    #define X_NOZZLE_PARK_POINT_M600    X_AXIS_LOAD_POS
+    #define Y_NOZZLE_PARK_POINT_M600    (Y_MIN_POS + 10)
+    #define Z_NOZZLE_PARK_POINT_M600    20
+    #define XYZ_NOZZLE_PARK_POINT_M600 \
+        {X_NOZZLE_PARK_POINT_M600, Y_NOZZLE_PARK_POINT_M600, Z_NOZZLE_PARK_POINT_M600}
+
     #define NOZZLE_PARK_XY_FEEDRATE 100 // (mm/s) X and Y axes feedrate (also used for delta Z axis)
     #define NOZZLE_UNPARK_XY_FEEDRATE 30 // (mm/s) X and Y axes feedrate for unparking after m600
     #define NOZZLE_PARK_Z_FEEDRATE 5 // (mm/s) Z axis feedrate (not used for delta printers)
@@ -1854,12 +1831,6 @@
 //
 
 //
-// Elefu RA Board Control Panel
-// http://www.elefu.com/index.php?route=product/product&product_id=53
-//
-#define RA_CONTROL_PANEL
-
-//
 // Sainsmart (YwRobot) LCD Displays
 //
 // These require F.Malpartida's LiquidCrystal_I2C library
@@ -2070,11 +2041,6 @@
 //
 // CONTROLLER TYPE: Standalone / Serial
 //
-
-//
-// LCD for Malyan M200 printers.
-//
-//#define MALYAN_LCD
 
 //
 // CONTROLLER TYPE: Keypad / Add-on

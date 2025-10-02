@@ -12,6 +12,7 @@
 #include "i_window_menu.hpp" //needed invalidate for click
 #include "text_roll.hpp"
 #include <utility_extensions.hpp>
+#include <gui/event/gui_event.hpp>
 
 // IWindowMenuItem
 // todo make version with constant label
@@ -30,6 +31,20 @@
 //| icon  | text         | [value]      | switch with brackets
 //+-------+--------------+--------------+
 
+class WindowMenuItemEventContext : public GuiEventContext {
+
+public:
+    inline WindowMenuItemEventContext(GuiEventType auto &&event, IWindowMenu *menu)
+        : GuiEventContext(event)
+        , menu(menu) {
+    }
+
+public:
+    // TODO: Get rid of this completely, currently here only to keep compatibility with the old API
+    /// Menu of the item the event is called for. Might be not known.
+    IWindowMenu *const menu = nullptr;
+};
+
 /*****************************************************************************/
 // IWindowMenuItem
 class IWindowMenuItem {
@@ -37,33 +52,32 @@ class IWindowMenuItem {
 public:
     struct ColorScheme {
         struct ColorPair {
-            color_t focused;
-            color_t unfocused;
+            Color focused;
+            Color unfocused;
         };
 
         struct ROpPair {
-            ropfn focused;
-            ropfn unfocused;
+            ropfn focused = { .invert = is_inverted::yes };
+            ropfn unfocused = {};
         };
 
-        ColorPair text;
-        ColorPair back;
-        ROpPair rop;
+        ColorPair text = {
+            .focused = GuiDefaults::MenuColorBack,
+            .unfocused = GuiDefaults::MenuColorText,
+        };
+        ColorPair back = {
+            .focused = GuiDefaults::MenuColorFocusedBack,
+            .unfocused = GuiDefaults::MenuColorBack,
+        };
+        ROpPair rop = {};
     };
+
+    static const ColorScheme color_scheme_title;
 
     enum class IconPosition : uint8_t {
         left,
         right,
         replaces_extends,
-    };
-
-    /**
-     * @brief print extension the same way as label
-     * == bolder and whiter than normal extension
-     */
-    enum class ExtensionLikeLabel : bool {
-        no,
-        yes
     };
 
     /// Minimum width of the item extension touch rect
@@ -120,18 +134,20 @@ protected:
 private:
     Font label_font = GuiDefaults::FontMenuItems;
     string_view_utf8 label;
-    txtroll_t roll;
 
     uint8_t hidden : 2;
     is_enabled_t enabled : 1;
     show_disabled_extension_t show_disabled_extension : 1 = show_disabled_extension_t::yes; // Hide disabled menu_items's extension
 
 protected:
-    ExtensionLikeLabel has_extension_like_label : 1 = ExtensionLikeLabel::no; // currently has meaning only for menu item info, but might have meaning for other types as well
     uint16_t extension_width : 10;
     /// Marks this menu item as returning.
     /// TOUCH_SWIPE_LEFT gesture tries to find an item with this flag in the menu and execute it.
     bool has_return_behavior_ : 1 = false;
+
+    /// If set, touch event generates the click event only when the touch happens in the extension rect by default
+    bool touch_extension_only_ : 1 = false;
+
     bool invalid_icon : 1 = true;
     bool invalid_label : 1 = true;
     bool invalid_extension : 1 = true;
@@ -144,19 +160,17 @@ protected:
     Rect16 getExtensionRect(Rect16 rect) const;
     bool is_touch_in_extension_rect(IWindowMenu &window_menu, point_ui16_t relative_touch_point) const;
 
-    virtual void printIcon(Rect16 icon_rect, ropfn raster_op, color_t color_back) const; // must be virtual, because pictures of flags are drawn differently
-    virtual void printExtension(Rect16 extension_rect, color_t color_text, color_t color_back, ropfn raster_op) const; // things behind rect
-    virtual void click(IWindowMenu &window_menu) = 0;
-    virtual void touch(IWindowMenu &window_menu, point_ui16_t relative_touch_point);
+    virtual void printIcon(Rect16 icon_rect, ropfn raster_op, Color color_back) const; // must be virtual, because pictures of flags are drawn differently
+    virtual void printExtension(Rect16 extension_rect, Color color_text, Color color_back, ropfn raster_op) const; // things behind rect
+    virtual void click([[maybe_unused]] IWindowMenu &window_menu) {};
     virtual invalidate_t change(int /*dif*/) { return invalidate_t::no; }
+    virtual void event(WindowMenuItemEventContext &);
 
     void setLabelFont(Font);
     Font getLabelFont() const;
 
-    void reInitRoll(Rect16 rect);
-    void deInitRoll();
-    color_t GetTextColor() const;
-    color_t GetBackColor() const;
+    Color GetTextColor() const;
+    Color GetBackColor() const;
 
     void showDevOnly() {
         if (hidden != (uint8_t)is_hidden_t::dev) {
@@ -165,10 +179,13 @@ protected:
         }
     }
 
+    // Make the destructor protected. It is not virtual to save flash (because of vtables), so we want to prevent someone accidentally calling it "dynamically" on a base class.
+    ~IWindowMenuItem();
+
 public:
-    IWindowMenuItem(string_view_utf8 label, const img::Resource *id_icon = nullptr, is_enabled_t enabled = is_enabled_t::yes, is_hidden_t hidden = is_hidden_t::no, expands_t expands = expands_t::no);
-    IWindowMenuItem(string_view_utf8 label, Rect16::Width_t extension_width_, const img::Resource *id_icon = nullptr, is_enabled_t enabled = is_enabled_t::yes, is_hidden_t hidden = is_hidden_t::no);
-    virtual ~IWindowMenuItem();
+    IWindowMenuItem(const string_view_utf8 &label, const img::Resource *id_icon = nullptr, is_enabled_t enabled = is_enabled_t::yes, is_hidden_t hidden = is_hidden_t::no, expands_t expands = expands_t::no);
+    IWindowMenuItem(const string_view_utf8 &label, Rect16::Width_t extension_width_, const img::Resource *id_icon = nullptr, is_enabled_t enabled = is_enabled_t::yes, is_hidden_t hidden = is_hidden_t::no);
+    IWindowMenuItem(const IWindowMenuItem &) = delete;
 
     bool IsEnabled() const { return enabled == is_enabled_t::yes; } // This translates to 'shadow' in window_t's derived classes (remains focusable but cant be executed)
     void set_is_enabled(bool set = true);
@@ -221,28 +238,28 @@ public:
     bool IsHidden() const;
     bool IsDevOnly() const;
 
-    void SetIconId(const img::Resource *id) {
-        id_icon = id;
-        InValidateIcon();
-    }
-    void SetLabel(string_view_utf8 text);
+    void SetIconId(const img::Resource *id);
+    void SetLabel(const string_view_utf8 &text);
     /// @returns the label translated via gettext
     /// Use this function when you want to get the actual translated text
     /// to be displayed to the user based on his language settings.
-    inline string_view_utf8 GetLabel() const { return label; }
+    inline const string_view_utf8 &GetLabel() const { return label; }
 
     void Print(Rect16 rect);
-    void printRoundCorners(Rect16 rect, color_t front, color_t back) const;
-    void printOverRoundCorners(Rect16 rect, uint8_t left_width, uint8_t right_width, color_t color_back) const;
+    void printRoundCorners(Rect16 rect, Color front, Color back) const;
+    void printOverRoundCorners(Rect16 rect, uint8_t left_width, uint8_t right_width, Color color_back) const;
 
     inline bool Increment(uint8_t dif) { return Change(dif); }
     inline bool Decrement(uint8_t dif) { return Change(-int(dif)); }
     bool Change(int dif); // returns if changed
     void Click(IWindowMenu &window_menu);
     void Touch(IWindowMenu &window_menu, point_ui16_t relative_touch_point);
-    inline void InitRollIfNeeded(Rect16 rect) { reInitRoll(getLabelRect(rect)); }
 
-    void Roll();
+    /// Handles text roll on the focused item
+    static void handle_roll();
+
+    /// Reset text roll of the focused item
+    static void reset_roll();
 
     bool IsInvalid() const;
     bool IsIconInvalid() const;
@@ -270,4 +287,18 @@ public:
     // those methods must not be public, because their usage will break menu!!!
     friend class IWinMenuContainer;
     friend class window_file_list_t;
+};
+
+/// Final subclass of IWindowMenuItem to get around the protected IWindowMenuItem destructor
+class WindowMenuItem : public IWindowMenuItem {
+
+public:
+    using IWindowMenuItem::IWindowMenuItem;
+};
+
+template <typename T>
+concept UpdatableMenuItem = requires(T a) {
+    requires std::is_base_of_v<IWindowMenuItem, T>;
+
+    { a.update() };
 };

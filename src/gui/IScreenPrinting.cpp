@@ -4,8 +4,8 @@
 #include "ScreenHandler.hpp"
 #include "img_resources.hpp"
 
-IScreenPrinting::IScreenPrinting(string_view_utf8 caption)
-    : AddSuperWindow<screen_t>()
+IScreenPrinting::IScreenPrinting(const string_view_utf8 &caption)
+    : screen_t()
     , header(this)
     , footer(this) {
     IScreenPrinting::ClrMenuTimeoutClose(); // don't close on menu timeout

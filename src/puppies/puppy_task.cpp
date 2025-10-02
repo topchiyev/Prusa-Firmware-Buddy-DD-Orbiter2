@@ -4,7 +4,7 @@
 
 #include <iterator>
 #include "cmsis_os.h"
-#include "log.h"
+#include <logging/log.hpp>
 #include "main.h"
 #include "puppies/modular_bed.hpp"
 #include "puppies/Dwarf.hpp"
@@ -12,17 +12,13 @@
 #include "timing.h"
 #include "Marlin/src/module/stepper.h"
 #include "Marlin/src/module/prusa/toolchanger.h"
-#include <option/has_embedded_esp32.h>
-#if HAS_EMBEDDED_ESP32()
-    #include <esp_flash.hpp>
-#endif
 #include <tasks.hpp>
 #include <option/has_dwarf.h>
 #include <ccm_thread.hpp>
 #include "bsod.h"
 #include "gui_bootstrap_screen.hpp"
 
-LOG_COMPONENT_DEF(Puppies, LOG_SEVERITY_DEBUG);
+LOG_COMPONENT_DEF(Puppies, logging::Severity::debug);
 
 namespace buddy::puppies {
 
@@ -186,25 +182,7 @@ static bool puppy_initial_scan() {
 }
 
 static void puppy_task_body([[maybe_unused]] void const *argument) {
-
-#if BOARD_VER_HIGHER_OR_EQUAL_TO(0, 5, 0)
-    // This is temporary, remove once everyone has compatible hardware.
-    // Requires new sandwich rev. 06 or rev. 05 with R83 removed.
-
-    #if HAS_EMBEDDED_ESP32()
-    // Power on the ESP
-    hw::espPower.write(hw::Pin::State::high);
-
-    // Flash ESP
-    ESPFlash esp_flash;
-    auto esp_result = esp_flash.flash();
-    if (esp_result != ESPFlash::State::Done) {
-        log_error(Puppies, "ESP flash failed with %u", static_cast<unsigned>(esp_result));
-        ESPFlash::fatal_err(esp_result);
-    }
-    TaskDeps::provide(TaskDeps::Dependency::esp_flashed);
-    #endif
-#endif
+    TaskDeps::wait(TaskDeps::Tasks::puppy_task_start);
 
     bool first_run = true;
 
@@ -248,8 +226,10 @@ static void puppy_task_body([[maybe_unused]] void const *argument) {
 
             TaskDeps::wait(TaskDeps::Tasks::puppy_run);
 
+#if HAS_DWARF()
             // write current Marlin's state of the E TMC
             stepperE0.push();
+#endif
 
             // now run puppy main loop
             puppy_task_loop();

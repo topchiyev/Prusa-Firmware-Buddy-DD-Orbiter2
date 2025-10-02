@@ -1,7 +1,6 @@
 // selftest_axis.cpp
 
 #include "selftest_axis.h"
-#include <guiconfig/wizard_config.hpp>
 #include "../../Marlin/src/module/planner.h"
 #include "../../Marlin/src/module/stepper.h"
 #include "../../Marlin/src/module/endstops.h"
@@ -13,7 +12,6 @@
 #include "algorithm_scale.hpp"
 #include "printers.h"
 #include "homing_reporter.hpp"
-#include "PersistentStorage.h"
 #include "config_store/store_instance.hpp"
 
 #include <limits>
@@ -72,6 +70,10 @@ void CSelftestPart_Axis::phaseMove(int8_t dir) {
         start_sensorless_homing_per_axis(AxisEnum(config.axis));
     }
 #endif
+#if !PRINTER_IS_PRUSA_XL()
+    // Unmeasured distance is to check the exact length of an axis. Since XL doesn't check full axis and only print area, this measurement is therefore obsolete
+    unmeasured_distance = std::abs((dir > 0 ? soft_endstop.min : soft_endstop.max)[config.axis] - current_position.pos[config.axis]);
+#endif
 
     current_position.pos[config.axis] += dir * (config.length + EXTRA_LEN_MM);
     line_to_current_position(feedrate);
@@ -104,6 +106,9 @@ LoopResult CSelftestPart_Axis::wait(int8_t dir) {
     if (static_cast<AxisEnum>(config.axis) == AxisEnum::Y_AXIS) {
         length_mm *= -1;
     }
+#endif
+#if !PRINTER_IS_PRUSA_XL()
+    length_mm += unmeasured_distance;
 #endif
 
     if ((length_mm < config.length_min) || (length_mm > config.length_max)) {
@@ -161,61 +166,6 @@ void CSelftestPart_Axis::sg_sampling_disable() {
 
 CSelftestPart_Axis *CSelftestPart_Axis::m_pSGAxis = nullptr;
 
-LoopResult CSelftestPart_Axis::stateSwitchTo400step() {
-    if (config_store().xy_motors_400_step.get()) {
-        log_info(Selftest, "%s have 400step", config.partname);
-        return LoopResult::RunNext;
-    }
-
-    log_info(Selftest, "%s change to 400step", config.partname);
-
-    motor_switch(Motor::stp_400);
-
-    return LoopResult::RunNext;
-}
-
-LoopResult CSelftestPart_Axis::stateSwitchTo200stepAndRetry() {
-    if (homed) {
-        return LoopResult::RunNext;
-    }
-
-    if (!config_store().xy_motors_400_step.get()) {
-        // we already have 200 step, this means calibration failed on both 200 and 400 step
-        // switch setting of motors to default
-        motor_switch(config_store().xy_motors_400_step.default_val ? Motor::stp_400 : Motor::stp_200);
-        return LoopResult::Fail;
-    }
-
-    log_info(Selftest, "%s change to 200step", config.partname);
-
-    motor_switch(Motor::stp_200);
-
-    return LoopResult::GoToMark0;
-}
-
-void CSelftestPart_Axis::motor_switch(Motor steps) {
-    config_store().xy_motors_400_step.set(steps == Motor::stp_400);
-
-    // TODO change FSM .. make user know
-    PersistentStorage::erase();
-
-    config_store().homing_sens_x.set(config_store().homing_sens_x.default_val);
-    config_store().homing_sens_y.set(config_store().homing_sens_y.default_val);
-    config_store().homing_bump_divisor_x.set(config_store().homing_bump_divisor_x.default_val);
-    config_store().homing_bump_divisor_y.set(config_store().homing_bump_divisor_y.default_val);
-
-    queue.enqueue_one_now("M914 X Y"); // Reset XY homing sensitivity
-
-    static constexpr size_t buffer_size { 50 }; // enough space to have the gcode + two numbers of max 11 digits
-    char gcode_curr[buffer_size]; // note +1 for terminating null byte
-    snprintf(gcode_curr, buffer_size, "M906 X%u Y%u", get_rms_current_ma_x(), get_rms_current_ma_y()); // XY motor currents
-    queue.enqueue_one_now(gcode_curr);
-
-    char gcode_microstep[buffer_size]; // note +1 for terminating null byte
-    snprintf(gcode_microstep, buffer_size, "M350 X%u Y%u", get_microsteps_x(), get_microsteps_y()); // XY motor microsteps
-    queue.enqueue_one_now(gcode_microstep);
-}
-
 LoopResult CSelftestPart_Axis::stateActivateHomingReporter() {
     HomingReporter::enable();
     return LoopResult::RunNext;
@@ -251,16 +201,18 @@ LoopResult CSelftestPart_Axis::stateWaitHomingReporter() {
 }
 
 LoopResult CSelftestPart_Axis::stateEvaluateHomingXY() {
-    // TODO: Is it necessary to remember homed state?
-    // It can be checked later on. Motors will hold for another 2 minutes.
-    // The subsequent check seems immediate
-    homed = !axes_need_homing(_BV(config.axis));
+    if (axes_need_homing(_BV(config.axis))) {
+        return LoopResult::Fail;
+    }
 
     endstops.enable(true);
     return LoopResult::RunNext;
 }
 
 LoopResult CSelftestPart_Axis::stateHomeZ() {
+#if PRINTER_IS_PRUSA_iX() && ENABLED(DETECT_PRINT_SHEET)
+    queue.enqueue_one_now("G28 P");
+#else
     // we have Z safe homing enabled, so Z might need to home all axis
     if (!TEST(axis_known_position, X_AXIS) || !TEST(axis_known_position, Y_AXIS)) {
         log_info(Selftest, "%s home all axis", config.partname);
@@ -269,6 +221,7 @@ LoopResult CSelftestPart_Axis::stateHomeZ() {
         log_info(Selftest, "%s home single axis", config.partname);
         queue.enqueue_one_now("G28 Z");
     }
+#endif
 
 #if HAS_TOOLCHANGER()
     // Z axis check needs to be done with a tool
@@ -302,24 +255,6 @@ LoopResult CSelftestPart_Axis::stateInitProgressTimeCalculation() {
 
 LoopResult CSelftestPart_Axis::stateMove() {
     phaseMove(getDir());
-    return LoopResult::RunNext;
-}
-
-LoopResult CSelftestPart_Axis::stateMoveFinishCycleWithMotorSwitch() {
-    LoopResult result = wait(getDir());
-    switch (result) {
-    case LoopResult::RunNext:
-        break;
-    case LoopResult::Fail:
-        homed = false;
-        return LoopResult::GoToMark1;
-    default:
-        return result;
-    }
-
-    if ((++m_Step) < config.steps) {
-        return LoopResult::GoToMark2;
-    }
     return LoopResult::RunNext;
 }
 
@@ -359,6 +294,7 @@ LoopResult CSelftestPart_Axis::stateParkAxis() {
 
     if (config.park) {
         char gcode[15];
+        endstops.enable(false);
         log_info(Selftest, "%s park %c axis to %i", config.partname, axis_to_letter(config.axis), static_cast<int>(config.park_pos));
         snprintf(gcode, std::size(gcode), "G1 %c%i F4200", axis_to_letter(config.axis), static_cast<int>(config.park_pos));
         queue.enqueue_one_now(gcode); // Park Y

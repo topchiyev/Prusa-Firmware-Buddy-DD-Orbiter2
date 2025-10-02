@@ -6,8 +6,8 @@
 #include <common/http/httpc.hpp>
 #include <common/http/socket_connection_factory.hpp>
 #include <common/unique_file_ptr.hpp>
+#include <inplace_function.hpp>
 
-#include <functional>
 #include <variant>
 #include <memory>
 
@@ -81,19 +81,45 @@ public:
     /// It is expected that the size of the headers array might not be sufficient,
     /// in such case the function should return the number of headers it wishes to
     /// and it will be called again with a sufficiently large array.
-    using ExtraHeaders = std::function<size_t(size_t headers_size, http::HeaderOut *headers)>;
+    using ExtraHeaders = stdext::inplace_function<size_t(size_t headers_size, http::HeaderOut *headers)>;
 
     struct Request {
-        const char *host;
-        uint16_t port;
-        const char *url_path;
-        std::shared_ptr<EncryptionInfo> encryption;
+        struct Encrypted {
+            const char *host;
+            uint16_t port;
+            const char *url_path;
+            std::shared_ptr<EncryptionInfo> encryption;
+        };
+
+        struct Inline {
+            const char *hash;
+            uint64_t team_id;
+            uint32_t orig_size;
+        };
+
+        std::variant<Encrypted, Inline> data;
 
         Request(const char *host, uint16_t port, const char *url_path, std::unique_ptr<EncryptionInfo> &&encryption)
-            : host(host)
-            , port(port)
-            , url_path(url_path)
-            , encryption(std::move(encryption)) {}
+            : data(Encrypted {
+                host,
+                port,
+                url_path,
+                std::move(encryption) }) {}
+
+        Request(const char *hash, uint64_t team_id, uint32_t orig_size)
+            : data(Inline {
+                hash,
+                team_id,
+                orig_size,
+            }) {}
+
+        uint32_t orig_size() const {
+            if (const auto *encrypted = get_if<Encrypted>(&data); encrypted != nullptr) {
+                return encrypted->encryption->orig_size;
+            } else {
+                return get<Inline>(data).orig_size;
+            }
+        }
     };
 
 private:
@@ -102,8 +128,26 @@ private:
     public:
         void operator()(Async *);
     };
+    struct Inline {
+        uint64_t team_id;
+        uint32_t file_id;
+        uint32_t start;
+        // One past end
+        uint32_t end;
+        uint32_t segment_end = 0;
+        PartialFile::Ptr destination;
+        DownloadStep status = DownloadStep::Continue;
+        bool started = false;
+        static constexpr size_t HASH_BUFF = 29;
+        char hash[HASH_BUFF] = {};
+    };
     using AsyncPtr = std::unique_ptr<Async, AsyncDeleter>;
-    AsyncPtr async;
+    // Using pointer here to make both versions same sized. Once we get rid of
+    // the old download way, we should be able to just put it inside us
+    // directly.
+    using InlinePtr = std::unique_ptr<Inline>;
+    using Engine = std::variant<AsyncPtr, InlinePtr>;
+    Engine engine;
 
 public:
     /// Makes an HTTP request.
@@ -126,6 +170,34 @@ public:
 
     /// Returns the partial file object where the downloaded data is being stored.
     PartialFile::Ptr get_partial_file() const;
+
+    struct InlineRequestDetails {
+        uint64_t team_id;
+        // The InlineRequest is just taken and rendered. It's fine to point
+        // into the Download, as that can be removed only in connect's Sleep,
+        // which doesn't happen during rendering of the InlineRequest. We do
+        // not keep the request across reconnects.
+        const char *hash;
+    };
+
+    struct InlineRequest {
+        uint32_t file_id;
+        uint32_t start;
+        uint32_t end;
+        std::optional<InlineRequestDetails> details = std::nullopt;
+    };
+
+    struct InlineChunk {
+        uint32_t file_id;
+        uint32_t size;
+        const uint8_t *data;
+    };
+
+    // Get the request in case we are in inline mode and mark as started.
+    std::optional<InlineRequest> inline_request();
+    bool inline_chunk(const InlineChunk &chunk);
+    // Network failed during the inline transfer - reset it in case it was already started.
+    void network_failed();
 };
 
 } // namespace transfers

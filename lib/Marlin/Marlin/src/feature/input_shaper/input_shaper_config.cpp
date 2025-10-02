@@ -1,6 +1,6 @@
 #include "input_shaper_config.hpp"
 #include "input_shaper.hpp"
-
+#include <utility_extensions.hpp>
 #include <config_store/store_instance.hpp>
 
 #include "../../module/planner.h"
@@ -18,14 +18,14 @@ void set_config_for_m74(const AxisEnum axis, const std::optional<AxisConfig> &ne
     // Only set the value if it was not set before.
     // Older slicer versions issued both M593 and M74 which caused M74 to adjust already adjusted value.
     // This gets reset after the boot and after the print is done.
-    if (!config_for_m74.axis[axis]) {
+    if (!next_config || !config_for_m74.axis[axis]) {
         config_for_m74.axis[axis] = next_config;
     }
 }
 
 void set_config_for_m74(const std::optional<WeightAdjustConfig> &next_config) {
     // This function complements set_config_for_m74 for setting axis config
-    if (!config_for_m74.weight_adjust_y) {
+    if (!next_config || !config_for_m74.weight_adjust_y) {
         config_for_m74.weight_adjust_y = next_config;
     }
 }
@@ -147,25 +147,19 @@ void set_axis_y_weight_adjust(std::optional<WeightAdjustConfig> wa_config) {
 }
 
 const char *to_string(Type type) {
-    switch (type) {
-    case Type::zv:
-        return "ZV";
-    case Type::zvd:
-        return "ZVD";
-    case Type::mzv:
-        return "MZV";
-    case Type::ei:
-        return "EI";
-    case Type::ei_2hump:
-        return "EI_2HUMP";
-    case Type::ei_3hump:
-        return "EI_3HUMP";
-    case Type::null:
-        return "null";
-    default:
-        break;
+    auto type_idx = ftrstd::to_underlying(type);
+    if (type_idx > ftrstd::to_underlying(Type::last)) {
+        return "Unknown";
     }
-    return "Unknown";
+    return filter_names[type_idx];
+}
+
+const char *to_short_string(Type type) {
+    auto type_idx = ftrstd::to_underlying(type);
+    if (type_idx > ftrstd::to_underlying(Type::last)) {
+        return "UNK";
+    }
+    return filter_short_names[type_idx];
 }
 
 float clamp_frequency_to_safe_values(float frequency) {

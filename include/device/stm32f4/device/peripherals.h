@@ -7,7 +7,7 @@
 extern "C" {
 #endif //__cplusplus
 
-#if (BOARD_IS_XBUDDY || BOARD_IS_XLBUDDY)
+#if (BOARD_IS_XBUDDY() || BOARD_IS_XLBUDDY())
     #define HAS_ADC3
 #endif
 
@@ -99,7 +99,7 @@ extern TIM_HandleTypeDef htim14;
 #define THERM_1_Pin           GPIO_PIN_4
 #define THERM_1_GPIO_Port     GPIOA
 
-#if (BOARD_IS_BUDDY)
+#if (BOARD_IS_BUDDY())
     #define ESP_TX_Pin            GPIO_PIN_6
     #define ESP_TX_GPIO_Port      GPIOC
     #define ESP_RX_Pin            GPIO_PIN_7
@@ -113,7 +113,7 @@ extern TIM_HandleTypeDef htim14;
     #define THERM_2_GPIO_Port GPIOF
 #endif
 
-#if (BOARD_IS_XBUDDY && !PRINTER_IS_PRUSA_MK3_5)
+#if (BOARD_IS_XBUDDY() && !PRINTER_IS_PRUSA_MK3_5())
     #define THERM_HEATBREAK_Pin       GPIO_PIN_6
     #define THERM_HEATBREAK_GPIO_Port GPIOA
 #endif
@@ -162,7 +162,7 @@ extern TIM_HandleTypeDef htim14;
 
 #define USB_OVERC_Pin       GPIO_PIN_4
 #define USB_OVERC_GPIO_Port GPIOE
-#if (BOARD_IS_XBUDDY || BOARD_IS_XLBUDDY)
+#if (BOARD_IS_XBUDDY() || BOARD_IS_XLBUDDY())
     #define ESP_GPIO0_Pin GPIO_PIN_15
 #else
     #define ESP_GPIO0_Pin GPIO_PIN_6
@@ -185,7 +185,7 @@ extern TIM_HandleTypeDef htim14;
 #define WP1_Pin                     GPIO_PIN_0
 #define WP1_GPIO_Port               GPIOE
 
-#if (BOARD_IS_XBUDDY || BOARD_IS_XLBUDDY)
+#if (BOARD_IS_XBUDDY() || BOARD_IS_XLBUDDY())
     #define i2c2_SDA_PORT_BASE GPIOF_BASE
     #define i2c2_SCL_PORT_BASE GPIOF_BASE
     #define i2c2_SDA_PORT      ((GPIO_TypeDef *)i2c2_SDA_PORT_BASE)
@@ -194,7 +194,7 @@ extern TIM_HandleTypeDef htim14;
     #define i2c2_SCL_PIN       GPIO_PIN_1
 
     // iX uses the I2C3 pins for back door filament sensor - BFW-4746
-    #if !PRINTER_IS_PRUSA_iX
+    #if !PRINTER_IS_PRUSA_iX()
         #define i2c3_SDA_PORT_BASE GPIOC_BASE
         #define i2c3_SCL_PORT_BASE GPIOA_BASE
         #define i2c3_SDA_PORT      ((GPIO_TypeDef *)i2c3_SDA_PORT_BASE)
@@ -204,7 +204,7 @@ extern TIM_HandleTypeDef htim14;
     #endif
 #endif
 
-#if (BOARD_IS_XLBUDDY)
+#if (BOARD_IS_XLBUDDY())
     #define i2c1_SDA_PORT_BASE GPIOB_BASE
     #define i2c1_SCL_PORT_BASE GPIOB_BASE
     #define i2c1_SDA_PORT      ((GPIO_TypeDef *)i2c1_SDA_PORT_BASE)
@@ -213,7 +213,7 @@ extern TIM_HandleTypeDef htim14;
     #define i2c1_SCL_PIN       GPIO_PIN_6
 #endif
 
-#if (BOARD_IS_BUDDY)
+#if (BOARD_IS_BUDDY())
     #define i2c1_SDA_PORT_BASE GPIOB_BASE
     #define i2c1_SCL_PORT_BASE GPIOB_BASE
     #define i2c1_SDA_PORT      ((GPIO_TypeDef *)i2c1_SDA_PORT_BASE)
@@ -233,28 +233,31 @@ extern TIM_HandleTypeDef htim14;
 // -1 == don't have, currently i2c only
 //
 
-#if BOARD_IS_BUDDY
-    #define i2c_eeprom      1
-    #define i2c_usbc        -1
-    #define i2c_touch       -1
-    #define i2c_io_extender -1
-    #define spi_flash       3
-    #define spi_lcd         2
-    #define uart_tmc        2
-    #define uart_esp        6
-    #define uart_extconn    1
-    #define spi_extconn     1
-#elif BOARD_IS_XBUDDY
-    #define i2c_eeprom        2
-    #define i2c_usbc          2
-    #define i2c_io_extender   -1
-    #define spi_flash         5
-    #define spi_lcd           6
-    #define spi_tmc           3
-    #define uart_esp          8
-    #define spi_accelerometer 2
-    #define spi_extconn       4
-    #if PRINTER_IS_PRUSA_iX
+#if BOARD_IS_BUDDY()
+    #define i2c_eeprom       1
+    #define i2c_usbc         -1
+    #define i2c_touch        -1
+    #define i2c_gcode        1
+    #define i2c_io_expander1 -1
+    #define i2c_io_expander2 -1
+    #define spi_flash        3
+    #define spi_lcd          2
+    #define uart_tmc         2
+    #define uart_esp         6
+#elif BOARD_IS_XBUDDY()
+    #define i2c_eeprom         2
+    #define i2c_usbc           2
+    #define i2c_gcode          2
+    #define i2c_io_expander1   -1
+    #define i2c_io_expander2   2
+    #define spi_flash          5
+    #define spi_lcd            6
+    #define spi_tmc            3
+    #define uart_esp           8
+    #define spi_accelerometer  2
+    #define spi_extconn        4
+    #define tim_phase_stepping 13
+    #if PRINTER_IS_PRUSA_iX()
         #define uart_puppies 6
         /// iX uses the I2C3 pins for back door filament sensor - BFW-4746
         #define i2c_touch    -1
@@ -262,11 +265,13 @@ extern TIM_HandleTypeDef htim14;
         #define uart_mmu  6
         #define i2c_touch 3
     #endif
-#elif BOARD_IS_XLBUDDY
+#elif BOARD_IS_XLBUDDY()
     #define i2c_eeprom         2
     #define i2c_usbc           1
     #define i2c_touch          3
-    #define i2c_io_extender    2
+    #define i2c_gcode          2
+    #define i2c_io_expander1   2
+    #define i2c_io_expander2   -1
     #define spi_flash          5
     #define spi_lcd            6
     #define spi_tmc            3
@@ -275,18 +280,17 @@ extern TIM_HandleTypeDef htim14;
     // Side LEDs use either SPI4 or share SPI with LCD, depending on HW revision
     // #define spi_led           4 or spi_lcd
     #define uart_puppies       3
-    #define uart_reserved      6
     #define tim_burst_stepping 8
     #define tim_phase_stepping 13
 #else
     #error Unknown board
 #endif
 
-#if PRINTER_IS_PRUSA_iX
+#if PRINTER_IS_PRUSA_iX()
     #define spi_led spi_extconn
 #endif
 
-#define HAS_I2CN(n) ((n == i2c_eeprom) || (n == i2c_touch) || (n == i2c_usbc) || (n == i2c_io_extender))
+#define HAS_I2CN(n) ((n == i2c_eeprom) || (n == i2c_touch) || (n == i2c_usbc) || (n == i2c_gcode) || (n == i2c_io_expander1) || (n == i2c_io_expander2))
 
 //
 // Other
@@ -385,15 +389,6 @@ void hw_tim14_init();
 #define UART_INIT(peripheral)                \
     _JOIN(hw_uart, uart_##peripheral, _init) \
     ()
-
-/// Get instance of given peripheral: I2C_INSTANCE_FOR(touch) -> I2C3
-#define I2C_INSTANCE_FOR(peripheral) _JOIN(I2C, i2c_##peripheral, )
-
-/// Get instance of given peripheral: SPI_INSTANCE_FOR(lcd) -> SPI3
-#define SPI_INSTANCE_FOR(peripheral) _JOIN(SPI, spi_##peripheral, )
-
-/// Get instance of given peripheral: UART_INSTANCE_FOR(esp) -> UART3
-#define UART_INSTANCE_FOR(peripheral) _JOIN(UART, uart_##peripheral, )
 
 #ifdef __cplusplus
 }

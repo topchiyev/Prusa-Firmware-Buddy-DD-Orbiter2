@@ -1,8 +1,11 @@
 #pragma once
+
 #include "stm32f4xx_hal.h"
-#include "uartrxbuff.h"
 #include "FreeRTOS.h"
-#include <option/has_puppies.h>
+#include <inttypes.h>
+#include <stdbool.h>
+#include <device/hal.h>
+#include "cmsis_os.h"
 
 #ifdef __cplusplus
 
@@ -51,19 +54,6 @@ namespace hw {
         /// Set timeout for write operations
         void SetWriteTimeoutMs(uint32_t timeout) { writeTimeoutMs = timeout; }
 
-        /// TODO: Get me out of here!
-    #if BOARD_IS_BUDDY
-        static BufferedSerial uart2;
-    #endif
-    #if BOARD_IS_XBUDDY
-        #if !HAS_PUPPIES()
-        static BufferedSerial uart6;
-        #endif
-    #endif
-
-    #if BOARD_IS_XLBUDDY
-        static BufferedSerial uart3;
-    #endif
         /// Should be called from the Transmission Complete ISR of its related USART
         void WriteFinishedISR();
 
@@ -78,6 +68,25 @@ namespace hw {
 
         /// DMA will stop receiving upon error (framing, parity etc), this will reinitialize it if needed
         void ErrorRecovery();
+
+        struct uartrxbuff_t {
+            DMA_HandleTypeDef *phdma;
+
+            /// Event group used to synchronize reading the buffer with DMA/UART interrupts
+            EventGroupHandle_t event_group;
+
+            /// Pointer to the buffer's memory itself
+            uint8_t *buffer;
+
+            /// Size of the buffer
+            int buffer_size;
+
+            /// Index of the next position in the buffer to read from
+            int buffer_pos;
+
+            /// position in buffer where idle occured (UINT32_MAX when no idle occured)
+            uint32_t idle_at_NDTR;
+        };
 
     private:
         uint32_t readTimeoutMs;
@@ -106,19 +115,3 @@ namespace hw {
 } // namespace buddy
 
 #endif
-
-//
-// FIXME: remove uart2 definition from this file
-//
-#ifdef __cplusplus
-extern "C" {
-#endif //__cplusplus
-
-void uart2_idle_cb();
-#if !HAS_PUPPIES()
-void uart6_idle_cb();
-#endif
-
-#ifdef __cplusplus
-}
-#endif //__cplusplus

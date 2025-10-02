@@ -1031,7 +1031,7 @@
 #define DISABLE_Z false
 
 // X and Y axes ENABLE/DISABLE functions are linked through pins
-#if BOARD_IS_XBUDDY
+#if BOARD_IS_XBUDDY()
   #define XY_LINKED_ENABLE true
 #endif
 
@@ -1523,11 +1523,6 @@
 //
 //#define INCH_MODE_SUPPORT
 
-/**
- * R1 Redirect gcode support
- */
-//#define REDIRECT_GCODE_SUPPORT
-
 //
 // M149 Set temperature units support
 //
@@ -1566,11 +1561,19 @@
     #define Y_AXIS_UNLOAD_POS  (std::numeric_limits<float>::quiet_NaN())
     #define X_AXIS_LOAD_POS  (std::numeric_limits<float>::quiet_NaN())
     #define X_AXIS_UNLOAD_POS  (std::numeric_limits<float>::quiet_NaN())
-    // Specify a park position as { X, Y, Z }
-    #define NOZZLE_PARK_POINT \
-        { (X_MAX_POS - 10), (Y_MAX_POS - 10), 20 }
-        #define NOZZLE_PARK_POINT_M600 \
-        {(X_MIN_POS + 10), (Y_MIN_POS + 10), 20 }
+
+    #define X_NOZZLE_PARK_POINT (X_MAX_POS - 10)
+    #define Y_NOZZLE_PARK_POINT (Y_MAX_POS - 10)
+    #define Z_NOZZLE_PARK_POINT 20
+    #define XYZ_NOZZLE_PARK_POINT \
+        {X_NOZZLE_PARK_POINT, Y_NOZZLE_PARK_POINT, Z_NOZZLE_PARK_POINT}
+
+    #define X_NOZZLE_PARK_POINT_M600    (X_MIN_POS + 10)
+    #define Y_NOZZLE_PARK_POINT_M600    (Y_MIN_POS + 10)
+    #define Z_NOZZLE_PARK_POINT_M600    20
+    #define XYZ_NOZZLE_PARK_POINT_M600 \
+        {X_NOZZLE_PARK_POINT_M600, Y_NOZZLE_PARK_POINT_M600, Z_NOZZLE_PARK_POINT_M600}
+
     #define NOZZLE_PARK_XY_FEEDRATE 100 // (mm/s) X and Y axes feedrate (also used for delta Z axis)
     #define NOZZLE_PARK_Z_FEEDRATE 5 // (mm/s) Z axis feedrate (not used for delta printers)
 
@@ -1905,12 +1908,6 @@
 //
 
 //
-// Elefu RA Board Control Panel
-// http://www.elefu.com/index.php?route=product/product&product_id=53
-//
-#define RA_CONTROL_PANEL
-
-//
 // Sainsmart (YwRobot) LCD Displays
 //
 // These require F.Malpartida's LiquidCrystal_I2C library
@@ -2121,11 +2118,6 @@
 //
 // CONTROLLER TYPE: Standalone / Serial
 //
-
-//
-// LCD for Malyan M200 printers.
-//
-//#define MALYAN_LCD
 
 //
 // CONTROLLER TYPE: Keypad / Add-on

@@ -5,9 +5,9 @@
 #include "screen_menu_sensor_info.hpp"
 #include "DialogMoveZ.hpp"
 
-void ScreenMenuSensorInfo::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void ScreenMenuSensorInfo::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     if (event == GUI_event_t::LOOP) {
-        Item<MI_INFO_MCU_TEMP>().UpdateValue(buffer.GetValue(SensorData::Sensor::MCUTemp));
+        Item<MI_INFO_MCU_TEMP>().UpdateValue(sensor_data().MCUTemp);
     }
 
     if (event == GUI_event_t::HELD_RELEASED) {
@@ -15,5 +15,5 @@ void ScreenMenuSensorInfo::windowEvent(EventLock /*has private ctor*/, window_t 
         return;
     }
 
-    SuperWindowEvent(sender, event, param);
+    ScreenMenu::windowEvent(sender, event, param);
 }

@@ -13,12 +13,12 @@ ScreenMenuTemperature::ScreenMenuTemperature()
     : ScreenMenuTemperature__(_(label)) {
     EnableLongHoldScreenAction();
 
-#if (!PRINTER_IS_PRUSA_MINI)
+#if (!PRINTER_IS_PRUSA_MINI())
     header.SetIcon(&img::temperature_white_16x16);
-#endif // PRINTER_IS_PRUSA_MINI
+#endif // PRINTER_IS_PRUSA_MINI()
 }
 
-void ScreenMenuTemperature::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void ScreenMenuTemperature::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     if (event == GUI_event_t::CHILD_CLICK) {
         HOTEND_LOOP() {
             marlin_client::set_target_nozzle(0, e);
@@ -36,6 +36,6 @@ void ScreenMenuTemperature::windowEvent(EventLock /*has private ctor*/, window_t
         Item<MI_HEATBED>().SetVal(0);
         Item<MI_PRINTFAN>().SetVal(0);
     } else {
-        SuperWindowEvent(sender, event, param);
+        ScreenMenu::windowEvent(sender, event, param);
     }
 }

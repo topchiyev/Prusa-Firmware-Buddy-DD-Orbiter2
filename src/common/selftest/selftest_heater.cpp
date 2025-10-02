@@ -2,14 +2,12 @@
 
 #include "selftest_heater.h"
 #include "hwio.h"
-#include <guiconfig/wizard_config.hpp>
 #include "selftest_log.hpp"
 #include "fanctl.hpp"
 #include "../../Marlin/src/module/temperature.h"
 #include "i_selftest.hpp"
 #include "algorithm_scale.hpp"
 #include <option/has_toolchanger.h>
-#include <common/nozzle_type.hpp>
 #include "advanced_power.hpp"
 #include <printers.h>
 #include "config_store/store_instance.hpp"
@@ -52,7 +50,7 @@ uint32_t CSelftestPart_Heater::estimate(const HeaterConfig_t &config) {
 
 LoopResult CSelftestPart_Heater::stateCheckHbrPassed() {
     SelftestResult eeres = config_store().selftest_result.get();
-    if (eeres.tools[m_config.tool_nr].heatBreakFan != TestResult_Passed || eeres.tools[m_config.tool_nr].fansSwitched != TestResult_Passed) {
+    if (!eeres.tools[m_config.tool_nr].has_heatbreak_fan_passed()) {
         IPartHandler::SetFsmPhase(PhasesSelftest::HeatersDisabledDialog);
         nozzle_test_skipped = true;
     }
@@ -256,12 +254,6 @@ LoopResult CSelftestPart_Heater::stateMeasure() {
         // Bounds check, there might be invalid value in the config_store
         const auto hotend_type = static_cast<size_t>(config_store().hotend_type.get());
         hw_diff += m_config.hotend_type_temp_offsets[hotend_type < static_cast<size_t>(HotendType::_cnt) ? hotend_type : 0];
-
-#if NOZZLE_TYPE_SUPPORT()
-        // Bounds check, there might be invalid value in the config_store
-        const auto nozzle_type = static_cast<size_t>(config_store().nozzle_type.get());
-        hw_diff += m_config.nozzle_type_temp_offsets[nozzle_type < static_cast<size_t>(NozzleType::_cnt) ? nozzle_type : 0];
-#endif
     }
 
     if (hw_diff) {
@@ -294,7 +286,7 @@ void CSelftestPart_Heater::actualizeProgress(float current, float progres_start,
 }
 
 // Currently supported only by XL, others needs to implement sensor reading, MK4 uses PowerCheckBoth to check its linked heaters
-#if PRINTER_IS_PRUSA_XL
+#if PRINTER_IS_PRUSA_XL()
 void CSelftestPart_Heater::single_check_callback() {
     assert(m_config.type == heater_type_t::Nozzle || m_config.type == heater_type_t::Bed);
 

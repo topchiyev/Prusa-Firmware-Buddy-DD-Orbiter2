@@ -3,6 +3,7 @@
 #pragma once
 #include "screen.hpp"
 #include "ScreenFactory.hpp"
+#include <inplace_function.hpp>
 #include <array>
 
 // stack with screen creator methods
@@ -10,15 +11,21 @@ inline constexpr size_t MAX_SCREENS = 16;
 struct screen_node {
     ScreenFactory::Creator creator;
     screen_init_variant init_data;
-    screen_node(ScreenFactory::Creator creator = nullptr, screen_init_variant init_data = screen_init_variant())
+
+    screen_node(ScreenFactory::Creator creator = {}, screen_init_variant init_data = screen_init_variant())
         : creator(creator)
         , init_data(init_data) {}
+
+    screen_node(ScreenFactory::Creator::Func creator, screen_init_variant init_data = screen_init_variant())
+        : creator(creator)
+        , init_data(init_data) {}
+
     void MakeEmpty() {
-        creator = nullptr;
+        creator = {};
         init_data = screen_init_variant();
     }
     bool IsEmpty() {
-        return creator == nullptr;
+        return creator.func == nullptr;
     }
 };
 using ScreenArray = std::array<screen_node, MAX_SCREENS>;
@@ -33,7 +40,6 @@ class Screens {
     bool close;
     bool close_all;
     bool close_printing;
-    bool display_reinitialized;
 
     uint32_t timeout_tick;
 
@@ -44,16 +50,32 @@ class Screens {
 public:
     void Loop(); // call inside guiloop
 
-    void Open(const ScreenFactory::Creator screen_creator); // remember creator and create later with default initialization parameter (like selected item in menu)
     void Open(screen_node screen_creator); // remember creator and create later with stored initialization parameter
-    bool IsOpenPending() const { return creator_node.creator != nullptr; }
+
+    template <typename Screen, auto... args>
+    void Open() {
+        return Open(ScreenFactory::Screen<Screen, args...>);
+    }
+
+    bool IsOpenPending() const { return creator_node.creator.func != nullptr; }
 
     void PushBeforeCurrent(const ScreenFactory::Creator screen_creator);
     void PushBeforeCurrent(screen_node screen_creator);
     void PushBeforeCurrent(const screen_node *begin, const screen_node *end); // push in normal order, skips nullptr
-    void RPushBeforeCurrent(const screen_node *begin, const screen_node *end); // push in reversed order, skips nullptr
 
+    /// Closes currently open screen on the stack
     void Close();
+
+    /// Closes the specific screen anywhere on the stack
+    /// \returns if any screen was closed
+    template <typename Screen>
+    inline bool Close() {
+        return Close(ScreenFactory::Screen<Screen>);
+    };
+
+    /// Closes the specific screen anywhere on the stack
+    /// \returns if any screen was closed
+    bool Close(const ScreenFactory::Creator &creator);
 
     void CloseAll();
 
@@ -69,6 +91,15 @@ public:
 
     screen_t *Get() const;
 
+    template <typename T>
+    T *get() const {
+        if (IsScreenOpened<T>()) {
+            return static_cast<T *>(current.get());
+        } else {
+            return nullptr;
+        }
+    }
+
     void EnableMenuTimeout();
     void DisableMenuTimeout();
     bool GetMenuTimeout();
@@ -76,11 +107,9 @@ public:
     void EnableFanCheck();
     void DisableFanCheck();
     bool GetFanChceck();
-    void SetDisplayReinitialized();
 
     static void Init(screen_node screen_creator);
     static void Init(const screen_node *begin, const screen_node *end); // init in normal order, skips nullptr
-    static void RInit(const screen_node *begin, const screen_node *end); // init in reversed order, skips nullptr
 
     static Screens *Access();
 
@@ -92,8 +121,12 @@ public:
      * @return false screen is not opened
      */
     template <class T>
-    bool IsScreenOpened() {
-        return stack_iterator && ScreenFactory::DoesCreatorHoldType<T>(stack_iterator->creator);
+    bool IsScreenOpened() const {
+        return stack_iterator->creator.is_screen<T>();
+    }
+
+    bool IsScreenOpened(ScreenFactory::Creator creator) const {
+        return stack_iterator->creator == creator;
     }
 
     /**
@@ -105,13 +138,8 @@ public:
      * @return false screen is not closed
      */
     template <class T>
-    bool IsScreenClosed() {
-        for (auto it = stack.begin(); it != stack_iterator; ++it) {
-            if (it && ScreenFactory::DoesCreatorHoldType<T>(it->creator)) {
-                return true;
-            }
-        }
-        return false;
+    bool IsScreenClosed() const {
+        return std::any_of(stack.begin(), ScreenArray::const_iterator(stack_iterator + 1), [](const auto &node) { return node.creator.template is_screen<T>(); });
     }
 
     /**
@@ -123,14 +151,14 @@ public:
      * @return false screen is not on stack
      */
     template <class T>
-    bool IsScreenOnStack() {
+    bool IsScreenOnStack() const {
         return IsScreenOpened<T>() || IsScreenClosed<T>();
     }
 
     // This function is used to keep gui responsive when showing some dialog.
     // TODO: Perhaps it would be better to create the required dialog
     //       on the actual stack of screens.
-    void gui_loop_until_dialog_closed(std::function<void()> callback = {});
+    void gui_loop_until_dialog_closed(stdext::inplace_function<void()> callback = {});
 
 private:
     void InnerLoop(); // call inside Loop of this class

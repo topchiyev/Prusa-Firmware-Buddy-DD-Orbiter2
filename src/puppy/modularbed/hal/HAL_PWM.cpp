@@ -64,13 +64,7 @@
 
 #define PIN_HB_0 GPIO_PIN_4
 #define PIN_HB_1 GPIO_PIN_5
-
-#if (BOARD_VER_EQUAL_TO(0, 6, 0))
-    #define PIN_HB_2 GPIO_PIN_10
-#else
-    #define PIN_HB_2 GPIO_PIN_8
-#endif
-
+#define PIN_HB_2 GPIO_PIN_8
 #define PIN_HB_3 GPIO_PIN_9
 #define PIN_HB_4 GPIO_PIN_1
 #define PIN_HB_5 GPIO_PIN_2
@@ -178,6 +172,9 @@ void AddPWMPulse(uint32_t heatbedletIndex, uint32_t pulseStartEdge, uint32_t pul
         }
 
         if (pulseStartEdge != pulseEndEdge) {
+            if (pulseEndEdge >= PWM_PERIOD_LENGTH) {
+                bsod("PWM pulse is too long!");
+            }
             uint32_t *pEdgeMaskList = (s_pActualEdgeMaskList == s_EdgeMaskList_A) ? s_EdgeMaskList_B : s_EdgeMaskList_A;
             pEdgeMaskList[pulseStartEdge] |= hbMask << 16;
             pEdgeMaskList[pulseEndEdge] |= hbMask;

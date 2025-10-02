@@ -1,4 +1,6 @@
 #include "accelerometer.hpp"
+
+#include <freertos/critical_section.hpp>
 #include "timing.h"
 #include <cstdint>
 #include <common/bsod.h>
@@ -28,9 +30,8 @@ enum class State : uint8_t {
 State state = State::uninitialized;
 
 void clear() {
-    taskENTER_CRITICAL();
+    freertos::CriticalSection critical_section;
     sample_buffer.clear();
-    taskEXIT_CRITICAL();
     overflown_count = 0;
     first_sample_timestamp = 0;
     last_sample_timestamp = 0;
@@ -89,32 +90,32 @@ void check_device_id() {
     }
 }
 
-void configure_interrupt() {
+void init() {
+    // restore all defaults
+    lis2dh12_boot_set(&dev_ctx, 1);
+    osDelay(25);
+    lis2dh12_boot_set(&dev_ctx, 0);
+    osDelay(5);
+
+    // switch between FIFO and Bypass to reset the accelerometer
+    lis2dh12_fifo_mode_set(&dev_ctx, LIS2DH12_FIFO_MODE);
+    lis2dh12_fifo_mode_set(&dev_ctx, LIS2DH12_BYPASS_MODE);
+
+    // low-power mode off, high resolution mode off
+    lis2dh12_operating_mode_set(&dev_ctx, LIS2DH12_NM_10bit);
+
+    // enable interrupt when axis data are ready
     lis2dh12_ctrl_reg3_t reg3 {};
     reg3.i1_zyxda = true;
     lis2dh12_pin_int1_config_set(&dev_ctx, &reg3);
 }
 
 void enable_sampling() {
-    constexpr lis2dh12_ctrl_reg1_t ctrl_reg1 {
-        .xen = 1, // enable x axis
-        .yen = 1, // enable y axis
-        .zen = 1, // enable z axis
-        .lpen = 0, // disable low power mode
-        .odr = 0x9, // enable output
-    };
-    write_reg(dev_ctx.handle, LIS2DH12_CTRL_REG1, (const uint8_t *)&ctrl_reg1, 1);
+    lis2dh12_data_rate_set(&dev_ctx, LIS2DH12_ODR_5kHz376_LP_1kHz344_NM_HP);
 }
 
 void disable_sampling() {
-    constexpr lis2dh12_ctrl_reg1_t ctrl_reg1 {
-        .xen = 1, // enable x axis
-        .yen = 1, // enable y axis
-        .zen = 1, // enable z axis
-        .lpen = 0, // disable low power mode
-        .odr = 0x0, // disable output
-    };
-    write_reg(dev_ctx.handle, LIS2DH12_CTRL_REG1, (const uint8_t *)&ctrl_reg1, 1);
+    lis2dh12_data_rate_set(&dev_ctx, LIS2DH12_POWER_DOWN);
 }
 
 void throwaway_sample() {
@@ -127,10 +128,11 @@ void throwaway_sample() {
 void dwarf::accelerometer::enable() {
     switch (state) {
     case State::uninitialized:
+        init();
         check_device_id();
-        configure_interrupt();
         [[fallthrough]];
     case State::disabled:
+        throwaway_sample();
         clear();
         enable_sampling();
         state = State::enabled;
@@ -170,7 +172,7 @@ void dwarf::accelerometer::irq() {
     lis2dh12_status_get(&dev_ctx, &status);
 
     // Get sample and store sample
-    uint32_t now = ticks_us();
+    const uint32_t now = ticks_us();
     if (first_sample_timestamp == 0) {
         first_sample_timestamp = now;
         samples_extracted = 0;
@@ -189,19 +191,16 @@ void dwarf::accelerometer::irq() {
 }
 
 bool dwarf::accelerometer::accelerometer_get_sample(AccelerometerRecord &sample) {
-    taskENTER_CRITICAL();
+    freertos::CriticalSection critical_section;
     const bool ret = sample_buffer.try_get(sample);
-    taskEXIT_CRITICAL();
     // Mark all outgoing packets as corrupted when there is an overflow
     sample.buffer_overflow = overflown_count > 0;
     return ret;
 }
 
 size_t dwarf::accelerometer::get_num_samples() {
-    taskENTER_CRITICAL();
-    const size_t size = sample_buffer.size();
-    taskEXIT_CRITICAL();
-    return size;
+    freertos::CriticalSection critical_section;
+    return sample_buffer.size();
 }
 
 float dwarf::accelerometer::measured_sampling_rate() {

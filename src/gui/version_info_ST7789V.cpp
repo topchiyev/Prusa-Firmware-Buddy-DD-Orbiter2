@@ -14,7 +14,7 @@ uint16_t ScreenMenuVersionInfo::get_help_h() {
 }
 
 ScreenMenuVersionInfo::ScreenMenuVersionInfo()
-    : AddSuperWindow<screen_t>(nullptr)
+    : screen_t(nullptr)
     , menu(this, GuiDefaults::RectScreenBody - Rect16::Height_t(get_help_h() + blank_space_h /*Avoid drawing over help text*/), &container)
     , header(this)
     , help(this, Rect16(GuiDefaults::MenuPaddingItems.left, uint16_t(GuiDefaults::RectFooter.Top()) - get_help_h() - blank_space_h, GuiDefaults::RectScreen.Width() - GuiDefaults::MenuPaddingItems.left, get_help_h()), is_multiline::yes)
@@ -34,9 +34,8 @@ ScreenMenuVersionInfo::ScreenMenuVersionInfo()
     auto end = version_info_str.end();
     {
         // r=1 c=20
-        static const char fmt2Translate[] = N_("Firmware Version\n");
         char fmt[21];
-        _(fmt2Translate).copyToRAM(fmt, sizeof(fmt)); // note the underscore at the beginning of this line
+        _("Firmware Version\n").copyToRAM(fmt, sizeof(fmt)); // note the underscore at the beginning of this line
         begin += snprintf(begin, end - begin, fmt);
     }
 
@@ -58,9 +57,8 @@ ScreenMenuVersionInfo::ScreenMenuVersionInfo()
 
     if (end > begin) {
         // c=20 r=4
-        static const char fmt2Translate[] = N_("\nBootloader Version\n%d.%d.%d\n\nBuddy Board\n%d\n%s");
         char fmt[20 * 4];
-        _(fmt2Translate).copyToRAM(fmt, sizeof(fmt)); // note the underscore at the beginning of this line
+        _("\nBootloader Version\n%d.%d.%d\n\nBuddy Board\n%d\n%s").copyToRAM(fmt, sizeof(fmt)); // note the underscore at the beginning of this line
         begin += snprintf(begin, end - begin,
             fmt,
             bootloader->major, bootloader->minor, bootloader->patch,

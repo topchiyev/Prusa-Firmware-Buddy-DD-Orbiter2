@@ -16,6 +16,8 @@
 #define MOVE_SEGMENT_QUEUE_MOD(n) ((n) & (MOVE_SEGMENT_QUEUE_SIZE - 1))
 #define STEP_EVENT_QUEUE_MOD(n)   ((n) & (STEP_EVENT_QUEUE_SIZE - 1))
 
+constexpr const uint8_t PS_AXIS_COUNT = 4; // Number of axes handled by precise stepping
+
 constexpr const uint32_t MOVE_FLAG_DIR_MASK = 0x00F0;
 constexpr const uint32_t MOVE_FLAG_AXIS_ACTIVE_MASK = 0x0F00;
 constexpr const uint32_t MOVE_FLAG_RESET_POSITION_MASK = 0x000F0000;
@@ -216,6 +218,8 @@ enum StepGeneratorStatus : uint8_t {
 
 typedef struct basic_step_generator_t {
     const uint8_t axis;
+    StepEventFlag_t step_flags = 0; // generated step active/direction flags
+    StepEventFlag_t move_step_flags = 0; // current move active/direction flags
 } basic_step_generator_t;
 
 // Groups variables for step event generators that work with move segments or micro move segments (input shaper).
@@ -238,15 +242,18 @@ typedef step_event_info_t (*generator_next_step_f)(move_segment_step_generator_t
 typedef uint8_t step_index_t;
 
 struct step_generator_state_t {
-    basic_step_generator_t *step_generator[4];
-    generator_next_step_f next_step_func[4];
-    step_event_info_t step_events[4];
-    std::array<step_index_t, 4> step_event_index;
+    // Step generators
+    basic_step_generator_t *step_generator[PS_AXIS_COUNT]; // Per-axis step generator state
+    generator_next_step_f next_step_func[PS_AXIS_COUNT]; // Per-axis step generator function
+
+    // Step events
+    step_event_info_t step_events[PS_AXIS_COUNT]; // Per-axis next step events
+    std::array<step_index_t, PS_AXIS_COUNT> step_event_index; // Time-sorted indexes into step_events
     double previous_step_time;
     uint64_t previous_step_time_ticks;
 
     uint64_t initial_time; // initialization timestamp (us)
-    StepEventFlag_t flags; // current axis/direction flags
+    StepEventFlag_t current_flags; // current active/direction flags for all axes
     step_event_i32_t buffered_step; // accumulator for multi-axis step fusion
 
     xyze_long_t current_distance; // current axis position (steps, physical)

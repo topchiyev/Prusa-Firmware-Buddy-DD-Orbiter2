@@ -5,16 +5,15 @@
  */
 
 #include <cstring>
-#include "common/to_tie.hpp"
 #include "common/extract_member_pointer.hpp"
 #include "store_item.hpp"
 #include <tuple>
 #include <algorithm>
 #include <ranges>
-#include "indices.hpp"
 #include "utils/utility_extensions.hpp"
 #include "backend.hpp"
 #include <persistent_stores/journal/gen_journal_hashes.hpp>
+#include <common/visit_all_struct_fields.hpp>
 
 namespace journal {
 
@@ -22,18 +21,20 @@ consteval uint16_t hash(std::string_view name) {
     return get_generated_hash(name);
 }
 
-template <BackendC BackendT, BackendT &(*backend)()>
+template <BackendC BackendT, auto backend>
 struct CurrentStoreConfig {
-    static BackendT &get_backend() { return backend(); };
+    static inline BackendT &get_backend() { return backend(); };
     using Backend = BackendT;
-    template <StoreItemDataC DataT, const DataT &default_val, typename BackendT::Id id>
+    template <StoreItemDataC DataT, auto default_val, typename BackendT::Id id>
     using StoreItem = JournalItem<DataT, default_val, backend, id>;
+    template <StoreItemDataC DataT, auto default_val, typename BackendT::Id id, uint8_t max_item_count, uint8_t item_count>
+    using StoreItemArray = JournalItemArray<DataT, default_val, backend, id, max_item_count, item_count>;
 };
 
 template <BackendC BackendT>
 struct DeprecatedStoreConfig {
     // we don't care about default val, but we have it anyway to make deprecating an item a ctrl+c and ctrl+v operation (and in case we need it for some reason)
-    template <StoreItemDataC DataT, const DataT &DefaultVal, typename BackendT::Id HashedID>
+    template <StoreItemDataC DataT, auto DefaultVal, typename BackendT::Id HashedID>
     using StoreItem
         = DeprecatedStoreItem<DataT, DefaultVal, BackendT, HashedID>;
 };
@@ -64,8 +65,8 @@ template <class Config, class DeprecatedItems, const std::span<const journal::Ba
 class Store : public Config {
 
     void dump_items() {
-        to_tie(*static_cast<Config *>(this)).apply([](auto &&...args) {
-            (args.ram_dump(), ...);
+        visit_all_struct_fields(static_cast<Config &>(*this), [](auto &item) {
+            item.ram_dump();
         });
     }
 
@@ -78,15 +79,17 @@ public:
      * @param data Holds data in binary form to be loaded into current item
      */
     void load_item(uint16_t id, std::span<uint8_t> data) {
-        using TupleT = typename std::invoke_result<decltype(to_tie<Config>), Config &>::type;
-        auto constexpr indices = get_current_indices<Config>();
-        auto res = std::lower_bound(indices.cbegin(), indices.cend(), detail::CurrentItemIndex<TupleT>(id, nullptr),
-            [](const auto &a, const auto &b) { return a.id < b.id; });
-        if (res != indices.cend() && res->id == id) { // we found it in current RAM mirror
-            // load data to the item itself
-            auto tuple = to_tie(*static_cast<Config *>(this));
-            res->fnc(data, tuple);
-        }
+        visit_all_struct_fields(static_cast<Config &>(*this), [&]<typename Item>(Item &item) {
+            if constexpr (is_item_array_v<Item>) {
+                if (Item::hashed_id_first <= id && id <= Item::hashed_id_last) {
+                    item.init(id - Item::hashed_id_first, data);
+                }
+            } else {
+                if (Item::hashed_id == id) {
+                    item.init(data);
+                }
+            }
+        });
     }
 
     void save_all() {

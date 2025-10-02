@@ -3,7 +3,6 @@
  */
 
 #include "selftest_firstlayer.hpp"
-#include <guiconfig/wizard_config.hpp>
 #include "i_selftest.hpp"
 #include "filament_sensors_handler.hpp"
 #include "filament.hpp"
@@ -48,7 +47,7 @@ enum class filament_status {
 static filament_status get_filament_status() {
     auto filament = config_store().get_filament_type(0); // first layer calib is on single tool printers only, so should be fine
 
-    uint8_t eeprom = filament != filament::Type::NONE ? static_cast<uint8_t>(filament_status::TypeKnown_SensorNoFilament) : uint8_t(0); // set eeprom flag
+    uint8_t eeprom = filament != FilamentType::none ? static_cast<uint8_t>(filament_status::TypeKnown_SensorNoFilament) : uint8_t(0); // set eeprom flag
     uint8_t sensor = FSensors_instance().sensor_state(LogicalFilamentSensor::primary_runout) != FilamentSensorState::NoFilament ? static_cast<uint8_t>(filament_status::TypeUnknown_SensorValid) : uint8_t(0); // set sensor flag
     return static_cast<filament_status>(eeprom | sensor); // combine flags
 }
@@ -280,15 +279,12 @@ LoopResult CSelftestPart_FirstLayer::stateShowStartPrint() {
 }
 
 LoopResult CSelftestPart_FirstLayer::statePrintInit() {
-    // reset progress
-    marlin_server::set_var_sd_percent_done(0);
-
     IPartHandler::SetFsmPhase(PhasesSelftest::FirstLayer_mbl);
-    auto filament = config_store().get_filament_type(active_extruder);
-    auto filament_desc = filament::get_description(filament);
-    const int temp_nozzle = filament_desc.nozzle;
-    temp_nozzle_preheat = filament_desc.nozzle_preheat;
-    temp_bed = filament_desc.heatbed;
+    const auto filament = config_store().get_filament_type(active_extruder);
+    const auto filament_desc = filament.parameters();
+    const int temp_nozzle = filament_desc.nozzle_temperature;
+    temp_nozzle_preheat = filament_desc.nozzle_preheat_temperature;
+    temp_bed = filament_desc.heatbed_temperature;
 
     // nozzle temperature preheat
     thermalManager.setTargetHotend(temp_nozzle_preheat, 0);
@@ -320,21 +316,30 @@ LoopResult CSelftestPart_FirstLayer::stateMbl() {
 }
 
 LoopResult CSelftestPart_FirstLayer::statePrint() {
-    how_many_times_finished = FirstLayer::HowManyTimesFinished();
     return enqueueGcode("G26") ? LoopResult::RunNext : LoopResult::RunCurrent; // draw firstlay
 }
 
 LoopResult CSelftestPart_FirstLayer::stateMblFinished() {
-    if (how_many_times_finished == FirstLayer::HowManyTimesStarted()) {
+    // Wait for the G26 to start
+    if (!FirstLayer::instance()) {
         return LoopResult::RunCurrent;
     }
 
     IPartHandler::SetFsmPhase(PhasesSelftest::FirstLayer_print);
+    rResult.progress = 0;
     return LoopResult::RunNext;
 }
 
 LoopResult CSelftestPart_FirstLayer::statePrintFinished() {
-    return (how_many_times_finished == FirstLayer::HowManyTimesFinished()) ? LoopResult::RunCurrent : LoopResult::RunNext;
+    FirstLayer *fli = FirstLayer::instance();
+
+    // If the G26 finished, go to the next phase
+    if (!fli) {
+        return LoopResult::RunNext;
+    }
+
+    rResult.progress = fli->progress_percent();
+    return LoopResult::RunCurrent;
 }
 
 LoopResult CSelftestPart_FirstLayer::stateReprintInit() {

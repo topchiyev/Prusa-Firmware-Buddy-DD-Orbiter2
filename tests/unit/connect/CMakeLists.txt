@@ -1,12 +1,15 @@
+add_definitions(-DPRUSA_TOOL_MAPPING)
 add_executable(
   connect_tests
   ${CMAKE_CURRENT_BINARY_DIR}/http_resp_automaton.cpp
   ${CMAKE_SOURCE_DIR}/src/common/automata/core.cpp
   ${CMAKE_SOURCE_DIR}/src/common/crc32.cpp
+  ${CMAKE_SOURCE_DIR}/src/common/error_code_mangle.cpp
   ${CMAKE_SOURCE_DIR}/src/common/json_encode.cpp
   ${CMAKE_SOURCE_DIR}/src/common/segmented_json.cpp
   ${CMAKE_SOURCE_DIR}/src/common/filepath_operation.cpp
   ${CMAKE_SOURCE_DIR}/src/common/filename_type.cpp
+  ${CMAKE_SOURCE_DIR}/src/common/printer_model.cpp
   ${CMAKE_SOURCE_DIR}/src/common/base64_stream_decoder.cpp
   ${CMAKE_SOURCE_DIR}/src/common/gcode/gcode_reader_any.cpp
   ${CMAKE_SOURCE_DIR}/src/common/gcode/gcode_reader_binary.cpp
@@ -49,7 +52,6 @@ add_executable(
   ${CMAKE_SOURCE_DIR}/tests/unit/common/printer_state_mock.cpp
   ${CMAKE_SOURCE_DIR}/tests/stubs/jsmn_impl.c
   ${CMAKE_SOURCE_DIR}/tests/stubs/strlcpy.c
-  ${CMAKE_SOURCE_DIR}/tests/stubs/fake_freertos_mutex.cpp
   ${CMAKE_SOURCE_DIR}/tests/stubs/printer_type.cpp
   ${CMAKE_SOURCE_DIR}/tests/unit/mock/bsod.cpp
   # LwIP parts
@@ -87,6 +89,8 @@ target_include_directories(
           ${CMAKE_SOURCE_DIR}/src/common
           ${CMAKE_SOURCE_DIR}/src/common/http
           ${CMAKE_SOURCE_DIR}/src/common/gcode
+          ${CMAKE_SOURCE_DIR}/src/common/utils
+          ${CMAKE_SOURCE_DIR}/src/common/marlin_server_types
           ${CMAKE_SOURCE_DIR}/src/persistent_stores
           ${CMAKE_SOURCE_DIR}/lib/jsmn
           ${CMAKE_SOURCE_DIR}/lib/WUI
@@ -99,7 +103,7 @@ target_include_directories(
           ${CMAKE_SOURCE_DIR}/lib/libbgcode/src/LibBGCode
           ${CMAKE_BINARY_DIR}/lib/libbgcode/src/
   )
-target_link_libraries(connect_tests mbedTLS bgcode_core)
+target_link_libraries(connect_tests mbedTLS bgcode_core SG14 freertos_tests)
 
 file(GLOB AUTOMATA_GENERATORS ${PROJECT_ROOT_DIR}/utils/gen-automata/*.py)
 
@@ -123,9 +127,11 @@ add_executable(
   ${CMAKE_CURRENT_BINARY_DIR}/http_resp_automaton.cpp
   ${CMAKE_SOURCE_DIR}/src/common/automata/core.cpp
   ${CMAKE_SOURCE_DIR}/src/common/crc32.cpp
+  ${CMAKE_SOURCE_DIR}/src/common/error_code_mangle.cpp
   ${CMAKE_SOURCE_DIR}/src/common/json_encode.cpp
   ${CMAKE_SOURCE_DIR}/src/common/filepath_operation.cpp
   ${CMAKE_SOURCE_DIR}/src/common/filename_type.cpp
+  ${CMAKE_SOURCE_DIR}/src/common/printer_model.cpp
   ${CMAKE_SOURCE_DIR}/src/common/http/resp_parser.cpp
   ${CMAKE_SOURCE_DIR}/src/common/http/httpc.cpp
   ${CMAKE_SOURCE_DIR}/src/common/http/socket.cpp
@@ -149,7 +155,6 @@ add_executable(
   ${CMAKE_SOURCE_DIR}/src/transfers/transfer_recovery.cpp
   ${CMAKE_SOURCE_DIR}/tests/stubs/jsmn_impl.c
   ${CMAKE_SOURCE_DIR}/tests/stubs/strlcpy.c
-  ${CMAKE_SOURCE_DIR}/tests/stubs/fake_freertos_mutex.cpp
   ${CMAKE_SOURCE_DIR}/tests/stubs/printer_type.cpp
   ${CMAKE_SOURCE_DIR}/tests/unit/mock/bsod.cpp
   ${CMAKE_SOURCE_DIR}/tests/unit/common/printer_state_mock.cpp
@@ -193,6 +198,7 @@ target_include_directories(
           ${CMAKE_SOURCE_DIR}/src/connect
           ${CMAKE_SOURCE_DIR}/src/common
           ${CMAKE_SOURCE_DIR}/src/common/http
+          ${CMAKE_SOURCE_DIR}/src/common/marlin_server_types
           ${CMAKE_SOURCE_DIR}/src/gui
           ${CMAKE_SOURCE_DIR}/src
           ${CMAKE_SOURCE_DIR}/lib/jsmn
@@ -207,6 +213,8 @@ target_include_directories(
   )
 add_dependencies(connect_planner_tests generate-httpc-automata-tests-connect)
 
+target_link_libraries(connect_planner_tests SG14 freertos_tests)
+
 add_executable(
   connect_registration_tests
   ${CMAKE_CURRENT_BINARY_DIR}/http_resp_automaton.cpp
@@ -214,6 +222,7 @@ add_executable(
   ${CMAKE_SOURCE_DIR}/lib/Middlewares/Third_Party/mbedtls/library/aesni.c
   ${CMAKE_SOURCE_DIR}/src/common/automata/core.cpp
   ${CMAKE_SOURCE_DIR}/src/common/crc32.cpp
+  ${CMAKE_SOURCE_DIR}/src/common/error_code_mangle.cpp
   ${CMAKE_SOURCE_DIR}/src/common/http/connection.cpp
   ${CMAKE_SOURCE_DIR}/src/common/http/httpc.cpp
   ${CMAKE_SOURCE_DIR}/src/common/http/resp_parser.cpp
@@ -222,6 +231,7 @@ add_executable(
   ${CMAKE_SOURCE_DIR}/src/common/json_encode.cpp
   ${CMAKE_SOURCE_DIR}/src/common/filename_type.cpp
   ${CMAKE_SOURCE_DIR}/src/common/filepath_operation.cpp
+  ${CMAKE_SOURCE_DIR}/src/common/printer_model.cpp
   ${CMAKE_SOURCE_DIR}/src/common/stat_retry.cpp
   ${CMAKE_SOURCE_DIR}/src/common/segmented_json.cpp
   ${CMAKE_SOURCE_DIR}/src/common/random_sw.cpp
@@ -240,7 +250,6 @@ add_executable(
   ${CMAKE_SOURCE_DIR}/src/transfers/transfer.cpp
   ${CMAKE_SOURCE_DIR}/src/transfers/transfer_file_check.cpp
   ${CMAKE_SOURCE_DIR}/src/transfers/transfer_recovery.cpp
-  ${CMAKE_SOURCE_DIR}/tests/stubs/fake_freertos_mutex.cpp
   ${CMAKE_SOURCE_DIR}/tests/stubs/strlcpy.c
   ${CMAKE_SOURCE_DIR}/tests/stubs/printer_type.cpp
   ${CMAKE_SOURCE_DIR}/tests/unit/mock/bsod.cpp
@@ -275,14 +284,15 @@ target_include_directories(
   connect_registration_tests
   PRIVATE .
           ${CMAKE_CURRENT_BINARY_DIR}
+          ${CMAKE_SOURCE_DIR}/tests/stubs
           ${CMAKE_BINARY_DIR}/include
           ${CMAKE_SOURCE_DIR}/include
           ${CMAKE_SOURCE_DIR}/src
           ${CMAKE_SOURCE_DIR}/src/common
           ${CMAKE_SOURCE_DIR}/src/common/http
+          ${CMAKE_SOURCE_DIR}/src/common/marlin_server_types
           ${CMAKE_SOURCE_DIR}/src/gui
           ${CMAKE_SOURCE_DIR}/lib/Middlewares/Third_Party/mbedtls/include
-          ${CMAKE_SOURCE_DIR}/tests/stubs
           ${CMAKE_SOURCE_DIR}/include/usb_host
           ${CMAKE_SOURCE_DIR}/lib/WUI
           ${CMAKE_SOURCE_DIR}/lib/Middlewares/Third_Party/mbedtls/include
@@ -292,6 +302,7 @@ target_include_directories(
           ${CMAKE_BINARY_DIR}/lib/libbgcode/src/
   )
 add_dependencies(connect_registration_tests generate-httpc-automata-tests-connect)
+target_link_libraries(connect_registration_tests SG14 freertos_tests)
 
 add_catch_test(connect_tests)
 add_catch_test(connect_planner_tests)

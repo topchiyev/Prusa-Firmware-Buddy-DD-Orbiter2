@@ -14,6 +14,8 @@ target_include_directories(
          ${CMAKE_SOURCE_DIR}/src/lang
          ${CMAKE_SOURCE_DIR}/src/common
          ${CMAKE_SOURCE_DIR}/src/common/utils
+         ${CMAKE_SOURCE_DIR}/src/common/marlin_server_types
+         ${CMAKE_SOURCE_DIR}/src/common/fanctl
          ${CMAKE_SOURCE_DIR}/src/gui
          ${CMAKE_SOURCE_DIR}/src/guiconfig
          ${CMAKE_BINARY_DIR}/tests/unit
@@ -28,6 +30,8 @@ target_include_directories(
 
 # define custom macros
 target_compile_definitions(language_eeprom_tests PUBLIC LANGEEPROM_UNITTEST)
+
+target_link_libraries(language_eeprom_tests SG14 freertos_tests)
 
 # tell build system about the test case
 add_catch_test(language_eeprom_tests)

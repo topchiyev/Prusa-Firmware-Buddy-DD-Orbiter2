@@ -12,8 +12,9 @@
 #include "gpio.h"
 #include <stdlib.h>
 #include <random.h>
+#include <algorithm>
 
-#if (BOARD_IS_XBUDDY)
+#if (BOARD_IS_XBUDDY())
     #include "hw_configuration.hpp"
 #endif
 
@@ -41,7 +42,7 @@ int8_t CFanCtlPWM::tick() {
     if (pwm_on >= val) {
         pwm_on -= max_value;
     }
-    bool o = (cnt >= pha) && (cnt < (pha + val));
+    const bool o = (cnt >= pha) && (cnt < (pha + val));
     if (++cnt >= max_value) {
         cnt = 0;
         if (val != pwm) { // pwm changed
@@ -57,9 +58,7 @@ int8_t CFanCtlPWM::tick() {
             } else {
                 pha_stp = 0; // set step to zero - disable phase shifting
             }
-        }
-#if 1
-        else if (pha_stp) // pha_stp != 0 means phase shifting enabled
+        } else if (pha_stp) { // pha_stp != 0 means phase shifting enabled
             switch (pha_mode) {
             case none:
                 pha = 0;
@@ -78,9 +77,9 @@ int8_t CFanCtlPWM::tick() {
                 pha = pha_max * rand_f_from_u(rand_u_sw());
                 break;
             }
-#endif
+        }
     }
-#if (BOARD_IS_XBUDDY)
+#if (BOARD_IS_XBUDDY())
     // set output pin
     if (buddy::hw::Configuration::Instance().has_inverted_fans()) {
         m_pin.write(static_cast<Pin::State>(!o));
@@ -94,18 +93,12 @@ int8_t CFanCtlPWM::tick() {
 }
 
 void CFanCtlPWM::set_PWM(uint8_t new_pwm) {
-    if (new_pwm > max_value) {
-        new_pwm = max_value;
-    }
-    if (new_pwm && (new_pwm < min_value)) {
-        new_pwm = min_value;
-    }
-    pwm = new_pwm;
+    pwm = (new_pwm > 0) ? std::clamp(new_pwm, min_value, max_value) : 0;
 }
 
 void CFanCtlPWM::safeState() {
     set_PWM(max_value);
-#if (BOARD_IS_XBUDDY)
+#if (BOARD_IS_XBUDDY())
     if (buddy::hw::Configuration::Instance().has_inverted_fans()) {
         m_pin.write(Pin::State::low);
     } else {
@@ -159,10 +152,11 @@ bool CFanCtlTach::tick(int8_t pwm_on) {
 // CFanCtl3Wire implementation
 
 CFanCtl3Wire::CFanCtl3Wire(const OutputPin &pinOut, const InputPin &pinTach,
-    uint8_t minPWM, uint8_t maxPWM, uint16_t minRPM, uint16_t maxRPM, uint8_t thrPWM, is_autofan_t autofan, skip_tacho_t skip_tacho)
+    uint8_t minPWM, uint8_t maxPWM, uint16_t minRPM, uint16_t maxRPM, uint8_t thrPWM, is_autofan_t autofan, skip_tacho_t skip_tacho, uint8_t min_pwm_to_measure_rpm)
     : CFanCtlCommon(minRPM, maxRPM)
     , m_State(idle)
     , m_PWMValue(0)
+    , min_pwm_to_measure_rpm(min_pwm_to_measure_rpm)
     , is_autofan(autofan)
     , m_pwm(pinOut, minPWM, maxPWM, thrPWM)
     , m_tach(pinTach)
@@ -174,7 +168,7 @@ void CFanCtl3Wire::tick() {
     // PWM control
     int8_t pwm_on = m_pwm.tick();
     // RPM measurement
-    bool edge = 0;
+    bool edge = false;
 
     if (m_skip_tacho != skip_tacho_t::yes) {
         edge = m_tach.tick(pwm_on);
@@ -268,11 +262,11 @@ bool CFanCtl3Wire::selftestSetPWM(uint8_t pwm) {
     return true;
 }
 
-bool CFanCtl3Wire::setPhaseShiftMode(uint8_t psm) {
+bool CFanCtl3Wire::setPhaseShiftMode(CFanCtlPWM::PhaseShiftMode psm) {
     if (selftest_mode) {
         return false;
     }
-    m_pwm.set_PhaseShiftMode((CFanCtlPWM::PhaseShiftMode)psm);
+    m_pwm.set_PhaseShiftMode(psm);
     return true;
 }
 
@@ -283,7 +277,7 @@ void CFanCtl3Wire::safeState() {
 }
 
 bool CFanCtl3Wire::getRPMIsOk() {
-    if (m_PWMValue && (getActualRPM() < min_rpm)) {
+    if (m_PWMValue > min_pwm_to_measure_rpm && (getActualRPM() < min_rpm)) {
         return false;
     }
     return true;

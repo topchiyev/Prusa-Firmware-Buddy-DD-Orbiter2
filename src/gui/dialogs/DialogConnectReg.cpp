@@ -6,6 +6,7 @@
 #include <find_error.hpp>
 #include <connect/connect.hpp>
 #include <guiconfig/guiconfig.h>
+#include <str_utils.hpp>
 
 using connect_client::ConnectionStatus;
 using connect_client::OnlineStatus;
@@ -17,15 +18,14 @@ const PhaseResponses dlg_responses = { Response::Continue, Response::_none, Resp
 // TODO: How does this thing get translated/marked for translation?
 const PhaseTexts dlg_texts = { { N_("Leave") } };
 
-const constexpr size_t max_url_len = 128;
-
 } // namespace
 
 DialogConnectRegister::DialogConnectRegister()
-    : AddSuperWindow<IDialog>(WizardDefaults::RectSelftestFrame)
+    : IDialog(WizardDefaults::RectSelftestFrame)
     , header(this, _(headerLabel))
     , icon_phone(this, Positioner::phoneIconRect(), &img::hand_qr_59x72)
-    , qr(this, Positioner::qrcodeRect(), "")
+    , qr_registration_code(this, Positioner::qrcodeRect(), Align_t::Center())
+    , qr_error(this, Positioner::qrcodeRect(), ErrCode::ERR_CONNECT_CONNECT_REGISTRATION_FAILED)
     , title(this, Positioner::textRectTitle(), is_multiline::no)
     , line(this, Positioner::lineRect())
     , text_state(this, Positioner::textRectState(), is_multiline::yes)
@@ -42,17 +42,13 @@ DialogConnectRegister::DialogConnectRegister()
 
     last_seen_status = std::make_tuple(connect_client::ConnectionStatus::Unknown, connect_client::OnlineError::NoError, std::nullopt);
 
-    text_state.SetText(_("Acquiring registration code, please wait..."));
-
-    char help_buff[20] = { 0 };
-    _(attemptTxt).copyToRAM(help_buff, sizeof(help_buff)); // Translation
-    snprintf(attempt_buffer, sizeof(attempt_buffer), "%s %d/%d", help_buff, 1, connect_client::Registrator::starting_retries);
-    text_attempt.SetText(string_view_utf8::MakeRAM((const uint8_t *)attempt_buffer));
-    text_attempt.Invalidate();
+    text_state.SetText(_("Registering the printer to Prusa Connect..."));
+    text_attempt.Hide();
 
     // Show these only after we get the code.
     qr_rect = false;
-    qr.Hide();
+    qr_registration_code.Hide();
+    qr_error.Hide();
     icon_phone.Hide();
 
     connect_client::request_registration();
@@ -70,7 +66,7 @@ void DialogConnectRegister::Show() {
     Screens::Access()->gui_loop_until_dialog_closed();
 }
 
-void DialogConnectRegister::windowEvent(EventLock, window_t *sender, GUI_event_t event, void *param) {
+void DialogConnectRegister::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     if (event_in_progress) {
         return;
     }
@@ -105,7 +101,7 @@ void DialogConnectRegister::windowEvent(EventLock, window_t *sender, GUI_event_t
             switch (get<0>(last_seen_status)) {
             case ConnectionStatus::RegistrationCode: {
                 const char *code = connect_client::registration_code();
-                char url_buffer[max_url_len + 1];
+
                 // Note: the URL hardcoded for production instance. This is
                 // because the hostname for the printer is different from the
                 // hostname for the user (because of certificates...)
@@ -113,23 +109,27 @@ void DialogConnectRegister::windowEvent(EventLock, window_t *sender, GUI_event_t
                 // In case the user is not using the production instance, they
                 // already need the ini file to override the hostname and
                 // therefore the wizard is of little use to them.
-                showQR();
-                snprintf(url_buffer, sizeof url_buffer, "https://connect.prusa3d.com/add/%s", code);
-                qr.SetText(url_buffer);
-                // The MakeRAM doesn't copy it, it just passes the pointer
-                // through and assumes the data live for long enough.
-                //
-                // This is OK here, as the registration_code is stable and not
-                // changing until we leave the registration, which we do in our
-                // destructor.
-                text_detail.SetText(string_view_utf8::MakeRAM(reinterpret_cast<const uint8_t *>(code)));
 
-#ifdef USE_ST7789
-                text_state.SetText(_("Scan QR or visit prusa.io/add, log in and add printer code:"));
-#else /*USE_ST7789*/
-                text_state.SetText(_("1. Scan the QR code or visit prusa.io/add.\n2. Log in.\n3. Add printer with code:\n"));
-#endif /*USE_ST7789*/
+                qr_registration_code.get_string_builder()
+                    .append_string("https://connect.prusa3d.com/add/")
+                    .append_string(code);
+                showQR(qr_registration_code);
+
+                text_detail.SetText(_("Code: %s").formatted(code_params, code));
+#if !HAS_MINI_DISPLAY()
+                Rect16 adjusted_rect = text_detail.GetRect();
+                adjusted_rect += Rect16::Top_t(WizardDefaults::row_h);
+                adjusted_rect -= Rect16::Height_t(WizardDefaults::row_h);
+                text_detail.SetRect(adjusted_rect);
+#endif
+
+#if HAS_MINI_DISPLAY()
+                text_state.SetText(_("Scan the QR code using the Prusa app or camera, or visit prusa.io/add"));
+#else
+                text_state.SetText(_("1. Scan the QR code using the Prusa app or camera, or visit prusa.io/add\n\n2. Log in"));
+#endif
                 break;
+                ;
             }
             case ConnectionStatus::RegistrationDone: {
                 hideDetails();
@@ -169,7 +169,6 @@ void DialogConnectRegister::windowEvent(EventLock, window_t *sender, GUI_event_t
                     err_buffer = "";
                 }
 
-                char url_buffer[15] = { 0 };
                 char error_help_buffer[70];
                 char error_detail_buffer[30];
 
@@ -179,26 +178,24 @@ void DialogConnectRegister::windowEvent(EventLock, window_t *sender, GUI_event_t
                 text_state.SetText(string_view_utf8::MakeRAM((const uint8_t *)error_buffer));
                 text_state.Invalidate();
 
-                snprintf(url_buffer, sizeof(url_buffer), "prusa.io/%d", static_cast<int>(error.err_code));
-                qr.SetText(url_buffer);
-                showQR();
+                showQR(qr_error);
 
-                // Detail uses the same buffer from the start so SetText here is obsolete as it does nothing and the text is changed within memory
                 _(moreDetailTxt).copyToRAM(error_detail_buffer, sizeof(error_detail_buffer)); // Translation
-                snprintf(detail_buffer, sizeof(detail_buffer), "%s:\n%s", error_detail_buffer, url_buffer);
+                snprintf(detail_buffer, sizeof(detail_buffer), "%s:\nprusa.io/%d", error_detail_buffer, static_cast<int>(error.err_code));
                 text_detail.SetText(string_view_utf8::MakeRAM((const uint8_t *)detail_buffer));
                 text_detail.Invalidate();
                 break;
             }
-            default:
-                const auto &retries_count { get<2>(last_seen_status) };
-                if (retries_count.has_value()) {
-                    char help_buff[20] = { 0 };
-                    _(attemptTxt).copyToRAM(help_buff, sizeof(help_buff)); // Translation
-                    if (get<1>(last_seen_status) != connect_client::OnlineError::NoError) {
-                        snprintf(attempt_buffer, sizeof(attempt_buffer), "%s %d/%d", help_buff, (connect_client::Registrator::starting_retries - retries_count.value()), connect_client::Registrator::starting_retries);
-                        text_attempt.Invalidate();
-                    }
+
+            default: {
+                const auto retries_count = get<2>(last_seen_status);
+                const auto retry_ix = retries_count.transform([](auto v) { return connect_client::Registrator::starting_retries - v; }).value_or(0);
+
+                // After a few attempts, show the user that we're retrying
+                if (retry_ix > 1) {
+                    text_attempt.SetText(_("Attempt %d/%d").formatted(attempt_params, retry_ix, connect_client::Registrator::starting_retries));
+                    text_attempt.Invalidate();
+                    text_attempt.Show();
                 }
                 // Some other state:
                 // * Unknown.
@@ -208,23 +205,25 @@ void DialogConnectRegister::windowEvent(EventLock, window_t *sender, GUI_event_t
                 // For these, we just keep the default.
                 break;
             }
+            }
         }
 
         break;
     }
     default:
-        SuperWindowEvent(sender, event, param);
+        IDialog::windowEvent(sender, event, param);
         break;
     }
 }
 
 void DialogConnectRegister::hideDetails() {
-    qr.Hide();
+    qr_registration_code.Hide();
+    qr_error.Hide();
     icon_phone.Hide();
     text_detail.Hide();
 }
 
-void DialogConnectRegister::showQR() {
+void DialogConnectRegister::showQR(window_t &qr) {
     if (!qr_rect) {
         text_state.Hide();
         text_attempt.Hide();
@@ -242,29 +241,29 @@ void DialogConnectRegister::showQR() {
 }
 
 constexpr Rect16 DialogConnectRegister::Positioner::qrcodeRect() {
-#ifndef USE_ST7789
+#if !HAS_MINI_DISPLAY()
     return Rect16 {
         GuiDefaults::ScreenWidth - WizardDefaults::MarginRight - qrcodeWidth,
         WizardDefaults::row_1 + 5, // place qr under title and underlining
         qrcodeWidth,
         qrcodeHeight
     };
-#else /*USE_ST7789*/
+#else
     return Rect16 { 160 - qrcodeWidth / 2, 200 - qrcodeHeight / 2, qrcodeWidth, qrcodeHeight };
-#endif /*USE_ST7789*/
+#endif
 }
 
 constexpr Rect16 DialogConnectRegister::Positioner::phoneIconRect() {
-#ifndef USE_ST7789
+#if !HAS_MINI_DISPLAY()
     return Rect16 {
         qrcodeRect().Left() - phoneWidth,
         (qrcodeRect().Top() + qrcodeRect().Bottom()) / 2 - phoneHeight / 2,
         phoneWidth,
         phoneHeight
     };
-#else /*USE_ST7789*/
+#else
     return Rect16 { 20, 165, phoneWidth, phoneHeight };
-#endif /*USE_ST7789*/
+#endif
 }
 
 /** @param add_top places rect x pixels under @link{WizardDefaults::row_0}
@@ -279,69 +278,69 @@ constexpr Rect16 DialogConnectRegister::Positioner::textRect(int16_t add_top, ui
 
 /** @returns Rect16 for title (prusaConnect)*/
 constexpr Rect16 DialogConnectRegister::Positioner::textRectTitle() {
-#ifndef USE_ST7789
+#if !HAS_MINI_DISPLAY()
     return textRect();
-#else /*USE_ST7789*/
+#else
     return Rect16 {}; // Empty, this is not used
-#endif /*USE_ST7789*/
+#endif
 }
 
 /** @param final if wizard is done and qr code is to be shown
     @returns Rect16 for static state text (wait/done)*/
 constexpr Rect16 DialogConnectRegister::Positioner::textRectState([[maybe_unused]] bool final) {
-#ifndef USE_ST7789
+#if !HAS_MINI_DISPLAY()
     if (final) {
-        return textRect(WizardDefaults::row_h * 2, WizardDefaults::txt_h * 4, phoneIconRect().Left() - WizardDefaults::col_0);
+        return textRect(WizardDefaults::row_h * 2, WizardDefaults::txt_h * 8, phoneIconRect().Left() - WizardDefaults::col_0);
     } else {
         return textRect(WizardDefaults::row_h * 2, WizardDefaults::row_h * 2);
     }
-#else /*USE_ST7789*/
+#else
     return Rect16 { WizardDefaults::col_0, WizardDefaults::row_0, textWidth, WizardDefaults::txt_h * 4 };
-#endif /*USE_ST7789*/
+#endif
 }
 
 /** @returns Rect16 for number of attempts*/
 constexpr Rect16 DialogConnectRegister::Positioner::textRectAttempt([[maybe_unused]] bool final) {
-#ifndef USE_ST7789
+#if !HAS_MINI_DISPLAY()
     if (final) {
         return textRect(textRectState(final).Bottom() - WizardDefaults::row_0, WizardDefaults::row_h, textRectState(final).Width());
     } else {
         return textRect(textRectState().Bottom());
     }
-#else /*USE_ST7789*/
+#else
     return Rect16 {};
-#endif /*USE_ST7789*/
+#endif
 }
 
 /** @param final if wizard is done and qr code is to be shown
     @returns Rect16 for error details or code/help link on final screen*/
 constexpr Rect16 DialogConnectRegister::Positioner::textRectDetail([[maybe_unused]] bool final) {
-#ifndef USE_ST7789
+#if !HAS_MINI_DISPLAY()
     if (final) {
         return textRect(WizardDefaults::RectRadioButton(0).Top() - WizardDefaults::row_0 - WizardDefaults::row_h * 2, WizardDefaults::row_h * 2);
     } else {
         return textRect(WizardDefaults::Y_space - textHeight - WizardDefaults::row_1);
     }
 
-#else /*USE_ST7789*/
+#else
     return Rect16 { WizardDefaults::col_0, WizardDefaults::row_0 + WizardDefaults::txt_h * 4, textWidth, WizardDefaults::txt_h * 2 };
-#endif /*USE_ST7789*/
+#endif
 }
 
 /** @returns Rect16 for underlining title text */
 constexpr Rect16 DialogConnectRegister::Positioner::lineRect() {
-#ifndef USE_ST7789
+#if !HAS_MINI_DISPLAY()
     return Rect16 { WizardDefaults::col_0, WizardDefaults::row_1, textWidth, WizardDefaults::progress_h };
-#else /*USE_ST7789*/
+#else
     return Rect16 {};
-#endif /*USE_ST7789*/
+#endif
 }
 
 /** @returns Rect16 position and size of the link widget */
 constexpr Rect16 DialogConnectRegister::Positioner::codeRect() {
-#ifndef USE_ST7789
+#if !HAS_MINI_DISPLAY()
     return Rect16 { WizardDefaults::col_0, WizardDefaults::Y_space - textHeight, phoneIconRect().Left() - WizardDefaults::col_0, textHeight };
-#else /*USE_ST7789*/
+#else
     return Rect16 { WizardDefaults::col_0, WizardDefaults::row_0 + textLines * WizardDefaults::row_h, textWidth, codeHeight };
-#endif /*USE_ST7789*/
+#endif
 }

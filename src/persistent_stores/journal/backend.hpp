@@ -1,4 +1,5 @@
 #pragma once
+#include <inplace_function.hpp>
 #include <stdint.h>
 #include "crc32.h"
 #include <stdlib.h>
@@ -7,7 +8,7 @@
 #include "st25dv64k.h"
 #include <algorithm>
 #include "bsod.h"
-#include <common/freertos_mutex.hpp>
+#include <freertos/mutex.hpp>
 #include <mutex>
 #include <variant>
 #include "store_item.hpp"
@@ -15,6 +16,8 @@
 #include <memory>
 #include <storage_drivers/storage.hpp>
 #include <assert.h>
+#include <type_traits>
+
 namespace journal {
 
 /**
@@ -79,9 +82,7 @@ public:
         uint32_t sequence_id;
         uint16_t version;
 
-        bool operator==(const BankHeader &other) const {
-            return sequence_id == other.sequence_id && version == other.version;
-        }
+        bool operator==(const BankHeader &) const = default;
     };
     static_assert(sizeof(BankHeader) == 6);
 
@@ -128,19 +129,19 @@ public:
     static constexpr size_t END_ITEM_SIZE_WITH_CRC = ITEM_HEADER_SIZE + CRC_SIZE;
     static constexpr size_t BANK_HEADER_SIZE_WITH_CRC = BANK_HEADER_SIZE + CRC_SIZE;
 
-    using CallbackFunction = std::function<void(ItemHeader, std::array<uint8_t, MAX_ITEM_SIZE> &)>;
+    using CallbackFunction = stdext::inplace_function<void(ItemHeader, std::array<uint8_t, MAX_ITEM_SIZE> &)>;
 
     struct Transaction {
         enum class Type {
-            migration, // bank flipping
+            bank_migration, // bank flipping
             transaction, // writing to normal bank
-            migrating_transaction, // writing to the next bank (needed during migrations from older version)
+            version_migration, // writing to the next bank (needed during migrations from older version)
         };
 
         Backend &backend;
 
         Type type = Type::transaction;
-        Address last_item_address = type == Type::migrating_transaction ? backend.current_next_address : backend.current_address;
+        Address last_item_address = type == Type::version_migration ? backend.current_next_address : backend.current_address;
         CRCType crc = 0;
         CRCType last_item_crc = 0;
         ItemHeader last_item_header = { true, 0, 0 };
@@ -150,7 +151,11 @@ public:
         ~Transaction();
         void calculate_crc(Id id, const std::span<const uint8_t> &data);
         void store_item(Id id, const std::span<const uint8_t> &data);
-        void cancel();
+
+        /// Called if bank migration happens during a transaction – that renders the transaction invalid.
+        /// Throws away the previous transaction data and reinitializes the transaction context, so that the transaction can continue.
+        /// In this case, we lose the atomicity of the transaction.
+        void reinitialize();
     };
 
     /**
@@ -199,16 +204,23 @@ public:
     void override_cold_start_state();
 
     /**
-     * @brief Shorthand meant for migrating functions to easily save data
+     * @brief Shorthand meant for migrating functions to easily save data.
      *
-     * @tparam T
+     * @tparam T - intentionally prevented from being automatically deduced, it has bitten us before - see BFW-5938.
+     * We need precise control over the type of the items that we're saving,
+     * because if the record size does not match the expected value type size of a config store item,
+     * bsods happen (or even worse, they do not happen and the printer just doesn't boot).
+     *
+     * So we're enforcing explicit specification of T to prevent accidental wrong type deductions,
+     * for example "0" being deduced as int, when the record type is uint8_t.
+     *
      * @param hashed_id
      * @param item_to_be_saved
      */
     template <typename T>
-    void save_migration_item(Id hashed_id, const T &item_to_be_saved) {
+    void save_migration_item(Id hashed_id, const std::type_identity_t<T> &item_to_be_saved) {
         static_assert(sizeof(T) <= MAX_ITEM_SIZE, "Trying to save an item too big");
-        assert(transaction.has_value() && transaction->type == Transaction::Type::migrating_transaction); // migrating transaction must be in progress
+        assert(transaction.has_value() && transaction->type == Transaction::Type::version_migration); // migrating transaction must be in progress
 
         std::array<uint8_t, sizeof(T)> buffer;
         memcpy(buffer.data(), &item_to_be_saved, sizeof(T)); // Load the buffer with data
@@ -224,19 +236,19 @@ public:
     void transaction_end();
     using TransactionGuard = TransactionRAII<&Backend::transaction_start, &Backend::transaction_end>;
 
-    void migration_start();
-    void migration_end();
-    using MigrationGuard = TransactionRAII<&Backend::migration_start, &Backend::migration_end>;
-    MigrationGuard migration_guard();
+    void bank_migration_start();
+    void bank_migration_end();
+    using BankMigrationGuard = TransactionRAII<&Backend::bank_migration_start, &Backend::bank_migration_end>;
+    BankMigrationGuard bank_migration_guard();
 
-    void migrating_transaction_start();
-    void migrating_transaction_end();
-    using MigratingTransactionGuard = TransactionRAII<&Backend::migrating_transaction_start, &Backend::migrating_transaction_end>;
-    MigratingTransactionGuard migrating_transaction_guard();
+    void version_migration_start();
+    void version_migration_end();
+    using VersionMigratingTransactionGuard = TransactionRAII<&Backend::version_migration_start, &Backend::version_migration_end>;
+    VersionMigratingTransactionGuard version_migration_guard();
 
     std::optional<Transaction> transaction = std::nullopt;
-    std::optional<Transaction> migration = std::nullopt;
-    Address start_address;
+    std::optional<Transaction> bank_migration = std::nullopt;
+    const Address start_address;
     Offset bank_size;
 
     Address current_address = 0; // current position of the main bank 'end' (where next item will be stored ie without end item transaction)
@@ -250,7 +262,7 @@ public:
      * @return true if found a deprecated item
      */
 
-    bool generate_migration_intermediaries(std::span<const MigrationFunction> migration_functions);
+    bool generate_version_migration_intermediaries(std::span<const MigrationFunction> migration_functions);
 
     /**
      * @brief Finds the oldest index of migration version in the migration_functions span.
@@ -258,18 +270,18 @@ public:
      * @param migration_functions migration versions
      * @return returns min index into migration_functions that has at least one of deprecated_ids found in current bank
      */
-    size_t find_oldest_migration_index(std::span<const MigrationFunction> migration_functions);
+    size_t find_oldest_version_migration_index(std::span<const MigrationFunction> migration_functions);
 
     /**
      * @brief Loads migrated intermediary data from the next bank into RAM mirror
      *
      * @param update_function
      */
-    void load_migrated_data(const UpdateFunction &update_function);
+    void load_version_migrated_data(const UpdateFunction &update_function);
 
     JournalState journal_state = JournalState::ValidStart;
 
-    std::function<void(void)> dump_callback;
+    stdext::inplace_function<void(void)> dump_callback;
     configuration_store::Storage &storage;
 
     freertos::Mutex mutex;
@@ -321,7 +333,7 @@ public:
     [[nodiscard]] Address get_next_bank_start_address() const;
     BankSelector get_next_bank();
 
-    uint16_t write_item(const Address address, const Backend::ItemHeader &, const std::span<const uint8_t> &data, std::optional<CRCType> crc);
+    uint16_t write_item(Address address, Backend::ItemHeader, const std::span<const uint8_t> &data, std::optional<CRCType> crc);
     uint16_t write_end_item(Address address);
     void store_single_item(Id id, const std::span<const uint8_t> &data);
 

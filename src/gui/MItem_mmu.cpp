@@ -2,9 +2,10 @@
 #include "ScreenHandler.hpp"
 #include "screen_messages.hpp"
 #include "marlin_client.hpp"
-#include "menu_spin_config.hpp"
+#include "WindowMenuSpin.hpp"
 #include "window_msgbox.hpp"
 #include "ScreenSelftest.hpp"
+#include <filament_sensors_handler.hpp>
 
 #include "screen_menu_mmu_preload_to_mmu.hpp"
 #include "screen_menu_mmu_load_test_filament.hpp"
@@ -15,6 +16,8 @@
 
 #include <config_store/store_instance.hpp>
 #include <feature/prusa/MMU2/mmu2_mk4.h>
+#include <gui/screen_printer_setup.hpp>
+#include <MItem_tools.hpp>
 
 /**********************************************************************************************/
 // MI_MMU_LOAD_FILAMENT
@@ -180,16 +183,23 @@ static bool flip_mmu_rework([[maybe_unused]] bool flip_mmu_at_the_end) {
     config_store().is_mmu_rework.set(set_mmu_rework);
 
 // The FS is not calibrated on MK3.5
-#if !PRINTER_IS_PRUSA_MK3_5
+#if !PRINTER_IS_PRUSA_MK3_5()
+    const auto fsstate = GetExtruderFSensor(0)->get_state();
     GetExtruderFSensor(0)->SetInvalidateCalibrationFlag();
-    // opens the screen in advance before the screen will be opened by the selftest
-    // this prevents the user to click something before the selftest screen would open
-    Screens::Access()->Open(ScreenFactory::Screen<ScreenSelftest>);
 
-    if (flip_mmu_at_the_end) {
-        marlin_client::test_start(stmFSensor_flip_mmu_at_the_end);
-    } else {
-        marlin_client::test_start(stmFSensor);
+    if (fsstate != FilamentSensorState::NotCalibrated && fsstate != FilamentSensorState::Disabled
+        // Do not open selftest during ScreenPrinterSetup, it would screw things up (and the screen can be opened during the selftest)
+        && !Screens::Access()->IsScreenOpened<ScreenPrinterSetup>() //
+    ) {
+        // opens the screen in advance before the screen will be opened by the selftest
+        // this prevents the user to click something before the selftest screen would open
+        Screens::Access()->Open(ScreenFactory::Screen<ScreenSelftest>);
+
+        if (flip_mmu_at_the_end) {
+            marlin_client::test_start(stmFSensor_flip_mmu_at_the_end);
+        } else {
+            marlin_client::test_start(stmFSensor);
+        }
     }
 #endif
 
@@ -209,7 +219,7 @@ void MI_MMU_ENABLE::OnChange(size_t old_index) {
         // if we are enabling MMU and the MMU Rework option is not enabled, enable it
         flip_mmu_rework(true);
 
-#if PRINTER_IS_PRUSA_MK3_5
+#if PRINTER_IS_PRUSA_MK3_5()
         // On other printers flip_mmu_rework executes FS Calibration, which then enables MMU
         // There is no FS Calibration on MK3.5, so we turn on MMU here instead
         marlin_client::gcode("M709 S1");
@@ -217,7 +227,7 @@ void MI_MMU_ENABLE::OnChange(size_t old_index) {
     } else {
         // logical_sensors.current_extruder is not synchronized, but in this case it it OK
         if (!is_fsensor_working_state(FSensors_instance().sensor_state(LogicalFilamentSensor::current_extruder))) {
-            MsgBoxWarning(_("Can't enable MMU: enable the printer's filament sensor first."), Responses_Ok);
+            MsgBoxWarning(_("Can't enable MMU: calibrate and enable the printer's filament sensor first."), Responses_Ok);
             SetIndex(old_index);
             return;
         }
@@ -286,10 +296,7 @@ MI_INFO_FINDA::MI_INFO_FINDA()
             if (MMU2::mmu2.Enabled()) {
                 // TODO: change of visualization scheme is expected soon, some unification with fsensor visualization will happen as a result.
                 // For now, FINDA is visualized the same way like filament sensors' states
-                static constexpr char inserted[] = N_(" INS / 1");
-                static constexpr char notInserted[] = N_("NINS / 0");
-
-                _(value ? inserted : notInserted).copyToRAM(buffer, GuiDefaults::infoDefaultLen);
+                _(value ? N_(" INS / 1") : N_("NINS / 0")).copyToRAM(buffer, GuiDefaults::infoDefaultLen);
             } // else: when MMU is not active, the MI_INFO_FINDA item is hidden anyway, so no update is really needed
         }) {}
 
@@ -324,7 +331,12 @@ MI_DONE_EXTRUDER_MAINTENANCE::MI_DONE_EXTRUDER_MAINTENANCE()
 }
 
 void MI_DONE_EXTRUDER_MAINTENANCE::click(IWindowMenu &) {
-    if (MsgBoxQuestion(_("Do you want to reset the Nextruder main-plate maintenance reminder?"), Responses_YesNo) == Response::Yes) {
+#if HAS_LOADCELL()
+    static constexpr char const *msg = N_("Do you want to reset the Nextruder main-plate maintenance reminder?");
+#else
+    static constexpr char const *msg = N_("Do you want to reset the extruder maintenance reminder?");
+#endif
+    if (MsgBoxQuestion(_(msg), Responses_YesNo) == Response::Yes) {
         config_store().mmu_last_maintenance.set(config_store().mmu_changes.get());
         config_store().mmu_fail_bucket.set(0);
     }

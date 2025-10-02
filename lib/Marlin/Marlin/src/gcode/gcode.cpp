@@ -81,7 +81,11 @@ uint8_t GcodeSuite::axis_relative = (
 );
 
 #if ENABLED(GCODE_COMPATIBILITY_MK3)
-  GcodeSuite::CompatibilityMode GcodeSuite::compatibility_mode = CompatibilityMode::NONE;
+  GcodeSuite::GcodeCompatibilityMode GcodeSuite::gcode_compatibility_mode = GcodeCompatibilityMode::NONE;
+#endif
+
+#if ENABLED(FAN_COMPATIBILITY_MK4_MK3)
+  GcodeSuite::FanCompatibilityMode GcodeSuite::fan_compatibility_mode = FanCompatibilityMode::NONE;
 #endif
 
 #if ENABLED(HOST_KEEPALIVE_FEATURE)
@@ -909,7 +913,6 @@ void GcodeSuite::process_parsed_command(const bool no_ok/*=false*/) {
 
       #if HAS_PHASE_STEPPING()
         case 970: M970(); break;
-        case 971: M971(); break;
         case 972: M972(); break;
         case 973: M973(); break;
         case 974: M974(); break;
@@ -939,10 +942,6 @@ void GcodeSuite::process_parsed_command(const bool no_ok/*=false*/) {
 
     #if EXTRUDERS > 1
       case 'T': T(parser.codenum); break;                           // Tn: Tool Change
-    #endif
-
-    #if ENABLED(REDIRECT_GCODE_SUPPORT)
-      case 'R': R(parser.codenum); break;                           // Rn: Redirect command
     #endif
 
     default:

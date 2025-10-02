@@ -60,6 +60,7 @@ def get_dependency(name):
 
 
 class CaseInsensitiveEnum(Enum):
+
     @classmethod
     def _missing_(cls, name):
         for member in cls:
@@ -97,13 +98,11 @@ class HostTool(CaseInsensitiveEnum):
     """Known host tools."""
 
     png2font = "png2font"
-    bin2cc = "bin2cc"
-    hex2dfu = "hex2dfu"
-    makefsdata = "makefsdata"
     unittests = "unittests"
 
 
 class BuildConfiguration(ABC):
+
     @abstractmethod
     def get_cmake_cache_entries(self) -> List[Tuple[str, str, str]]:
         """Convert the build configuration to CMake cache entries."""
@@ -135,6 +134,7 @@ class BuildLayout(Enum):
 
 
 class FirmwareBuildConfiguration(BuildConfiguration):
+
     def __init__(self,
                  *,
                  preset: Preset,
@@ -144,7 +144,6 @@ class FirmwareBuildConfiguration(BuildConfiguration):
                  toolchain: Optional[Path] = None,
                  generator: str = 'Ninja',
                  generate_dfu: bool = False,
-                 generate_bbf: bool = False,
                  signing_key: Optional[Path] = None,
                  version_suffix: Optional[str] = None,
                  version_suffix_short: Optional[str] = None,
@@ -157,7 +156,6 @@ class FirmwareBuildConfiguration(BuildConfiguration):
         )
         self.generator = generator
         self.generate_dfu = generate_dfu
-        self.generate_bbf = generate_bbf
         self.signing_key = signing_key
         self.version_suffix = version_suffix
         self.version_suffix_short = version_suffix_short
@@ -169,13 +167,12 @@ class FirmwareBuildConfiguration(BuildConfiguration):
             __file__).resolve().parent.parent / 'cmake/GccArmNoneEabi.cmake'
 
     def get_cmake_cache_entries(self):
-        if self.generate_bbf and self.bootloader != Bootloader.NO:
-            generate_bbf = True
-            signing_key_flg = self.signing_key.resolve(
-            ) if self.signing_key else ''
+        # resolve signing key
+        if self.signing_key:
+            signing_key_flg = self.signing_key.resolve()
         else:
-            generate_bbf = False
             signing_key_flg = ''
+
         entries = []
 
         # set ninja executable if used as a generator
@@ -200,7 +197,6 @@ class FirmwareBuildConfiguration(BuildConfiguration):
         # set general entries
         entries.extend([
             ('BOOTLOADER', 'STRING', self.bootloader.value.upper()),
-            ('GENERATE_BBF', 'BOOL', str(generate_bbf).upper()),
             ('GENERATE_DFU', 'BOOL', 'ON' if self.generate_dfu else 'OFF'),
             ('SIGNING_KEY', 'FILEPATH', str(signing_key_flg)),
             ('CMAKE_TOOLCHAIN_FILE', 'FILEPATH', str(self.toolchain)),
@@ -243,6 +239,7 @@ class FirmwareBuildConfiguration(BuildConfiguration):
 
 
 class HostToolBuildConfiguration(BuildConfiguration):
+
     def __init__(self,
                  build_type: BuildType,
                  tool: HostTool,
@@ -342,7 +339,7 @@ def build(configuration: BuildConfiguration,
         build_returncode = build_process.returncode
         products.extend(build_dir / fname for fname in [
             'firmware', 'firmware.bin', 'firmware.bbf', 'firmware.dfu',
-            'firmware.map', 'firmware_update_pre_4.4.bbf'
+            'firmware.map'
         ] if (build_dir / fname).exists())
     else:
         build_returncode = None
@@ -361,6 +358,7 @@ def build(configuration: BuildConfiguration,
 
 
 class CProjectGenerator:
+
     @staticmethod
     def create_cmake_def(name, value_type, value) -> ET.Element:
         definition = ET.Element('def')
@@ -419,9 +417,9 @@ class CProjectGenerator:
         return result
 
     @staticmethod
-    def generate_cconfiguration(template: ET.Element,
-                                configuration: BuildConfiguration
-                                ) -> ET.Element:
+    def generate_cconfiguration(
+            template: ET.Element,
+            configuration: BuildConfiguration) -> ET.Element:
         get_element = CProjectGenerator.get_element
         cconfiguration = deepcopy(template)
         cache_entries = configuration.get_cmake_cache_entries()
@@ -500,6 +498,7 @@ class CProjectGenerator:
 
 
 class CMakePresetsGenerator:
+
     @staticmethod
     def normalize_cache_value(value, value_type):
         if value_type.lower() == 'filepath' and value:
@@ -571,8 +570,6 @@ def store_products(products: List[Path], build_config: BuildConfiguration,
     products_dir.mkdir(parents=True, exist_ok=True)
     for product in products:
         base_name = build_config.name.lower()
-        if 'firmware_update' in product.name:
-            base_name += '_update_pre_4.4'
         if isinstance(build_config, FirmwareBuildConfiguration
                       ) and build_config.version_suffix != '<auto>':
             version = project_version()
@@ -678,12 +675,6 @@ def main():
         type=Path,
         help='Path to a CMake toolchain file to be used.')
     parser.add_argument(
-        '--generate-bbf',
-        action='store_true',
-        help=('Generate .bbf versions of the firmware.'
-              ' Use --signing-key to specify a private key to be used for signing.')
-    )
-    parser.add_argument(
         '--generate-dfu',
         action='store_true',
         help='Generate .dfu versions of the firmware.'
@@ -708,6 +699,11 @@ def main():
         '--no-build',
         action='store_true',
         help='Do not build, configure the build only.'
+    )
+    parser.add_argument(
+        '--skip-bootstrap',
+        action='store_true',
+        help='Skip bootstrap, useful if dependencies are already installed.'
     )
     parser.add_argument(
         '--no-store-output',
@@ -762,7 +758,6 @@ def main():
             build_type=build_type,
             build_layout=build_layout,
             generate_dfu=args.generate_dfu,
-            generate_bbf=args.generate_bbf,
             signing_key=args.signing_key,
             version_suffix=args.version_suffix,
             version_suffix_short=args.version_suffix_short,
@@ -789,8 +784,9 @@ def main():
         CMakePresetsGenerator.generate(configurations)
         sys.exit(0)
 
-    # check all dependencis are installed
-    bootstrap.bootstrap()
+    if not args.skip_bootstrap:
+        # check all dependencis are installed
+        bootstrap.bootstrap()
 
     # build everything
     results: Dict[BuildConfiguration, BuildResult] = dict()

@@ -38,11 +38,6 @@
 
 #include "metric.h"
 
-#ifdef MINDA_BROKEN_CABLE_DETECTION
-#include "minda_broken_cable_detection.h"
-#else
-static inline void MINDA_BROKEN_CABLE_DETECTION__POST_ZHOME_0(){}
-#endif
 #include "homing_reporter.hpp"
 
 #if IS_SCARA
@@ -95,9 +90,11 @@ static inline void MINDA_BROKEN_CABLE_DETECTION__POST_ZHOME_0(){}
 
 #include <config_store/store_c_api.h>  // for has_inverted_axis
 
-#if !(BOARD_IS_DWARF)
+#if !(BOARD_IS_DWARF())
 #include "configuration.hpp"
 #endif
+
+#include <option/has_nozzle_cleaner.h>
 
 #define XYZ_CONSTS(T, NAME, OPT) const PROGMEM XYZval<T> NAME##_P = { X_##OPT, Y_##OPT, Z_##OPT }
 
@@ -518,8 +515,20 @@ void do_blocking_move_to_xy_z(const xy_pos_t &raw, const float &z, const feedRat
   do_blocking_move_to(raw.x, raw.y, z, fr_mm_s);
 }
 
+void do_blocking_move_around_nozzle_cleaner_to_xy(const xy_pos_t& destination, const feedRate_t& feedrate) {
+  #if !HAS_NOZZLE_CLEANER()
+    do_blocking_move_to_xy(destination, feedrate);
+  #elif AVOID_NOZZLE_CLEANER_Y_FIRST
+    do_blocking_move_to_y(destination.y, feedrate);
+    do_blocking_move_to_x(destination.x, feedrate);
+  #else
+    do_blocking_move_to_x(destination.x, feedrate);
+    do_blocking_move_to_y(destination.y, feedrate);
+  #endif
+}
+
 #if HAS_Z_AXIS
-  void do_z_clearance(const_float_t zclear, const bool lower_allowed/*=false*/) {
+  uint8_t do_z_clearance(const_float_t zclear, const bool lower_allowed/*=false*/) {
     float zdest = zclear;
     if (!lower_allowed) NOLESS(zdest, current_position.z);
     NOMORE(zdest, Z_MAX_POS);
@@ -533,14 +542,18 @@ void do_blocking_move_to_xy_z(const xy_pos_t &raw, const float &z, const feedRat
 
       const auto distance = zdest - current_position.z;
       current_position.z = zdest;
-      do_homing_move(Z_AXIS, distance); // Move as a homing move to stop if we reach endstop
+      const auto trigger_state = do_homing_move(Z_AXIS, distance); // Move as a homing move to stop if we reach endstop
       sync_plan_position();
 
       if (!endstop_enabled) {
         endstops.not_homing(); // Reset endstops only if they weren't enabled before
       }
       restore_feedrate_and_scaling();
+
+      return trigger_state;
     }
+
+    return 0;
   }
 #endif
 
@@ -1040,16 +1053,18 @@ void restore_feedrate_and_scaling() {
 #endif // DUAL_X_CARRIAGE
 
 void plan_move_by(const feedRate_t fr, const float dx, const float dy, const float dz, const float de){
-  /// save default value
-  feedRate_t dfr = feedrate_mm_s;
-  destination.x = current_position.x + dx;
-  destination.y = current_position.y + dy;
-  destination.z = current_position.z + dz;
-  destination.e = current_position.e + de;
-  feedrate_mm_s = fr;
-  prepare_move_to_destination();
-  /// restore default
-  feedrate_mm_s = dfr;
+  current_position.x += dx;
+  current_position.y += dy;
+  current_position.z += dz;
+  current_position.e += de;
+
+  // Machine position could be different to current_position thanks to MBL - adjust both positions separately
+  auto target = planner.get_machine_position_mm();
+  target.x += dx;
+  target.y += dy;
+  target.z += dz;
+  target.e += de;
+  planner.buffer_segment(target, fr);
 }
 
 /**
@@ -1126,11 +1141,7 @@ uint8_t axes_need_homing(uint8_t axis_bits/*=0x07*/) {
   #else
     #define HOMED_FLAGS axis_homed
   #endif
-  // Clear test bits that are homed
-  if (TEST(axis_bits, X_AXIS) && TEST(HOMED_FLAGS, X_AXIS)) CBI(axis_bits, X_AXIS);
-  if (TEST(axis_bits, Y_AXIS) && TEST(HOMED_FLAGS, Y_AXIS)) CBI(axis_bits, Y_AXIS);
-  if (TEST(axis_bits, Z_AXIS) && TEST(HOMED_FLAGS, Z_AXIS)) CBI(axis_bits, Z_AXIS);
-  return axis_bits;
+  return axis_bits & ~HOMED_FLAGS;
 }
 
 bool axis_unhomed_error(uint8_t axis_bits/*=0x07*/) {
@@ -1889,23 +1900,19 @@ bool homeaxis(const AxisEnum axis, const feedRate_t fr_mm_s, bool invert_home_di
       // check whether we should try again
       if (++attempt >= HOMING_MAX_ATTEMPTS) {
         // not OK run out attempts
-        switch (axis) {
-        case X_AXIS:
-          if (!HomingReporter::block_red_screen()) {
-            homing_failed([]() { fatal_error(ErrCode::ERR_ELECTRO_HOMING_ERROR_X); }, orig_crash);
-          }
-          return false;
-        case Y_AXIS:
-          if (!HomingReporter::block_red_screen()) {
-            homing_failed([]() { fatal_error(ErrCode::ERR_ELECTRO_HOMING_ERROR_Y); }, orig_crash);
-          }
-          return false;
-        default:
-          if (!HomingReporter::block_red_screen()) {
-            homing_failed([]() { fatal_error(ErrCode::ERR_ELECTRO_HOMING_ERROR_Z); }, orig_crash, true);
-          }
-          return false;
+        set_axis_is_not_at_home(axis);
+        
+        if (!HomingReporter::block_red_screen()) {
+          static constexpr std::array error_codes {
+            ErrCode::ERR_ELECTRO_HOMING_ERROR_X,
+            ErrCode::ERR_ELECTRO_HOMING_ERROR_Y,
+            ErrCode::ERR_ELECTRO_HOMING_ERROR_Z
+          };
+
+          homing_failed([code = error_codes[std::min(static_cast<size_t>(axis), error_codes.size() - 1)]]() { fatal_error(code); }, orig_crash, axis == Z_AXIS);
         }
+
+        return false;
       }
 
       if((axis == X_AXIS || axis == Y_AXIS) && !invert_home_dir){
@@ -2032,8 +2039,6 @@ float homeaxis_single_run(const AxisEnum axis, const int axis_home_dir, const fe
         return NAN; // Intermediate DEPLOY (in LOW SPEED MODE)
       }
     #endif
-
-    MINDA_BROKEN_CABLE_DETECTION__POST_ZHOME_0();
 
     #if HOMING_Z_WITH_PROBE
     if (axis == Z_AXIS) {

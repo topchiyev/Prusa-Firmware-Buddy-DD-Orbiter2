@@ -1,4 +1,4 @@
 #include "ScreenFactory.hpp"
 #include "i18n.h"
 
-ScreenFactory::mem_space ScreenFactory::all_screens;
+alignas(std::max_align_t) ScreenFactory::Storage ScreenFactory::storage;

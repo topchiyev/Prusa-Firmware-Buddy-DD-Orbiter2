@@ -75,12 +75,6 @@
   #define IS_U8GLIB_SSD1306
   #define IS_ULTIPANEL
 
-#elif ENABLED(RA_CONTROL_PANEL)
-
-  #define LCD_I2C_TYPE_PCA8574
-  #define LCD_I2C_ADDRESS 0x27   // I2C Address of the port expander
-  #define IS_ULTIPANEL
-
 #elif ENABLED(REPRAPWORLD_GRAPHICAL_LCD)
 
   #define DOGLCD
@@ -344,12 +338,6 @@
   #ifndef REPRAPWORLD_KEYPAD_MOVE_STEP
     #define REPRAPWORLD_KEYPAD_MOVE_STEP 1.0
   #endif
-#endif
-
-// Extensible UI serial touch screens. (See src/lcd/extensible_ui)
-#if ANY(MALYAN_LCD, DGUS_LCD, LULZBOT_TOUCH_UI)
-  #define IS_EXTUI
-  #define EXTENSIBLE_UI
 #endif
 
 // Aliases for LCD features

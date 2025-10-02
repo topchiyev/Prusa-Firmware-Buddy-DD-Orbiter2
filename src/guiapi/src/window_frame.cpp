@@ -2,11 +2,11 @@
 #include "window_frame.hpp"
 #include "gui_invalidate.hpp"
 #include "sound.hpp"
-#include "display.h"
+#include "display.hpp"
 #include "marlin_client.hpp"
 
 window_frame_t::window_frame_t(window_t *parent, Rect16 rect, win_type_t type, is_closed_on_timeout_t timeout, is_closed_on_printing_t close_on_print)
-    : AddSuperWindow<window_t>(parent, rect, type)
+    : window_t(parent, rect, type)
     , captured_normal_window(nullptr)
     , first_normal(nullptr)
     , last_normal(nullptr) {
@@ -136,6 +136,10 @@ void window_frame_t::unregisterAnySubWin(window_t &win, CompactRAMPointer<window
         return;
     }
 
+    if (captured_normal_window == &win) {
+        ReleaseCaptureOfNormalWindow();
+    }
+
     Rect16 inv_rect = win.GetRect();
     bool clr_begin_end = (&win == pFirst && pFirst == pLast);
 
@@ -189,7 +193,7 @@ void window_frame_t::draw() {
     } else {
         // invalid_area must be drawn before subwins
         if (!invalid_area.IsEmpty()) {
-            display::FillRect(invalid_area, GetBackColor());
+            display::fill_rect(invalid_area, GetBackColor());
         }
     }
 
@@ -215,7 +219,7 @@ void window_frame_t::draw() {
     invalid_area = Rect16(); // clear invalid_area
 }
 
-void window_frame_t::windowEvent(EventLock /*has private ctor*/, [[maybe_unused]] window_t *sender, GUI_event_t event, void *param) {
+void window_frame_t::windowEvent([[maybe_unused]] window_t *sender, GUI_event_t event, void *param) {
     intptr_t dif = (intptr_t)param;
     window_t *pWin = GetFocusedWindow();
     if (!pWin || !pWin->IsChildOf(this)) {
@@ -223,6 +227,12 @@ void window_frame_t::windowEvent(EventLock /*has private ctor*/, [[maybe_unused]
     }
 
     switch (event) {
+
+    case GUI_event_t::CHILD_CLICK:
+        if (auto p = GetParent()) {
+            p->WindowEvent(sender, event, param);
+        }
+        break;
 
     case GUI_event_t::CLICK:
         if (pWin) {
@@ -236,16 +246,7 @@ void window_frame_t::windowEvent(EventLock /*has private ctor*/, [[maybe_unused]
 
     case GUI_event_t::TOUCH_CLICK:
         if (pWin) { // check if a window has focus, to not give it if it does not
-            pWin = GetFirstEnabledSubWin();
-            event_conversion_union un;
-            un.pvoid = param;
-            while (pWin) {
-                Rect16 rc = pWin->get_rect_for_touch();
-                if (rc.Contain(un.point)) {
-                    break; // found it
-                }
-                pWin = GetNextEnabledSubWin(pWin);
-            }
+            pWin = get_child_by_touch_point(event_conversion_union { .pvoid = param }.point);
         }
         if (pWin) {
             pWin->SetFocus();
@@ -468,6 +469,15 @@ window_t *window_frame_t::GetFirstEnabledSubWin(Rect16 intersection_rect) const 
     return GetNextEnabledSubWin(first_normal, intersection_rect);
 }
 
+window_t *window_frame_t::get_child_by_touch_point(point_ui16_t point) {
+    for (window_t *r = GetFirstEnabledSubWin(); r; r = GetNextEnabledSubWin(r)) {
+        if (r->get_rect_for_touch().Contain(point)) {
+            return r;
+        }
+    }
+    return nullptr;
+}
+
 Rect16 window_frame_t::GenerateRect(ShiftDir_t direction, size_ui16_t sz, uint16_t distance) {
     if (!last_normal) {
         return Rect16();
@@ -496,7 +506,7 @@ void window_frame_t::Shift(ShiftDir_t direction, uint16_t distance) {
         pWin = GetNextSubWin(pWin);
     }
 
-    super::Shift(direction, distance);
+    window_t::Shift(direction, distance);
 }
 
 void window_frame_t::ChildVisibilityChanged(window_t &child) {
@@ -559,7 +569,7 @@ void window_frame_t::RecursiveCall(mem_fnc fnc) {
 }
 
 void window_frame_t::set_layout(ColorLayout lt) {
-    super::set_layout(lt);
+    window_t::set_layout(lt);
     switch (lt) {
 
     case ColorLayout::red:

@@ -6,7 +6,6 @@
 #include "sys.h"
 #include "shared_config.h"
 #include "support_utils.h"
-#include "display.h"
 #include "string.h"
 #include "version.h"
 #include "language_eeprom.hpp"
@@ -19,19 +18,6 @@
 #include "data_exchange.hpp"
 
 #include <option/bootloader.h>
-
-static constexpr char ERROR_URL_PREFIX[] = "https://prusa.io";
-
-/// FIXME same code in support_utils_lib
-/// but linker cannot find it
-char *eofstr(char *str) {
-    return (str + strlen(str));
-}
-
-void append_crc(char *str, const uint32_t str_size) {
-    uint32_t crc = crc32_calc((uint8_t *)(str + sizeof(ERROR_URL_PREFIX) - 1), strlen(str) - sizeof(ERROR_URL_PREFIX) + 1);
-    snprintf(eofstr(str), str_size - strlen(str), "/%08lX", crc);
-}
 
 void printerHash(char *str, size_t size, bool state_prefix) {
     serial_nr_t serial_nr;
@@ -85,56 +71,6 @@ void printerCode(char *str) {
     printerHash(str, PRINTER_CODE_SIZE, true);
 
     str[PRINTER_CODE_SIZE] = '\0';
-}
-
-/// Adds "/en" or other language abbreviation
-void addLanguage(char *str, const uint32_t str_size) {
-    char lang[3];
-    const uint16_t langNum = LangEEPROM::getInstance().getLanguage();
-    uint16_t *langP = (uint16_t *)lang;
-    *langP = langNum;
-    // uint16_t *(lang) = langNum;
-    // lang[0] = langNum / 256;
-    // lang[1] = langNum % 256;
-    lang[2] = '\0';
-    snprintf(eofstr(str), str_size - strlen(str), "/%s", lang);
-}
-
-void error_url_long(char *str, const uint32_t str_size, const int error_code) {
-    /// FIXME remove eofstr & strlen
-
-    /// fixed prefix
-    strlcpy(str, ERROR_URL_PREFIX, str_size);
-
-    // Website prusa.io doesn't require language specification
-
-    /// error code
-    snprintf(eofstr(str), str_size - strlen(str), "/%05d", error_code);
-
-    /// printer code
-    snprintf(eofstr(str), str_size - strlen(str), "/");
-    if (str_size - strlen(str) > 8) {
-        printerCode(eofstr(str));
-    }
-
-    /// FW version
-    char version_buffer[8] {};
-    fill_project_version_no_dots(version_buffer, sizeof(version_buffer));
-    snprintf(eofstr(str), str_size - strlen(str), "/%s", version_buffer);
-
-    // snprintf(eofstr(str), str_size - strlen(str), "/%08lX%08lX%08lX", *(uint32_t *)(OTP_STM32_UUID_ADDR), *(uint32_t *)(OTP_STM32_UUID_ADDR + sizeof(uint32_t)), *(uint32_t *)(OTP_STM32_UUID_ADDR + 2 * sizeof(uint32_t)));
-    // snprintf(eofstr(str), str_size - strlen(str), "/%s", ((ram_data_exchange.model_specific_flags && APPENDIX_FLAG_MASK) ? "U" : "L"));
-    // append_crc(str, str_size);
-}
-
-void error_url_short(char *str, const uint32_t str_size, const int error_code) {
-    /// help....com/
-    strlcpy(str, ERROR_URL_PREFIX, str_size);
-
-    // Website prusa.io doesn't require language specification
-
-    /// /12201
-    snprintf(eofstr(str), str_size - strlen(str), "/%05d", error_code);
 }
 
 bool appendix_exist() {

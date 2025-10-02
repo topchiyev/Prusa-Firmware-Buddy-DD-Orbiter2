@@ -49,7 +49,7 @@ void StartMeasurementTask([[maybe_unused]] void const *argument) {
     uint32_t next_sg_cycle = ticks_ms();
 
     tmc_set_sg_mask(
-#if PRINTER_IS_PRUSA_MINI
+#if PRINTER_IS_PRUSA_MINI()
         0 // disable sampling on mini
 #else
         0x07 // XYZ
@@ -69,7 +69,7 @@ void StartMeasurementTask([[maybe_unused]] void const *argument) {
         // sample stallguard
         if (checkTimestampsAscendingOrder(next_sg_cycle, now)) {
 #if HAS_PHASE_STEPPING() && !HAS_BURST_STEPPING()
-            if (!phase_stepping::any_axis_active()) {
+            if (!phase_stepping::any_axis_enabled()) {
 #endif
                 uint8_t updated_axes = tmc_sample();
                 record_trinamic_metrics(updated_axes);

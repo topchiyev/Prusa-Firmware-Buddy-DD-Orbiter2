@@ -6,7 +6,7 @@
 #include <variant>
 #include "led_types.h"
 #include <mutex>
-#include <common/freertos_mutex.hpp>
+#include <freertos/mutex.hpp>
 #include <gui/led_animations/animation_model.hpp>
 
 namespace leds {
@@ -52,14 +52,14 @@ private:
 
     void reload() {
         std::lock_guard lock(mutex);
-        PrinterState state = leds::mpsToAnimationState(marlin_vars()->print_state);
+        PrinterState state = leds::mpsToAnimationState(marlin_vars().print_state);
         oldState = state;
         changeAnimation(state);
     }
     void update() {
         std::lock_guard lock(mutex);
 
-        PrinterState state = leds::mpsToAnimationState(marlin_vars()->print_state);
+        PrinterState state = leds::mpsToAnimationState(marlin_vars().print_state);
         if (state != oldState && !change_animation_on.has_value()) {
             oldState = state;
             changeAnimation(state);

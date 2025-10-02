@@ -3,7 +3,7 @@
  */
 
 #include "screen_menu_experimental_settings.hpp"
-#include "menu_spin_config.hpp"
+#include "WindowMenuSpin.hpp"
 #include "ScreenHandler.hpp"
 #include "window_msgbox.hpp"
 #include "sys.h"
@@ -37,9 +37,9 @@ ScreenMenuExperimentalSettings::ScreenMenuExperimentalSettings()
     : ScreenMenuExperimentalSettings__(_(label))
     , initial(*this) {}
 
-void ScreenMenuExperimentalSettings::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t ev, void *param) {
+void ScreenMenuExperimentalSettings::windowEvent(window_t *sender, GUI_event_t ev, void *param) {
     if (ev != GUI_event_t::CHILD_CLICK) {
-        SuperWindowEvent(sender, ev, param);
+        ScreenMenu::windowEvent(sender, ev, param);
         return;
     }
 
@@ -48,11 +48,11 @@ void ScreenMenuExperimentalSettings::windowEvent(EventLock /*has private ctor*/,
         clicked_return();
         break;
     case ClickCommand::Reset_Z:
-        Item<MI_Z_AXIS_LEN>().SetVal(default_Z_max_pos);
+        Item<MI_Z_AXIS_LEN>().SetVal(DEFAULT_Z_MAX_POS);
         Invalidate();
         break;
     case ClickCommand::Reset_steps:
-        Item<MI_STEPS_PER_UNIT_E>().SetVal(config_store().axis_steps_per_unit_e0.default_val);
+        Item<MI_STEPS_PER_UNIT_E>().SetVal(std::abs(config_store().axis_steps_per_unit_e0.default_val));
         Invalidate();
         break;
     case ClickCommand::Reset_directions:

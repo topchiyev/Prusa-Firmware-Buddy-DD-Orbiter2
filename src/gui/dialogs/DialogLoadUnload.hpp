@@ -10,8 +10,9 @@
 #include "window_icon.hpp"
 #include "window_numb.hpp"
 #include "window_progress.hpp"
-#include "window_qr.hpp"
 #include "window_text.hpp"
+#include <gui/text_error_url.hpp>
+#include <gui/qr.hpp>
 #include <optional>
 
 /**
@@ -20,7 +21,7 @@
  * but MMU red screens are many states masked as single state
  * automatic radio button cannot handle that
  */
-class RadioButtonNotice : public AddSuperWindow<RadioButton> {
+class RadioButtonNotice : public RadioButton {
     PhasesLoadUnload current_phase;
 
 public:
@@ -34,7 +35,7 @@ public:
     void ChangePhase(PhasesLoadUnload phase, PhaseResponses responses);
 
 protected:
-    void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 };
 
 /**
@@ -42,7 +43,7 @@ protected:
  * with MMU support
  * MMU error are handled extra and are red
  */
-class DialogLoadUnload final : public AddSuperWindow<IDialogMarlin> {
+class DialogLoadUnload final : public IDialogMarlin {
 private:
     window_frame_t progress_frame;
     window_text_t title;
@@ -61,7 +62,7 @@ public:
     static constexpr uint8_t MaxErrorCodeDigits = 10;
 
     DialogLoadUnload(fsm::BaseData data);
-    virtual ~DialogLoadUnload() override;
+    ~DialogLoadUnload();
 
     static void phaseAlertSound();
     static void phaseWaitSound();
@@ -90,17 +91,19 @@ private:
 
     window_text_t notice_title;
     window_text_t notice_text;
-    window_text_t notice_link;
+    TextErrorUrlWindow notice_link;
     window_icon_t notice_icon_hand;
     window_icon_t notice_icon_type;
-    window_qr_t notice_qr;
+    QRErrorUrlWindow notice_qr;
     RadioButtonNotice notice_radio_button; // workaround, see RadioButtonNotice comment
 
     window_text_t filament_type_text;
     window_colored_rect filament_color_icon;
 
-    char error_code_str[32 + MaxErrorCodeDigits + 1]; // static text before error code has 32 chars
     LoadUnloadMode mode;
+
+    // Needs to be held in memory because we're rendering the name from it
+    FilamentTypeParameters filament_type_parameters;
 
     static DialogLoadUnload *instance; // needed for sounds
 };

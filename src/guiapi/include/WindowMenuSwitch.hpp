@@ -26,7 +26,7 @@ protected:
 
 public:
     // !!! Call changeExtentionWidth() after the items are initialized in the child
-    IWiSwitch(string_view_utf8 label, const img::Resource *id_icon, is_enabled_t enabled, is_hidden_t hidden);
+    IWiSwitch(const string_view_utf8 &label, const img::Resource *id_icon = nullptr, is_enabled_t enabled = is_enabled_t::yes, is_hidden_t hidden = is_hidden_t::no);
 
     void SetIndex(size_t idx);
 
@@ -48,17 +48,17 @@ protected:
     virtual invalidate_t change(int dif) override;
     virtual void OnChange([[maybe_unused]] size_t old_index) {};
     virtual void click(IWindowMenu &window_menu) final;
-    virtual void touch(IWindowMenu &window_menu, point_ui16_t relative_touch_point) final;
-    virtual void printExtension(Rect16 extension_rect, color_t color_text, color_t color_back, ropfn raster_op) const override;
+    virtual void printExtension(Rect16 extension_rect, Color color_text, Color color_back, ropfn raster_op) const override;
 };
 
 /// IWiSwitch implementation with fixed number of fixed items, stored in a buffer
+/// TODO: Most of the usage can be shifted to a nicer WiEnumSwitch
 template <size_t SZ>
 class WI_SWITCH_t : public IWiSwitch {
 
 public:
     template <class... E>
-    WI_SWITCH_t(size_t index, string_view_utf8 label, const img::Resource *id_icon, is_enabled_t enabled, is_hidden_t hidden, E &&...e)
+    WI_SWITCH_t(size_t index, const string_view_utf8 &label, const img::Resource *id_icon, is_enabled_t enabled, is_hidden_t hidden, E &&...e)
         : IWiSwitch(label, id_icon, enabled, hidden)
         , items_ { std::forward<E>(e)... } //
     {

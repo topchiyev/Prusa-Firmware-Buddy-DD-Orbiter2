@@ -275,8 +275,7 @@
  * M928 - Start SD logging: "M928 filename.gco". Stop with M29. (Requires SDSUPPORT)
  * M958 - Excite harmonic vibration and measure amplitude
  * M959 - Tune input shaper
- * M970 - Enable phase stepping
- * M971 - Disable phase stepping
+ * M970 - Set/enable phase stepping
  * M972 - Read phase stepping lookup table
  * M973 - Write phase stepping lookup table
  * M974 - Measure print head resonances and return raw data
@@ -290,7 +289,6 @@
  *
  * T0-T3 - Select an extruder (tool) by index: "T<n> F<units/min>"
  *
- * R1 - Redirect nested gcode to another machine using uart
  */
 
 #include "../inc/MarlinConfig.h"
@@ -323,7 +321,15 @@ public:
     return TEST(axis_relative, a);
   }
   static inline void set_relative_mode(const bool rel) {
-    axis_relative = rel ? _BV(REL_X) | _BV(REL_Y) | _BV(REL_Z) | _BV(REL_E) : 0;
+    #if ENABLED(GCODE_COMPATIBILITY_MK3)
+        if (gcode_compatibility_mode == GcodeCompatibilityMode::MK3) {
+            axis_relative = rel ? _BV(REL_X) | _BV(REL_Y) | _BV(REL_Z) : 0;
+        } else {
+            axis_relative = rel ? _BV(REL_X) | _BV(REL_Y) | _BV(REL_Z) | _BV(REL_E) : 0;
+        }
+    #else
+        axis_relative = rel ? _BV(REL_X) | _BV(REL_Y) | _BV(REL_Z) | _BV(REL_E) : 0;
+    #endif
   }
   static inline void set_e_relative() {
     CBI(axis_relative, E_MODE_ABS);
@@ -335,11 +341,18 @@ public:
   }
 
   #if ENABLED(GCODE_COMPATIBILITY_MK3)
-    enum class CompatibilityMode {
+    enum class GcodeCompatibilityMode : uint8_t {
       NONE,
       MK3,
     };
-    static CompatibilityMode compatibility_mode;
+    static GcodeCompatibilityMode gcode_compatibility_mode;
+  #endif
+  #if ENABLED(FAN_COMPATIBILITY_MK4_MK3)
+    enum class FanCompatibilityMode : uint8_t {
+        NONE,
+        MK3_TO_MK4_NON_S,
+    };
+    static FanCompatibilityMode fan_compatibility_mode;
   #endif
 
   #if ENABLED(CNC_WORKSPACE_PLANES)
@@ -1015,7 +1028,6 @@ private:
 
 #if HAS_PHASE_STEPPING()
   static void M970();
-  static void M971();
   static void M972();
   static void M973();
   static void M974();
@@ -1038,11 +1050,6 @@ private:
   #if ENABLED(MAX7219_GCODE)
     static void M7219();
   #endif
-
-  #if ENABLED(REDIRECT_GCODE_SUPPORT)
-    static void R(const uint8_t machine_index);
-  #endif
-
 };
 
 extern GcodeSuite gcode;

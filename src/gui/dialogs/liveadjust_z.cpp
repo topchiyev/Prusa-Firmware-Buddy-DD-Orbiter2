@@ -5,19 +5,24 @@
 #include "ScreenHandler.hpp"
 #include <guiconfig/GuiDefaults.hpp>
 #include "marlin_client.hpp"
+#include "display.hpp"
 #include "display_helper.h"
-#include "SteelSheets.hpp"
 #include "img_resources.hpp"
-
+#include <option/has_sheet_profiles.h>
 #include "config_features.h"
 #include "gui_config_printer.hpp"
 #include <guiconfig/guiconfig.h>
+#include <menu_vars.h>
+
+#if HAS_SHEET_PROFILES()
+    #include "SteelSheets.hpp"
+#endif
 
 /*****************************************************************************/
 // WindowScale
 
 WindowScale::WindowScale(window_t *parent, point_i16_t pt)
-    : AddSuperWindow<window_frame_t>(parent, Rect16(pt, 10, 100))
+    : window_frame_t(parent, Rect16(pt, 10, 100))
     , scaleNum0(parent, getNumRect(pt), z_offset_max, "% f")
     , scaleNum1(parent, getNumRect(pt), (z_offset_max + z_offset_min) / 2, "% f")
     , scaleNum2(parent, getNumRect(pt), z_offset_min, "% f") {
@@ -43,8 +48,8 @@ void WindowScale::SetMark(float relative) {
     }
 }
 
-void WindowScale::horizLine(uint16_t width_pad, uint16_t height, color_t color) {
-    display::DrawLine(
+void WindowScale::horizLine(uint16_t width_pad, uint16_t height, Color color) {
+    display::draw_line(
         point_ui16(Left() + width_pad, Top() + height),
         point_ui16(Left() + 10 - width_pad, Top() + height),
         color);
@@ -57,7 +62,7 @@ void WindowScale::unconditionalDraw() {
     }
     mark_old_y = std::nullopt;
     /// vertical line of scale
-    display::DrawLine(point_ui16(Left() + 5, Top()), point_ui16(Left() + 5, Top() + Height()), COLOR_WHITE);
+    display::draw_line(point_ui16(Left() + 5, Top()), point_ui16(Left() + 5, Top() + Height()), COLOR_WHITE);
     /// horizontal lines
     horizLineWhite(0, 0);
     horizLineWhite(2, Height() / 4);
@@ -71,8 +76,8 @@ void WindowScale::unconditionalDraw() {
 // WindowLiveAdjustZ
 
 WindowLiveAdjustZ::WindowLiveAdjustZ(window_t *parent, point_i16_t pt)
-    : AddSuperWindow<window_frame_t>(parent, GuiDefaults::RectScreenBody)
-    , number(this, getNumberRect(pt), marlin_vars()->z_offset)
+    : window_frame_t(parent, GuiDefaults::RectScreenBody)
+    , number(this, getNumberRect(pt), marlin_vars().z_offset)
     , arrows(this, getIconPoint(pt)) {
 
     SetRect(number.GetRect().Union(arrows.GetRect()));
@@ -83,8 +88,12 @@ WindowLiveAdjustZ::WindowLiveAdjustZ(window_t *parent, point_i16_t pt)
 }
 
 void WindowLiveAdjustZ::Save() {
+#if HAS_SHEET_PROFILES()
     /// store new z offset value into a marlin_vars & EEPROM
     SteelSheets::SetZOffset(number.GetValue());
+#else
+    marlin_client::set_z_offset(number.GetValue());
+#endif
 }
 
 void WindowLiveAdjustZ::Change(int dif) {
@@ -104,7 +113,7 @@ void WindowLiveAdjustZ::Change(int dif) {
     }
 }
 
-void WindowLiveAdjustZ::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void WindowLiveAdjustZ::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     switch (event) {
 
     case GUI_event_t::ENC_UP:
@@ -120,7 +129,7 @@ void WindowLiveAdjustZ::windowEvent(EventLock /*has private ctor*/, window_t *se
         break;
 
     default:
-        SuperWindowEvent(sender, event, param);
+        window_frame_t::windowEvent(sender, event, param);
         break;
     }
 }
@@ -129,7 +138,7 @@ void WindowLiveAdjustZ::windowEvent(EventLock /*has private ctor*/, window_t *se
 // WindowLiveAdjustZ_withText
 
 WindowLiveAdjustZ_withText::WindowLiveAdjustZ_withText(window_t *parent, point_i16_t pt, size_t width)
-    : AddSuperWindow<WindowLiveAdjustZ>(parent, pt)
+    : WindowLiveAdjustZ(parent, pt)
     , text(parent, Rect16(), is_multiline::no, is_closed_on_click_t::no, _(text_str)) {
     Shift(ShiftDir_t::Right, width - Width());
     text.SetRect(Rect16(pt, width - Width(), Height()));
@@ -148,7 +157,7 @@ bool WindowLiveAdjustZ_withText::IsActive() {
     return number.IsShadowed();
 }
 
-void WindowLiveAdjustZ_withText::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void WindowLiveAdjustZ_withText::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     switch (event) {
 
     case GUI_event_t::ENC_UP:
@@ -161,25 +170,27 @@ void WindowLiveAdjustZ_withText::windowEvent(EventLock /*has private ctor*/, win
     default:
         break;
     }
-    SuperWindowEvent(sender, event, param);
+    WindowLiveAdjustZ::windowEvent(sender, event, param);
 }
 
 /*****************************************************************************/
 // LiveAdjustZ
 static constexpr const padding_ui8_t textPadding = { 10, 5, 0, 0 };
-static constexpr const Rect16 nozzleRect = Rect16((display::GetW() / 2) - 24, 120, 48, 48);
-#if defined(USE_ST7789) || defined(USE_MOCK_DISPLAY)
-static constexpr const Rect16 textRect = Rect16(0, 32, display::GetW(), 4 * 30);
+static constexpr const Rect16 nozzleRect = Rect16((GuiDefaults::ScreenWidth / 2) - 24, 120, 48, 48);
+
+#if HAS_MINI_DISPLAY() || HAS_MOCK_DISPLAY()
+static constexpr const Rect16 textRect = Rect16(0, 32, GuiDefaults::ScreenWidth, 4 * 30);
 static constexpr const point_i16_t adjuster_pt = point_i16_t(75, 205);
 static constexpr const point_i16_t scale_pt = point_i16_t(45, 125);
-#elif defined(USE_ILI9488)
-static constexpr const Rect16 textRect = Rect16(20, 40, display::GetW() - 40, 3 * 30);
+
+#elif HAS_LARGE_DISPLAY()
+static constexpr const Rect16 textRect = Rect16(20, 40, GuiDefaults::ScreenWidth - 40, 3 * 30);
 static constexpr const point_i16_t adjuster_pt = point_i16_t(210, 205);
 static constexpr const point_i16_t scale_pt = point_i16_t(180, 125);
 #endif
 
 LiveAdjustZ::LiveAdjustZ()
-    : AddSuperWindow<IDialog>(GuiDefaults::RectScreenBody)
+    : IDialog(GuiDefaults::RectScreenBody)
     , text(this, textRect, is_multiline::yes, is_closed_on_click_t::no)
     , nozzle_icon(this, nozzleRect, &img::nozzle_shape_48x48)
     , adjuster(this, adjuster_pt)
@@ -211,7 +222,7 @@ void LiveAdjustZ::moveNozzle() {
     }
 }
 
-void LiveAdjustZ::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void LiveAdjustZ::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     switch (event) {
 
     case GUI_event_t::ENC_UP:
@@ -241,7 +252,7 @@ void LiveAdjustZ::windowEvent(EventLock /*has private ctor*/, window_t *sender, 
     }
 
     default:
-        SuperWindowEvent(sender, event, param);
+        IDialog::windowEvent(sender, event, param);
     }
 }
 

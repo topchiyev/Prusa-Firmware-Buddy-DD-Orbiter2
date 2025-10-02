@@ -1,13 +1,12 @@
-
-
 #include "WindowItemFormatableSpin.hpp"
 
-WI_LAMBDA_SPIN::WI_LAMBDA_SPIN(string_view_utf8 label, size_t index_n_, const img::Resource *icon, is_enabled_t enabled, is_hidden_t hidden, size_t init_index, std::function<void(char *)> printAs)
+WI_LAMBDA_SPIN::WI_LAMBDA_SPIN(const string_view_utf8 &label, size_t item_count, const img::Resource *icon, is_enabled_t enabled, is_hidden_t hidden, size_t init_index, stdext::inplace_function<void(char *)> printAs)
     : WI_LAMBDA_LABEL_t(label, icon, enabled, hidden, printAs)
     , index(init_index)
-    , index_n(index_n_) {
-    assert(index_n > init_index && "Cannot start with invalid value");
+    , item_count(item_count) {
+    assert(item_count > init_index && "Cannot start with invalid value");
 
+    touch_extension_only_ = true;
     UpdateText(); // Format text and get extension width
 }
 
@@ -20,7 +19,7 @@ void WI_LAMBDA_SPIN::UpdateText() {
     string_view_utf8 stringView = string_view_utf8::MakeRAM((uint8_t *)text);
 
     // Calculate extension width
-    const size_t len = stringView.computeNumUtf8CharsAndRewind();
+    const size_t len = stringView.computeNumUtf8Chars();
     extension_width = width(GuiDefaults::FontMenuItems) * len + Padding.left + Padding.right + (GuiDefaults::MenuSwitchHasBrackets ? (width(BracketFont) + GuiDefaults::MenuPaddingSpecial.left + GuiDefaults::MenuPaddingSpecial.right) * 2 : 0);
 }
 
@@ -63,7 +62,7 @@ Rect16 WI_LAMBDA_SPIN::getRightBracketRect(Rect16 extension_rect) const {
 /**
  * @brief Print switch text and brackets.
  */
-void WI_LAMBDA_SPIN::printExtension(Rect16 extension_rect, color_t color_text, color_t color_back, [[maybe_unused]] ropfn raster_op) const {
+void WI_LAMBDA_SPIN::printExtension(Rect16 extension_rect, Color color_text, Color color_back, [[maybe_unused]] ropfn raster_op) const {
     string_view_utf8 stringView = string_view_utf8::MakeRAM((uint8_t *)text);
 
     // Draw switch
@@ -94,21 +93,8 @@ void WI_LAMBDA_SPIN::click([[maybe_unused]] IWindowMenu &window_menu) {
     toggle_edit_mode();
 }
 
-/**
- * @brief Handle touch.
- * It behaves the same as click, but only when extension was clicked.
- * @param window_menu reference to menu where this item is shown
- * @param relative_touch_point where this item is touched
- */
-void WI_LAMBDA_SPIN::touch(IWindowMenu &window_menu, point_ui16_t relative_touch_point) {
-    if (is_touch_in_extension_rect(window_menu, relative_touch_point)) {
-        set_is_edited(true);
-        SetIndex((index + 1) % index_n);
-    }
-}
-
 void WI_LAMBDA_SPIN::SetIndex(size_t new_index) {
-    if (new_index < index_n) {
+    if (new_index < item_count) {
         index = new_index;
         UpdateText(); // Update extension width
         InValidateLabel(); // Invalidate label to clear remaining longer text
@@ -129,8 +115,8 @@ invalidate_t WI_LAMBDA_SPIN::change(int dif) {
             dif = -1 * index; // Prevent underflow
         }
     } else {
-        if (index + dif >= index_n) {
-            dif = index_n - 1 - index; // Prevent overflow
+        if (index + dif >= item_count) {
+            dif = item_count - 1 - index; // Prevent overflow
         }
     }
 

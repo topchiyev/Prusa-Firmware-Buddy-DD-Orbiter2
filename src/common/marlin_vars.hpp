@@ -14,9 +14,9 @@
 #include <assert.h>
 #include <tuple>
 
-#if BOARD_IS_DWARF
+#if BOARD_IS_DWARF()
     #error "You're trying to add marlin_vars to Dwarf. Don't!"
-#endif /*BOARD_IS_DWARF*/
+#endif /*BOARD_IS_DWARF()*/
 
 class MarlinVarsLockGuard {
 public:
@@ -290,8 +290,11 @@ enum {
 };
 
 class marlin_vars_t {
+private:
+    marlin_vars_t() = default;
+    friend marlin_vars_t &marlin_vars();
+
 public:
-    marlin_vars_t() {}
     void init();
 
     /**
@@ -320,7 +323,18 @@ public:
 
     MarlinVariableString<FILE_PATH_BUFFER_LEN> media_SFN_path;
     MarlinVariableString<FILE_NAME_BUFFER_LEN> media_LFN;
-    MarlinVariable<marlin_server::State> print_state; // marlin_server.print_state
+
+    /// Position in the media (arbitrary IGcodeReader units)
+    MarlinVariable<uint32_t> media_position;
+
+    /// Estimate of the media size (arbitrary IGcodeReader units)
+    MarlinVariable<uint32_t> media_size_estimate;
+
+    /// marlin_server.print_state
+    MarlinVariable<marlin_server::State> print_state;
+
+    /// Marlin variable for passing string data from the running gcode/FSM to the UI thread/whatever
+    MarlinVariableString<64> generic_param_string;
 
 #if ENABLED(CANCEL_OBJECTS)
     void set_cancel_object_mask(uint64_t mask) {
@@ -414,6 +428,38 @@ public:
         }
     }
 
+    struct JobInfo {
+        enum class JobResult {
+            finished,
+            aborted,
+        };
+        uint16_t job_id;
+        JobResult result;
+    };
+
+    std::optional<JobInfo::JobResult> get_job_result(uint16_t job_id) {
+        auto guard = MarlinVarsLockGuard();
+        for (const auto &job : job_history) {
+            if (job.has_value() && job->job_id == job_id) {
+                return job->result;
+            }
+        }
+
+        return std::nullopt;
+    }
+
+    void add_job_result(uint16_t job_id, JobInfo::JobResult result) {
+        auto guard = MarlinVarsLockGuard();
+        if (job_history[0].has_value() && job_history[0]->job_id == job_id) {
+            // We already have a result for this job, let's keep the first result
+            return;
+        }
+        // If we add more elements, we gotta do this better
+        static_assert(std::tuple_size_v<decltype(job_history)> == 2);
+        job_history[1] = job_history[0];
+        job_history[0] = { job_id, result };
+    }
+
     /**
      * @brief Get the last fsm state
      *
@@ -449,6 +495,7 @@ private:
     osMutexId mutex_id; // Mutex ID
     std::atomic<osThreadId> current_mutex_owner; // current mutex owner -> to check for recursive locking
     std::array<Hotend, HOTENDS> hotends; // array of hotends (use hotend()/active_hotend() getter)
+    std::array<std::optional<JobInfo>, 2> job_history;
     fsm::States fsm_states;
 #if ENABLED(CANCEL_OBJECTS)
     uint64_t cancel_object_mask;
@@ -458,8 +505,7 @@ private:
     marlin_vars_t &operator=(marlin_vars_t const &) = delete;
 };
 
-extern marlin_vars_t marlin_vars_instance;
-
-inline constexpr marlin_vars_t *marlin_vars() {
-    return (marlin_vars_t *)&marlin_vars_instance;
+inline marlin_vars_t &marlin_vars() {
+    static marlin_vars_t instance;
+    return instance;
 }

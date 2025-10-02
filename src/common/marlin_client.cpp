@@ -5,13 +5,14 @@
 #include "marlin_events.h"
 #include "marlin_server.hpp"
 #include <cassert>
+#include <freertos/mutex.hpp>
 #include <stdio.h>
 #include <string.h>
 #include <cstdint>
 #include "config.h"
 #include "bsod.h"
 #include "ffconf.h"
-#include "log.h"
+#include <logging/log.hpp>
 #include "../lib/Marlin/Marlin/src/core/macros.h"
 #include <module/motion.h>
 #include "bsod.h"
@@ -29,7 +30,7 @@ using std::optional;
 
 namespace marlin_client {
 
-LOG_COMPONENT_DEF(MarlinClient, LOG_SEVERITY_INFO);
+LOG_COMPONENT_DEF(MarlinClient, logging::Severity::info);
 
 static constexpr uint8_t max_retries = 5;
 
@@ -55,22 +56,34 @@ uint8_t marlin_clients = 0; // number of connected clients
 //-----------------------------------------------------------------------------
 // forward declarations of private functions
 
-static bool receive_and_process_client_message(marlin_client_t *client, TickType_t ticks_to_wait);
+static bool receive_and_process_client_message(marlin_client_t *client, size_t milliseconds_to_wait);
 static marlin_client_t *_client_ptr();
 
 //-----------------------------------------------------------------------------
 // client side public functions
 
+static freertos::Mutex mutex;
+
+void init_maybe() {
+    if (!_client_ptr()) {
+        init();
+    }
+}
+
 void init() {
+    // If the marlin has already been initialized, don't call init again
+    assert(!_client_ptr());
+
     int client_id;
     marlin_client_t *client = 0;
     TaskDeps::wait(TaskDeps::Tasks::marlin_client);
-    osSemaphoreWait(server_semaphore, osWaitForever);
+    std::unique_lock lock { mutex };
     for (client_id = 0; client_id < MARLIN_MAX_CLIENTS; client_id++) {
         if (marlin_client_task[client_id] == 0) {
             break;
         }
     }
+    assert(client_id < MARLIN_MAX_CLIENTS);
     if (client_id < MARLIN_MAX_CLIENTS) {
         client = clients + client_id;
         memset(client, 0, sizeof(marlin_client_t));
@@ -81,7 +94,6 @@ void init() {
         client->message_cb = NULL;
         marlin_client_task[client_id] = osThreadGetId();
     }
-    osSemaphoreRelease(server_semaphore);
 }
 
 void loop() {
@@ -97,14 +109,6 @@ int get_id() {
         return client->id;
     }
     return 0;
-}
-
-void wait_for_start_processing() {
-    if (marlin_client_t *client = _client_ptr()) {
-        while (!event_clr(Event::StartProcessing)) {
-            receive_and_process_client_message(client, portMAX_DELAY);
-        }
-    }
 }
 
 // register callback to message
@@ -129,7 +133,7 @@ static bool try_send(Request &request) {
     client->events &= ~(make_mask(Event::Acknowledge) | make_mask(Event::NotAcknowledge));
     server_queue.send(request);
     for (;;) {
-        receive_and_process_client_message(client, portMAX_DELAY);
+        receive_and_process_client_message(client, 1000);
         if (client->events & make_mask(Event::Acknowledge)) {
             client->events &= ~make_mask(Event::Acknowledge);
             return true;
@@ -242,10 +246,10 @@ void gcode_printf(const char *format, ...) {
     }
 }
 
-void gcode_push_front(const char *gcode) {
+void inject(InjectQueueRecord record) {
     Request request;
-    request.type = Request::Type::InjectGcode;
-    request.inject_gcode = gcode;
+    request.type = Request::Type::Inject;
+    request.inject = record;
     _send_request_to_server_and_wait(request);
 }
 
@@ -301,27 +305,8 @@ void move_xyz_axes_to(const xyz_float_t &position, float feedrate) {
     _send_request_to_server_and_wait(request);
 }
 
-#if HAS_PHASE_STEPPING()
-static bool try_start_test_via_gcode(const uint64_t test_mask, const uint64_t wizard_mask, const char *wizard_gcode) {
-    if (test_mask & wizard_mask) {
-        if (test_mask == wizard_mask) {
-            gcode(wizard_gcode);
-            return true;
-        } else {
-            bsod("unable to mix selftest and gcode");
-        }
-    }
-    return false;
-}
-#endif
-
 #if HAS_SELFTEST()
 void test_start_with_data(const uint64_t test_mask, const ::selftest::TestData test_data) {
-    #if HAS_PHASE_STEPPING()
-    if (try_start_test_via_gcode(test_mask, stmPhaseStepping, "M1977")) {
-        return;
-    }
-    #endif
     Request request;
     request.type = Request::Type::TestStart;
     request.test_start.test_mask = test_mask;
@@ -369,7 +354,7 @@ bool is_print_started() {
     // user.
 
     while (true) {
-        switch (marlin_vars()->print_state) {
+        switch (marlin_vars().print_state) {
         case State::WaitGui:
         // We also need to wait these two out, because they are not considered printing
         // and if connect want to send JOB_INFO before marlin_server goes through them
@@ -395,7 +380,7 @@ bool is_print_started() {
 
 bool is_print_exited() {
     while (true) {
-        switch (marlin_vars()->print_state) {
+        switch (marlin_vars().print_state) {
         case State::Finished:
         case State::Aborted:
         case State::Exit:
@@ -434,8 +419,8 @@ void print_resume() {
     _send_request_id_to_server_and_wait(Request::Type::PrintResume);
 }
 
-void media_print_reopen() {
-    _send_request_id_to_server_and_wait(Request::Type::MediaPrintReopen);
+void try_recover_from_media_error() {
+    _send_request_id_to_server_and_wait(Request::Type::TryRecoverFromMediaError);
 }
 
 void park_head() {
@@ -450,23 +435,30 @@ void notify_server_about_knob_click() {
     _send_request_id_to_server_and_wait(Request::Type::KnobClick);
 }
 
-void set_warning(WarningType type) {
+void set_warning(WarningType type, PhasesWarning phase) {
     Request request;
     request.type = Request::Type::SetWarning;
-    request.warning_type = type;
+    request.warning = { type, phase };
+    _send_request_to_server_noreply(request);
+}
+
+void clear_warning(WarningType type) {
+    Request request;
+    request.type = Request::Type::ClearWarning;
+    request.warning.type = type;
     _send_request_to_server_noreply(request);
 }
 
 //-----------------------------------------------------------------------------
 // responses from client finite state machine (like button click)
-void FSM_response_internal(EncodedFSMResponse encoded_fsm_response) {
+void FSM_encoded_response(EncodedFSMResponse encoded_fsm_response) {
     Request request;
     request.type = Request::Type::FSM;
     request.encoded_fsm_response = encoded_fsm_response;
     _send_request_to_server_and_wait(request);
 }
 bool is_printing() {
-    switch (marlin_vars()->print_state) {
+    switch (marlin_vars().print_state) {
     case State::Aborted:
     case State::Idle:
     case State::Finished:
@@ -482,7 +474,7 @@ bool is_printing() {
 }
 
 bool is_paused() {
-    switch (marlin_vars()->print_state) {
+    switch (marlin_vars().print_state) {
     case State::Paused:
         return true;
     default:
@@ -491,7 +483,7 @@ bool is_paused() {
 }
 
 bool is_idle() {
-    switch (marlin_vars()->print_state) {
+    switch (marlin_vars().print_state) {
     case State::Idle:
         return true;
     default:
@@ -503,10 +495,10 @@ bool is_idle() {
 // private functions
 
 // process message on client side (set flags, update vars etc.)
-static bool receive_and_process_client_message(marlin_client_t *client, TickType_t ticks_to_wait) {
+static bool receive_and_process_client_message(marlin_client_t *client, size_t milliseconds_to_wait) {
     ClientEvent client_event;
     ClientQueue &queue = marlin_client_queue[client->id];
-    if (!queue.receive(client_event, ticks_to_wait)) {
+    if (!queue.try_receive(client_event, milliseconds_to_wait)) {
         return false;
     }
 
@@ -524,17 +516,15 @@ static bool receive_and_process_client_message(marlin_client_t *client, TickType
         break;
     case Event::Message: {
         if (client->message_cb) {
-            client->message_cb(client_event.message);
+            client->message_cb(client_event.message); // callback takes ownership
+        } else {
+            free(client_event.message);
         }
-        free(client_event.message);
         break;
     }
         // not handled events
         // do not use default, i want all events listed here, so new event will generate warning, when not added
     case Event::MeshUpdate:
-    case Event::Startup:
-    case Event::StartProcessing:
-    case Event::StopProcessing:
     case Event::PrinterKilled:
     case Event::MediaInserted:
     case Event::MediaError:
@@ -586,31 +576,31 @@ void marlin_set_variable(MarlinVariable<T> &variable, T value) {
 }
 
 void set_target_nozzle(float val, uint8_t hotend) {
-    return marlin_set_variable(marlin_vars()->hotend(hotend).target_nozzle, val);
+    return marlin_set_variable(marlin_vars().hotend(hotend).target_nozzle, val);
 }
 void set_display_nozzle(float val, uint8_t hotend) {
-    return marlin_set_variable(marlin_vars()->hotend(hotend).display_nozzle, val);
+    return marlin_set_variable(marlin_vars().hotend(hotend).display_nozzle, val);
 }
 void set_target_bed(float val) {
-    return marlin_set_variable(marlin_vars()->target_bed, val);
+    return marlin_set_variable(marlin_vars().target_bed, val);
 }
 void set_fan_speed(uint8_t val) {
-    return marlin_set_variable(marlin_vars()->print_fan_speed, val);
+    return marlin_set_variable(marlin_vars().print_fan_speed, val);
 }
 void set_print_speed(uint16_t val) {
-    return marlin_set_variable(marlin_vars()->print_speed, val);
+    return marlin_set_variable(marlin_vars().print_speed, val);
 }
 void set_flow_factor(uint16_t val, uint8_t hotend) {
-    return marlin_set_variable(marlin_vars()->hotend(hotend).flow_factor, val);
+    return marlin_set_variable(marlin_vars().hotend(hotend).flow_factor, val);
 }
 void set_z_offset(float val) {
-    return marlin_set_variable(marlin_vars()->z_offset, val);
+    return marlin_set_variable(marlin_vars().z_offset, std::clamp(val, Z_OFFSET_MIN, Z_OFFSET_MAX));
 }
 void set_fan_check(bool val) {
-    return marlin_set_variable(marlin_vars()->fan_check_enabled, static_cast<uint8_t>(val));
+    return marlin_set_variable(marlin_vars().fan_check_enabled, static_cast<uint8_t>(val));
 }
 void set_fs_autoload(bool val) {
-    return marlin_set_variable(marlin_vars()->fs_autoload_enabled, static_cast<uint8_t>(val));
+    return marlin_set_variable(marlin_vars().fs_autoload_enabled, static_cast<uint8_t>(val));
 }
 
 #if ENABLED(CANCEL_OBJECTS)

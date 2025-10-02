@@ -10,7 +10,6 @@ public:
         : min_rpm(min_rpm)
         , max_rpm(max_rpm)
         , selftest_mode(false) {};
-    virtual ~CFanCtlCommon() {}
 
     enum FanState : int8_t {
         idle = 0, // idle - no rotation, PWM = 0%
@@ -31,6 +30,8 @@ public:
     virtual uint16_t getActualRPM() const = 0;
     virtual bool getRPMIsOk() = 0;
     virtual bool getRPMMeasured() const = 0;
+
+    // Accepts uint16_t only because Puppies use (uint16_t)-1 as an "auto-fan" signal. PWM is still 0-255.
     virtual bool setPWM(uint16_t pwm) = 0;
 
     inline bool isSelftest() { return selftest_mode; }
@@ -49,11 +50,15 @@ protected:
 extern void record_fanctl_metrics();
 
 // FANCTLPRINT - printing fan
-inline constexpr uint8_t FANCTLPRINT_PWM_MIN = 10;
-inline constexpr uint8_t FANCTLPRINT_PWM_MAX = 50;
+inline constexpr uint8_t FANCTLPRINT_PWM_MIN = 10; // min duty cycle length 10 / 50 = 0.2 = 20%
+inline constexpr uint8_t FANCTLPRINT_PWM_MAX = 50; // 1000Hz / 50 = 20Hz PWM cycle
+#if PRINTER_IS_PRUSA_MK4()
+inline constexpr uint16_t FANCTLPRINT_RPM_MIN = 90; // Dynamic PWM enables lower RPM
+#else
 inline constexpr uint16_t FANCTLPRINT_RPM_MIN = 150;
+#endif
 inline constexpr uint16_t FANCTLPRINT_RPM_MAX =
-#if (PRINTER_IS_PRUSA_MK4 || PRINTER_IS_PRUSA_MK3_5 || PRINTER_IS_PRUSA_iX || PRINTER_IS_PRUSA_XL)
+#if (PRINTER_IS_PRUSA_MK4() || PRINTER_IS_PRUSA_MK3_5() || PRINTER_IS_PRUSA_iX() || PRINTER_IS_PRUSA_XL())
     6850
 #else
     5000
@@ -61,18 +66,33 @@ inline constexpr uint16_t FANCTLPRINT_RPM_MAX =
     ;
 inline constexpr uint8_t FANCTLPRINT_PWM_THR = 20;
 
+// On Mk3 the printer would ignore rpm measurements if the pwm was under 30%.
+// Because some of the printers have a really weak print fan, it would cause
+// MK3.5 users to get print fan errors on low pwm, that wouldn't happend on MK3.
+// Sadly since we doing pwm differently we are not able to set it to 30% exactly,
+// but rather we round to nearest int:
+// <= 32% - ignore RPM measurement
+// >= 33% - will trigger print fan error if the pwm is too low (FANCTLPRINT_RPM_MIN)
+inline constexpr uint8_t FANCTLPRINT_MIN_PWM_TO_MEASURE_RPM =
+#if PRINTER_IS_PRUSA_MK3_5()
+    FANCTLPRINT_PWM_MAX * 0.3;
+#else
+    0;
+#endif
+
 // FANCTLHEATBREAK - heatbreak fan
 inline constexpr uint8_t FANCTLHEATBREAK_PWM_MIN = 0;
 inline constexpr uint8_t FANCTLHEATBREAK_PWM_MAX = 50;
 inline constexpr uint16_t FANCTLHEATBREAK_RPM_MIN = 1000;
 inline constexpr uint16_t FANCTLHEATBREAK_RPM_MAX =
-#if (PRINTER_IS_PRUSA_MK4 || PRINTER_IS_PRUSA_MK3_5 || PRINTER_IS_PRUSA_iX || PRINTER_IS_PRUSA_XL)
+#if (PRINTER_IS_PRUSA_MK4() || PRINTER_IS_PRUSA_MK3_5() || PRINTER_IS_PRUSA_iX() || PRINTER_IS_PRUSA_XL())
     15180
 #else
     8000
 #endif
     ;
 inline constexpr uint8_t FANCTLHEATBREAK_PWM_THR = 20;
+inline constexpr uint8_t FANCTLHEATBREAK_MIN_PWM_TO_MEASURE_RPM = 0;
 
 // FANCTLENCLOSURE - enclosure fan
 #if XL_ENCLOSURE_SUPPORT()

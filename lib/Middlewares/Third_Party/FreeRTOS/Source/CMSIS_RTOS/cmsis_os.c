@@ -407,7 +407,7 @@ osTimerId osTimerCreate (const osTimerDef_t *timer_def, os_timer_type type, void
                       1, // period should be filled when starting the Timer using osTimerStart
                       (type == osTimerPeriodic) ? pdTRUE : pdFALSE,
                       (void *) argument,
-                      (TaskFunction_t)timer_def->ptimer,
+                      (TimerCallbackFunction_t)timer_def->ptimer,
                       (StaticTimer_t *)timer_def->controlblock);
   }
   else {
@@ -415,7 +415,7 @@ osTimerId osTimerCreate (const osTimerDef_t *timer_def, os_timer_type type, void
                       1, // period should be filled when starting the Timer using osTimerStart
                       (type == osTimerPeriodic) ? pdTRUE : pdFALSE,
                       (void *) argument,
-                      (TaskFunction_t)timer_def->ptimer);
+                      (TimerCallbackFunction_t)timer_def->ptimer);
  }
 #elif( configSUPPORT_STATIC_ALLOCATION == 1 )
   return xTimerCreateStatic((const char *)"",
@@ -550,12 +550,12 @@ int32_t osSignalSet (osThreadId thread_id, int32_t signal)
 
   if (inHandlerMode())
   {
-    if(xTaskGenericNotifyFromISR( thread_id , (uint32_t)signal, eSetBits, &ulPreviousNotificationValue, &xHigherPriorityTaskWoken ) != pdPASS )
+    if(xTaskGenericNotifyFromISR( thread_id , tskDEFAULT_INDEX_TO_NOTIFY, (uint32_t)signal, eSetBits, &ulPreviousNotificationValue, &xHigherPriorityTaskWoken ) != pdPASS )
       return 0x80000000;
 
     portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
   }
-  else if(xTaskGenericNotify( thread_id , (uint32_t)signal, eSetBits, &ulPreviousNotificationValue) != pdPASS )
+  else if(xTaskGenericNotify( thread_id , tskDEFAULT_INDEX_TO_NOTIFY, (uint32_t)signal, eSetBits, &ulPreviousNotificationValue) != pdPASS )
     return 0x80000000;
 
   return ulPreviousNotificationValue;

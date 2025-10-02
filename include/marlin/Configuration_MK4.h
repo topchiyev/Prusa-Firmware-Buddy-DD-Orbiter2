@@ -208,6 +208,7 @@
  *  some gcodes (like G80) can have a different meaning.
  */
 #define GCODE_COMPATIBILITY_MK3
+#define FAN_COMPATIBILITY_MK4_MK3
 
 // A dual extruder that uses a single stepper motor
 //#define SWITCHING_EXTRUDER
@@ -745,11 +746,7 @@
  * Override with M92
  *                                      X, Y, Z, E0 [, E1[, E2[, E3[, E4[, E5]]]]]
  */
-#ifdef HAS_PLANETARY_GEARBOX
-    #define DEFAULT_AXIS_STEPS_PER_UNIT_E0 380
-#else
-    #define DEFAULT_AXIS_STEPS_PER_UNIT_E0 784
-#endif
+#define DEFAULT_AXIS_STEPS_PER_UNIT_E0 380
 
 #define DEFAULT_AXIS_STEPS_PER_UNIT \
     { 100, 100, 400, DEFAULT_AXIS_STEPS_PER_UNIT_E0 } //E0 280 295 420
@@ -1056,7 +1053,7 @@
 #define DISABLE_Z false
 
 // X and Y axes ENABLE/DISABLE functions are linked through pins
-#if BOARD_IS_XBUDDY
+#if BOARD_IS_XBUDDY()
   #define XY_LINKED_ENABLE true
 #endif
 
@@ -1072,12 +1069,7 @@
 #define DEFAULT_INVERT_X_DIR false
 #define DEFAULT_INVERT_Y_DIR true
 #define DEFAULT_INVERT_Z_DIR false
-
-#if (!defined(HAS_PLANETARY_GEARBOX))
-    #define DEFAULT_INVERT_E0_DIR true
-#else
-    #define DEFAULT_INVERT_E0_DIR false
-#endif
+#define DEFAULT_INVERT_E0_DIR false
 
 #ifdef USE_PRUSA_EEPROM_AS_SOURCE_OF_DEFAULT_VALUES
     //this part if header is accesible only from C++ because of bool
@@ -1450,7 +1442,8 @@
 
 #define HOMING_FEEDRATE_XY (62 * 60)
 
-#define HOMING_FEEDRATE_Z (8 * 60)
+// beware - experimentally tuned on a high volume of MK4 and MK4S to prevent resonances in Z while homing
+#define HOMING_FEEDRATE_Z 1150
 #define HOMING_FEEDRATE_INVERTED_Z (buddy::hw::Configuration::Instance().has_trinamic_oscillators() ? (60 * 60) : (30 * 60))
 
 // Validate that endstops are triggered on homing moves
@@ -1551,11 +1544,6 @@
 //
 //#define INCH_MODE_SUPPORT
 
-/**
- * R1 Redirect gcode support
- */
-//#define REDIRECT_GCODE_SUPPORT
-
 //
 // M149 Set temperature units support
 //
@@ -1594,11 +1582,20 @@
     #define Y_AXIS_UNLOAD_POS  (std::numeric_limits<float>::quiet_NaN())
     #define X_AXIS_LOAD_POS  (std::numeric_limits<float>::quiet_NaN())
     #define X_AXIS_UNLOAD_POS  (std::numeric_limits<float>::quiet_NaN())
+
     // Specify a park position as { X, Y, Z }
-    #define NOZZLE_PARK_POINT \
-        { (X_MAX_POS - 10), 170, 20 }
-    #define NOZZLE_PARK_POINT_M600 \
-        { (X_MAX_POS - 10), (Y_MIN_POS + 1), 20 }
+    #define X_NOZZLE_PARK_POINT (X_MAX_POS - 10)
+    #define Y_NOZZLE_PARK_POINT 170
+    #define Z_NOZZLE_PARK_POINT 20
+    #define XYZ_NOZZLE_PARK_POINT \
+        {X_NOZZLE_PARK_POINT, Y_NOZZLE_PARK_POINT, Z_NOZZLE_PARK_POINT}
+
+    #define X_NOZZLE_PARK_POINT_M600    (X_MAX_POS - 10)
+    #define Y_NOZZLE_PARK_POINT_M600    (Y_MIN_POS + 1)
+    #define Z_NOZZLE_PARK_POINT_M600    20
+    #define XYZ_NOZZLE_PARK_POINT_M600 \
+        {X_NOZZLE_PARK_POINT_M600, Y_NOZZLE_PARK_POINT_M600, Z_NOZZLE_PARK_POINT_M600}
+
     #define NOZZLE_PARK_XY_FEEDRATE 100 // (mm/s) X and Y axes feedrate (also used for delta Z axis)
     #define NOZZLE_PARK_Z_FEEDRATE 5 // (mm/s) Z axis feedrate (not used for delta printers)
 
@@ -1933,12 +1930,6 @@
 //
 
 //
-// Elefu RA Board Control Panel
-// http://www.elefu.com/index.php?route=product/product&product_id=53
-//
-#define RA_CONTROL_PANEL
-
-//
 // Sainsmart (YwRobot) LCD Displays
 //
 // These require F.Malpartida's LiquidCrystal_I2C library
@@ -2149,11 +2140,6 @@
 //
 // CONTROLLER TYPE: Standalone / Serial
 //
-
-//
-// LCD for Malyan M200 printers.
-//
-//#define MALYAN_LCD
 
 //
 // CONTROLLER TYPE: Keypad / Add-on

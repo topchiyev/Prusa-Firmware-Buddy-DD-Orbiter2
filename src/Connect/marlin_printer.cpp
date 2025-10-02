@@ -1,4 +1,6 @@
 #include "marlin_printer.hpp"
+#include <module/prusa/tool_mapper.hpp>
+#include <module/prusa/spool_join.hpp>
 #include "printer_common.hpp"
 #include "hostname.hpp"
 
@@ -8,10 +10,12 @@
 #include <netdev.h>
 #include <print_utils.hpp>
 #include <wui_api.h>
+#include <wui.h>
 #include <filament.hpp>
 #include <filament_sensors_handler.hpp>
 #include <filament_sensor_states.hpp>
 #include <state/printer_state.hpp>
+#include <common/unique_file_ptr.hpp>
 
 #if XL_ENCLOSURE_SUPPORT()
     #include <xl_enclosure.hpp>
@@ -22,8 +26,10 @@
 
 #include <cassert>
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
 #include <cctype>
+#include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <crc32.h>
 
@@ -75,6 +81,13 @@ namespace {
             } else {
                 return 0;
             }
+        } else if (ini_string_match(section, INI_SECTION, name, "proxy_hostname")) {
+            if (len <= config_store_ns::connect_proxy_size) {
+                strlcpy(config->proxy_host, value, sizeof config->proxy_host);
+                config->loaded = true;
+            } else {
+                return 0;
+            }
         } else if (ini_string_match(section, INI_SECTION, name, "token")) {
             if (len <= config_store_ns::connect_token_size) {
                 strlcpy(config->token, value, sizeof config->token);
@@ -91,6 +104,15 @@ namespace {
             } else {
                 return 0;
             }
+        } else if (ini_string_match(section, INI_SECTION, name, "proxy_port")) {
+            char *endptr;
+            long tmp = strtol(value, &endptr, 10);
+            if (*endptr == '\0' && tmp >= 0 && tmp <= 65535) {
+                config->proxy_port = (uint16_t)tmp;
+                config->loaded = true;
+            } else {
+                return 0;
+            }
         } else if (ini_string_match(section, INI_SECTION, name, "tls")) {
             if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0) {
                 config->tls = true;
@@ -101,8 +123,39 @@ namespace {
             } else {
                 return 0;
             }
+        } else if (ini_string_match(section, INI_SECTION, name, "custom_cert")) {
+            if (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0) {
+                config->custom_cert = true;
+            } else if (strcmp(value, "0") == 0 || strcasecmp(value, "false") == 0) {
+                config->custom_cert = false;
+            } else {
+                return 0;
+            }
         }
         return 1;
+    }
+
+    bool copy(const char *src, const char *dst) {
+        unique_file_ptr s(fopen(src, "rb"));
+        if (!s) {
+            return false;
+        }
+        unique_file_ptr d(fopen(dst, "wb"));
+        if (!d) {
+            return false;
+        }
+
+        while (!feof(s.get()) && !ferror(s.get()) && !ferror(d.get())) {
+            constexpr size_t block = 128;
+            uint8_t buffer[block];
+            size_t read = fread(buffer, 1, block, s.get());
+            size_t written = fwrite(buffer, 1, read, d.get());
+            if (read != written) {
+                return false;
+            }
+        }
+
+        return !ferror(s.get()) && !ferror(d.get());
     }
 } // namespace
 
@@ -120,8 +173,8 @@ void MarlinPrinter::renew(std::optional<SharedBuffer::Borrow> new_borrow) {
         borrow = BorrowPaths(move(*new_borrow));
         // update variables from marlin server, sample LFN+SFN atomically
         auto lock = MarlinVarsLockGuard();
-        marlin_vars()->media_SFN_path.copy_to(borrow->path(), FILE_PATH_BUFFER_LEN, lock);
-        marlin_vars()->media_LFN.copy_to(borrow->name(), FILE_NAME_BUFFER_LEN, lock);
+        marlin_vars().media_SFN_path.copy_to(borrow->path(), FILE_PATH_BUFFER_LEN, lock);
+        marlin_vars().media_LFN.copy_to(borrow->name(), FILE_NAME_BUFFER_LEN, lock);
     } else {
         borrow.reset();
     }
@@ -144,7 +197,7 @@ namespace {
 #if HAS_MMU2()
         params.progress_code = MMU2::Fsm::Instance().reporter.GetProgressCode();
         params.command_code = MMU2::Fsm::Instance().reporter.GetCommandInProgress();
-        const bool mmu_enabled = config_store().mmu2_enabled.get() && marlin_vars()->mmu2_state == ftrstd::to_underlying(MMU2::xState::Active);
+        const bool mmu_enabled = config_store().mmu2_enabled.get() && marlin_vars().mmu2_state == ftrstd::to_underlying(MMU2::xState::Active);
         params.slot_mask = mmu_enabled ? 0b00011111 : 1;
         params.mmu_version = MMU2::mmu2.GetMMUFWVersion();
         // Note: 0 means no active tool, indexing from 1
@@ -164,15 +217,23 @@ namespace {
         for (size_t i = 0; i < params.slots.size(); i++) {
             if (params.slot_mask & (1 << i)) {
 #if HAS_TOOLCHANGER()
-                auto &hotend = marlin_vars()->hotend(i);
+                auto &hotend = marlin_vars().hotend(i);
+                const size_t nozzle = i;
 #else
                 // only one hotend in any other situation
-                auto &hotend = marlin_vars()->active_hotend();
+                auto &hotend = marlin_vars().active_hotend();
+                const size_t nozzle = 0;
 #endif
-                params.slots[i].material = filament::get_name(config_store().get_filament_type(i));
+                params.slots[i].material = std::to_array(config_store().get_filament_type(i).parameters().name);
                 params.slots[i].temp_nozzle = hotend.temp_nozzle;
+#if PRINTER_IS_PRUSA_iX()
+                params.slots[i].temp_heatbreak = hotend.temp_heatbreak;
+#endif
                 params.slots[i].print_fan_rpm = hotend.print_fan_rpm;
                 params.slots[i].heatbreak_fan_rpm = hotend.heatbreak_fan_rpm;
+                params.slots[i].nozzle_diameter = config_store().get_nozzle_diameter(nozzle);
+                params.slots[i].hardened = config_store().nozzle_is_hardened.get()[nozzle];
+                params.slots[i].high_flow = config_store().nozzle_is_high_flow.get()[nozzle];
             }
         }
     }
@@ -183,21 +244,24 @@ Printer::Params MarlinPrinter::params() const {
     Params params(borrow);
     params.state = get_state_with_dialog(ready);
     params.has_job = has_job();
-    params.temp_bed = marlin_vars()->temp_bed;
-    params.target_bed = marlin_vars()->target_bed;
-    params.target_nozzle = marlin_vars()->active_hotend().target_nozzle;
-    params.pos[X_AXIS_POS] = marlin_vars()->logical_pos[X_AXIS_POS];
-    params.pos[Y_AXIS_POS] = marlin_vars()->logical_pos[Y_AXIS_POS];
-    params.pos[Z_AXIS_POS] = marlin_vars()->logical_pos[Z_AXIS_POS];
-    params.print_speed = marlin_vars()->print_speed;
-    params.flow_factor = marlin_vars()->active_hotend().flow_factor;
-    params.job_id = marlin_vars()->job_id;
-    // Version can change between MK4 and MK3.9 in runtime
-    params.version = get_printer_version();
+    params.temp_bed = marlin_vars().temp_bed;
+#if PRINTER_IS_PRUSA_iX()
+    params.temp_psu = thermalManager.deg_psu();
+    params.temp_ambient = thermalManager.deg_ambient();
+#endif
+    params.target_bed = marlin_vars().target_bed;
+    params.target_nozzle = marlin_vars().active_hotend().target_nozzle;
+    params.pos[X_AXIS_POS] = marlin_vars().logical_pos[X_AXIS_POS];
+    params.pos[Y_AXIS_POS] = marlin_vars().logical_pos[Y_AXIS_POS];
+    params.pos[Z_AXIS_POS] = marlin_vars().logical_pos[Z_AXIS_POS];
+    params.print_speed = marlin_vars().print_speed;
+    params.flow_factor = marlin_vars().active_hotend().flow_factor;
+    params.job_id = marlin_vars().job_id;
+    params.version = PrinterModelInfo::current().version;
     get_slot_info(params);
 #if ENABLED(CANCEL_OBJECTS)
-    params.cancel_object_count = marlin_vars()->cancel_object_count;
-    params.cancel_object_mask = marlin_vars()->get_cancel_object_mask();
+    params.cancel_object_count = marlin_vars().cancel_object_count;
+    params.cancel_object_mask = marlin_vars().get_cancel_object_mask();
 #endif
 #if XL_ENCLOSURE_SUPPORT()
     params.enclosure_info = {
@@ -212,13 +276,13 @@ Printer::Params MarlinPrinter::params() const {
         .time_in_use = std::min(config_store().xl_enclosure_filter_timer.get(), Enclosure::expiration_deadline_sec)
     };
 #endif
-    params.print_duration = marlin_vars()->print_duration;
-    params.time_to_end = marlin_vars()->time_to_end;
-    params.time_to_pause = marlin_vars()->time_to_pause;
-    params.progress_percent = marlin_vars()->sd_percent_done;
+    params.print_duration = marlin_vars().print_duration;
+    params.time_to_end = marlin_vars().time_to_end;
+    params.time_to_pause = marlin_vars().time_to_pause;
+    params.progress_percent = marlin_vars().sd_percent_done;
     params.filament_used = Odometer_s::instance().get_extruded_all();
-    params.nozzle_diameter = config_store().get_nozzle_diameter(params.preferred_slot());
-    params.has_usb = marlin_vars()->media_inserted;
+    params.has_usb = marlin_vars().media_inserted;
+    params.can_start_download = can_start_download;
 
     struct statvfs fsbuf = {};
     if (params.has_usb && statvfs("/usb/", &fsbuf) == 0) {
@@ -250,7 +314,7 @@ uint32_t MarlinPrinter::cancelable_fingerprint() const {
         crc = crc32_calc_ex(crc, reinterpret_cast<const uint8_t *>(*s), strlen(s));
     };
     for (size_t i = 0; i < marlin_vars_t::CANCEL_OBJECTS_NAME_COUNT; i++) {
-        marlin_vars()->cancel_object_names[i].execute_with(calc_crc);
+        marlin_vars().cancel_object_names[i].execute_with(calc_crc);
     }
     crc = crc32_calc_ex(crc, reinterpret_cast<const uint8_t *>(&parameters.job_id), sizeof(parameters.job_id));
     crc = crc32_calc_ex(crc, reinterpret_cast<const uint8_t *>(&parameters.cancel_object_count), sizeof(parameters.cancel_object_count));
@@ -260,30 +324,55 @@ uint32_t MarlinPrinter::cancelable_fingerprint() const {
 }
 
 #if ENABLED(CANCEL_OBJECTS)
+void MarlinPrinter::cancel_object(uint8_t id) {
+    marlin_client::cancel_object(id);
+}
+
+void MarlinPrinter::uncancel_object(uint8_t id) {
+    marlin_client::uncancel_object(id);
+}
+
 const char *MarlinPrinter::get_cancel_object_name(char *buffer, size_t size, size_t index) const {
-    marlin_vars()->cancel_object_names[index].copy_to(buffer, size);
+    marlin_vars().cancel_object_names[index].copy_to(buffer, size);
     return buffer;
 }
 #endif
 
 void MarlinPrinter::init_connect(const char *token) {
-    config_store().connect_token.set(token);
-    config_store().connect_enabled.set(true);
+    auto &store = config_store();
+    auto transaction = store.get_backend().transaction_guard();
+    store.connect_token.set(token);
+    store.connect_enabled.set(true);
 }
 
 bool MarlinPrinter::load_cfg_from_ini() {
     Config config;
     bool ok = ini_parse("/usb/prusa_printer_settings.ini", connect_ini_handler, &config) == 0;
     ok = ok && config.loaded;
+
+    if (ok && config.custom_cert) {
+        // OK to fail (for example if the dir already exists). In any case, we
+        // care about the below successes.
+        mkdir("/internal/connect", 0777);
+        if (!copy("/usb/connect.der", "/internal/connect/connect.der")) {
+            ok = false;
+        }
+    }
+
     if (ok) {
         if (config.port == 0) {
             config.port = config.tls ? 443 : 80;
         }
 
-        config_store().connect_host.set(config.host);
-        config_store().connect_token.set(config.token);
-        config_store().connect_port.set(config.port);
-        config_store().connect_tls.set(config.tls);
+        auto &store = config_store();
+        auto transaction = store.get_backend().transaction_guard();
+        store.connect_host.set(config.host);
+        store.connect_token.set(config.token);
+        store.connect_port.set(config.port);
+        store.connect_tls.set(config.tls);
+        store.connect_custom_tls_cert.set(config.custom_cert);
+        store.connect_proxy_host.set(config.proxy_host);
+        store.connect_proxy_port.set(config.proxy_port);
         // Note: enabled is controlled in the GUI
     }
     return ok;
@@ -320,6 +409,7 @@ Printer::NetCreds MarlinPrinter::net_creds() const {
     NetCreds result = {};
     strlcpy(result.pl_password, config_store().prusalink_password.get_c_str(), sizeof(result.pl_password));
     strlcpy(result.ssid, config_store().wifi_ap_ssid.get_c_str(), sizeof(result.ssid));
+    netdev_get_hostname(netdev_get_active_id(), result.hostname, sizeof(result.hostname));
     return result;
 }
 
@@ -354,13 +444,67 @@ bool MarlinPrinter::job_control(JobControl control) {
     return false;
 }
 
-bool MarlinPrinter::start_print(const char *path) {
+#if ENABLED(PRUSA_TOOL_MAPPING)
+namespace {
+    const char *handle_tool_mapping(const ToolMapping &tool_mapping) {
+    #if HAS_MMU2()
+        if (!config_store().mmu2_enabled.get()) {
+            return "MMU not enabled, can't use tools mapping";
+        }
+    #endif
+
+        auto cleanup = []() {
+            tool_mapper.reset();
+            spool_join.reset();
+            tool_mapper.set_enable(false);
+        };
+        // Wipe defaults (eg mapping 1-1, 2-2, ...) - we want to replace it,
+        // not merge and create some kind of weird hydra-mapping.
+        tool_mapper.set_all_unassigned();
+        tool_mapper.set_enable(true);
+        for (size_t i = 0; i < tool_mapping.size(); i++) {
+            auto &curr_tool = tool_mapping[i][0];
+            if (curr_tool == ToolMapper::NO_TOOL_MAPPED) {
+                continue;
+            }
+
+            if (!tool_mapper.set_mapping(i, curr_tool)) {
+                cleanup();
+                return "Invalid tools mapping";
+            }
+            for (size_t j = 1; j < tool_mapping[i].size(); j++) {
+                if (tool_mapping[i][j] == ToolMapper::NO_TOOL_MAPPED) {
+                    break;
+                }
+
+                if (!spool_join.add_join(curr_tool, tool_mapping[i][j])) {
+                    cleanup();
+                    return "Invalid spool join setting";
+                }
+            }
+        }
+        return nullptr;
+    }
+} // namespace
+#endif
+
+const char *MarlinPrinter::start_print(const char *path, [[maybe_unused]] const std::optional<ToolMapping> &tools_mapping) {
     if (!printer_state::remote_print_ready(false)) {
-        return false;
+        return "Can't print now";
+    }
+
+    if (tools_mapping.has_value()) {
+#if ENABLED(PRUSA_TOOL_MAPPING)
+        if (const char *error = handle_tool_mapping(tools_mapping.value()); error != nullptr) {
+            return error;
+        }
+#else
+        return "Tools mapping not enabled";
+#endif
     }
 
     print_begin(path, marlin_server::PreviewSkipIfAble::all);
-    return marlin_client::is_print_started();
+    return marlin_client::is_print_started() ? nullptr : "Can't print now";
 }
 
 const char *MarlinPrinter::delete_file(const char *path) {
@@ -427,29 +571,8 @@ void MarlinPrinter::reset_printer() {
     NVIC_SystemReset();
 }
 
-namespace {
-    bool validate_response(const PhaseResponses &responses, Response to_check) {
-        for (auto resp : responses) {
-            if (to_check == resp) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-    template <class Phase>
-    const char *send_click(uint8_t phase, Response response) {
-        auto phase_enum = GetEnumFromPhaseIndex<Phase>(phase);
-        if (!validate_response(ClientResponses::GetResponses(phase_enum), response)) {
-            return "Invalid button for dialog";
-        }
-        marlin_client::FSM_response(phase_enum, response);
-        return nullptr;
-    }
-} // namespace
-
 const char *MarlinPrinter::dialog_action(uint32_t dialog_id, Response response) {
-    const fsm::States fsm_states = marlin_vars()->get_fsm_states();
+    const fsm::States fsm_states = marlin_vars().get_fsm_states();
     const std::optional<fsm::States::Top> top = fsm_states.get_top();
 
     // We always send dialog from the top FSM, so we can
@@ -463,37 +586,48 @@ const char *MarlinPrinter::dialog_action(uint32_t dialog_id, Response response) 
         return "Invalid dialog id";
     }
 
-    const uint8_t phase = top->data.GetPhase();
-    switch (top->fsm_type) {
-    case ClientFSM::Load_unload:
-        return send_click<PhasesLoadUnload>(phase, response);
-    case ClientFSM::Preheat:
-        return send_click<PhasesPreheat>(phase, response);
-    case ClientFSM::Selftest:
-        return send_click<PhasesSelftest>(phase, response);
-    case ClientFSM::ESP:
-        return send_click<PhasesESP>(phase, response);
-    case ClientFSM::CrashRecovery:
-        return send_click<PhasesCrashRecovery>(phase, response);
-    case ClientFSM::QuickPause:
-        return send_click<PhasesQuickPause>(phase, response);
-    case ClientFSM::Warning:
-        return send_click<PhasesWarning>(phase, response);
-    case ClientFSM::ColdPull:
-        return send_click<PhasesColdPull>(phase, response);
-    case ClientFSM::PrintPreview:
-        return send_click<PhasesPrintPreview>(phase, response);
-        // NOTE: These have no Phases and no buttons
-#if HAS_PHASE_STEPPING()
-    case ClientFSM::PhaseStepping:
-        return send_click<PhasesPhaseStepping>(phase, response);
-#endif
-    case ClientFSM::Printing:
-    case ClientFSM::Serial_printing:
-    case ClientFSM::_none:
-        return "No buttons";
+    const PhaseResponses &valid_responses = ClientResponses::get_fsm_responses(top->fsm_type, top->data.GetPhase());
+    if (std::find(valid_responses.begin(), valid_responses.end(), response) == valid_responses.end()) {
+        return "Invalid button for dialog";
     }
+
+    marlin_client::FSM_encoded_response(EncodedFSMResponse {
+        .response = FSMResponseVariant::make(response),
+        .encoded_phase = top->data.GetPhase(),
+        .encoded_fsm = ftrstd::to_underlying(top->fsm_type),
+    });
     return nullptr;
+}
+
+std::optional<MarlinPrinter::FinishedJobResult> MarlinPrinter::get_prior_job_result(uint16_t job_id) const {
+    auto result = marlin_vars().get_job_result(job_id);
+    if (!result.has_value()) {
+        return nullopt;
+    }
+
+    switch (result.value()) {
+    case marlin_vars_t::JobInfo::JobResult::aborted:
+        return FinishedJobResult::FIN_STOPPED;
+    case marlin_vars_t::JobInfo::JobResult::finished:
+        return FinishedJobResult::FIN_OK;
+    }
+
+    return nullopt;
+}
+
+void MarlinPrinter::set_slot_info(size_t idx, const SlotInfo &info) {
+    config_store().set_nozzle_diameter(idx, info.nozzle_diameter);
+    // The below ones are, technically, a bit racy. That is, if some other
+    // thread does something similar with a different nozzle than us, there's a
+    // change one of the changes may get lost. But we consider such occurence
+    // to be improbable (eg. user setting the nozzle params at the printer and
+    // through Connect at the very same moment).
+    auto hardened = config_store().nozzle_is_hardened.get();
+    hardened[idx] = info.hardened;
+    config_store().nozzle_is_hardened.set(hardened);
+    auto high_flow = config_store().nozzle_is_high_flow.get();
+    high_flow[idx] = info.high_flow;
+    config_store().nozzle_is_high_flow.set(high_flow);
 }
 
 } // namespace connect_client

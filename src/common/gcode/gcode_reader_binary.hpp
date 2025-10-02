@@ -11,19 +11,21 @@ extern "C" {
 #include "heatshrink_decoder.h"
 }
 
+#include <inplace_function.hpp>
+
 /**
  * @brief Implementation of IGcodeReader for PrusaPack files
  */
-class PrusaPackGcodeReader final : public IGcodeReader {
+class PrusaPackGcodeReader final : public GcodeReaderCommon {
 public:
     PrusaPackGcodeReader(FILE &f, const struct stat &stat_info);
     PrusaPackGcodeReader(PrusaPackGcodeReader &&other) = default;
     PrusaPackGcodeReader &operator=(PrusaPackGcodeReader &&other) = default;
 
     virtual bool stream_metadata_start() override;
-    virtual bool stream_gcode_start(uint32_t offset = 0) override;
+    virtual Result_t stream_gcode_start(uint32_t offset = 0) override;
     virtual bool stream_thumbnail_start(uint16_t expected_width, uint16_t expected_height, ImgType expected_type, bool allow_larger = false) override;
-    virtual Result_t stream_get_block(char *out_data, size_t &size) override;
+    virtual Result_t stream_get_line(GcodeBuffer &buffer, Continuations) override;
     virtual uint32_t get_gcode_stream_size_estimate() override;
     virtual uint32_t get_gcode_stream_size() override;
 
@@ -33,7 +35,12 @@ public:
         return { .data = stream_restore_info };
     }
     void set_restore_info(const StreamRestoreInfo &restore_info) override {
-        stream_restore_info = std::get<StreamRestoreInfo::PrusaPack>(restore_info.data);
+        // Don't crash if we provide empty restore info - that simply indicates that we don't have any
+        if (const auto *ri = std::get_if<StreamRestoreInfo::PrusaPack>(&restore_info.data)) {
+            stream_restore_info = *ri;
+        } else {
+            stream_restore_info = {};
+        }
     }
 
     virtual bool valid_for_print() override;
@@ -73,7 +80,11 @@ private:
         End, //< end search
     };
 
-    std::optional<bgcode::core::BlockHeader> iterate_blocks(std::function<IterateResult_t(bgcode::core::BlockHeader &)> function);
+    // Returns:
+    // * monostate if the provided function returns End
+    // * The block header if the function returns Return
+    // * An error indication in case of error (including EOF)
+    std::variant<std::monostate, bgcode::core::BlockHeader, Result_t> iterate_blocks(bool check_crc, stdext::inplace_function<IterateResult_t(bgcode::core::BlockHeader &)> function);
 
     /// Pointer to function, that will get decompressed character from file, or data directly form file if not compressed
     stream_getc_type ptr_stream_getc_decompressed = nullptr;
@@ -124,11 +135,11 @@ private:
      * @brief Read block header at current position
      * @note Also checks for file validity and will return RESULT_OUT_OF_RANGE if any part of the block is not valid
      */
-    Result_t read_block_header(bgcode::core::BlockHeader &block_header);
+    Result_t read_block_header(bgcode::core::BlockHeader &block_header, bool check_crc = false);
 
     /**
      * @brief Reads file header and check its content (for magic, version etc)
-     * @return false when header invalid - file shouldn't be used in that case.
+     * @return Status of the header.
      */
-    bool read_and_check_header();
+    Result_t read_and_check_header();
 };

@@ -4,10 +4,18 @@
 #include <stdbool.h>
 #include <memory>
 
+#include <logging/log.hpp>
+#include <unique_file_ptr.hpp>
+#include <common/heap.h>
+#include <common/conserve_cpu.hpp>
+#include <common/http/proxy.hpp>
+
 #include <lwip/mem.h>
 
 using http::Error;
 using std::unique_ptr;
+
+LOG_COMPONENT_REF(connect);
 
 namespace {
 
@@ -57,9 +65,10 @@ struct InitContexts {
 
 namespace connect_client {
 
-tls::tls(uint8_t timeout_s)
+tls::tls(uint8_t timeout_s, bool custom_cert)
     : http::Connection(timeout_s)
-    , net_context(timeout_s) {
+    , net_context(timeout_s)
+    , custom_cert(custom_cert) {
     mbedtls_net_init(&net_context);
     mbedtls_ssl_init(&ssl_context);
     mbedtls_ssl_config_init(&ssl_config);
@@ -82,10 +91,17 @@ tls::~tls() {
     mbedtls_ssl_config_free(&ssl_config);
 }
 
-std::optional<Error> tls::connection(const char *host, uint16_t port) {
+std::optional<Error> tls::connection(const char *connection_host, uint16_t connection_port, const char *destination_host, uint16_t destination_port) {
 
     int status;
     InitContexts ctxs;
+
+    // Ask for other subsystems to save CPU if possible until we are done with
+    // TLS handshake. That's CPU intensive and there's a risk we won't make it
+    // in time for the server not to close the connection.
+    //
+    // (for example, prevents rolling texts from rolling).
+    buddy::ConserveCpu::Guard request_cpu_limiting;
 
     if (!ctxs.is_valid()) {
         return Error::Memory;
@@ -96,9 +112,50 @@ std::optional<Error> tls::connection(const char *host, uint16_t port) {
     }
 
     mbedtls_ssl_conf_rng(&ssl_config, mbedtls_ctr_drbg_random, &ctxs.drbg_context);
-    for (const auto &cert : certificates) {
-        if ((status = mbedtls_x509_crt_parse_der_nocopy(&ctxs.x509_certificate, cert.data(), cert.size())) != 0) {
+    class FreeDeleter {
+    public:
+        void operator()(void *p) {
+            free(p);
+        }
+    };
+    unique_ptr<void, FreeDeleter> der_buffer;
+    if (custom_cert) {
+        // Note that mbedtls offers the parse_path / parse_file variants, but
+        // these expect a PEM file and we do not want to support PEM too (extra
+        // code size).
+        //
+        // TODO: Unify the path somewhere
+        unique_file_ptr cert(fopen("/internal/connect/connect.der", "rb"));
+        if (!cert) {
+            // Missing cert
+            return Error::Tls;
+        }
+
+        if (fseek(cert.get(), 0, SEEK_END) != 0) {
             return Error::InternalError;
+        }
+
+        long fsize = ftell(cert.get());
+        if (fsize == -1) {
+            return Error::InternalError;
+        }
+
+        rewind(cert.get());
+
+        der_buffer.reset(malloc_fallible(fsize));
+        if (!der_buffer) {
+            return Error::InternalError;
+        }
+
+        if (mbedtls_x509_crt_parse_der_nocopy(&ctxs.x509_certificate, static_cast<const uint8_t *>(der_buffer.get()), fsize) != 0) {
+            // Wrong file content
+            return Error::Tls;
+        }
+    } else {
+        for (const auto &cert : certificates) {
+            if ((status = mbedtls_x509_crt_parse_der_nocopy(&ctxs.x509_certificate, cert.data(), cert.size())) != 0) {
+                return Error::InternalError;
+            }
         }
     }
 
@@ -122,7 +179,7 @@ std::optional<Error> tls::connection(const char *host, uint16_t port) {
     static const int tls_cipher_suites[2] = { MBEDTLS_TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, 0 };
     mbedtls_ssl_conf_ciphersuites(&ssl_config, tls_cipher_suites);
 
-    mbedtls_ssl_set_hostname(&ssl_context, host);
+    mbedtls_ssl_set_hostname(&ssl_context, destination_host);
 
     if ((status = mbedtls_ssl_setup(&ssl_context, &ssl_config)) != 0) {
         return Error::InternalError;
@@ -130,16 +187,23 @@ std::optional<Error> tls::connection(const char *host, uint16_t port) {
 
     mbedtls_ssl_set_bio(&ssl_context, &net_context, mbedtls_net_send, mbedtls_net_recv, NULL);
 
-    constexpr size_t str_len = 6;
-    char port_as_str[str_len] = {};
-    snprintf(port_as_str, str_len, "%hu", port);
-
-    if ((status = mbedtls_net_connect(&net_context, host, port_as_str, MBEDTLS_NET_PROTO_TCP)) != 0) {
+    if ((status = mbedtls_plain_connect(&net_context, connection_host, connection_port)) != 0) {
+        log_info(connect, "ssl handshake failed with: %d", status);
         return Error::Connect;
+    }
+
+    // Really a pointer compare, not strcmp.
+    if (destination_host != connection_host || destination_port != connection_port) {
+        // We are using a proxy to do the connection. Ask it to tunnel it through before initiating the encryption.
+        const auto err = http::proxy_connect(net_context.plain_conn, destination_host, destination_port);
+        if (err.has_value()) {
+            return err.value();
+        }
     }
 
     while ((status = mbedtls_ssl_handshake(&ssl_context)) != 0) {
         if (status != MBEDTLS_ERR_SSL_WANT_READ && status != MBEDTLS_ERR_SSL_WANT_WRITE) {
+            log_info(connect, "ssl handshake failed with: %d", status);
             return Error::Tls;
         }
 
@@ -167,6 +231,7 @@ std::variant<size_t, Error> tls::tx(const uint8_t *send_buffer, size_t data_len)
     int status = mbedtls_ssl_write(&ssl_context, (const unsigned char *)send_buffer, data_len);
 
     if (status <= 0) {
+        log_info(connect, "ssl write failed with: %d", status);
         if (net_context.timeout_happened) {
             return Error::Timeout;
         } else {

@@ -24,7 +24,8 @@
 #include "module/motion.h"
 #include "module/tool_change.h"
 #include "marlin_stubs/PrusaGcodeSuite.hpp"
-#include <logging/log.h>
+#include <logging/log.hpp>
+#include <filament_to_load.hpp>
 
 LOG_COMPONENT_REF(PRUSA_GCODE);
 
@@ -130,32 +131,18 @@ void GcodeSuite::M600() {
 
 void M600_execute(xyz_pos_t park_point, uint8_t target_extruder,
     xyze_float_t resume_point, std::optional<float> unloadLength, std::optional<float> fastLoadLength,
-    std::optional<float> retractLength, std::optional<filament::Colour> filament_colour,
-    std::optional<filament::Type> filament_type, pause::Settings::CalledFrom);
+    std::optional<float> retractLength, std::optional<Color> filament_colour,
+    std::optional<FilamentType> filament_type, pause::Settings::CalledFrom);
 
 void M600_manual() {
     char colourtype[16] = { '\0' };
 
-    auto filament_to_be_loaded = filament::Type::NONE;
-    const char *text_begin = 0;
-    if (parser.seen('S')) {
-        text_begin = strchr(parser.string_arg, '"');
-        if (text_begin) {
-            ++text_begin; // move pointer from '"' to first letter
-            const char *text_end = strchr(text_begin, '"');
-            if (text_end) {
-                auto filament = filament::get_type(text_begin, text_end - text_begin);
-                if (filament != filament::Type::NONE) {
-                    filament_to_be_loaded = filament;
-                }
-            }
-        }
-    }
+    const auto filament_to_be_loaded = PrusaGcodeSuite::get_filament_type_from_command('S');
 
     if (parser.seen('C')) {
         const char *colourtype_ptr = nullptr;
         if ((colourtype_ptr = strstr(parser.string_arg, "C\"")) != nullptr) {
-            text_begin = strchr(colourtype_ptr, '"');
+            const char *text_begin = strchr(colourtype_ptr, '"');
             if (text_begin) {
                 ++text_begin;
                 strlcpy(colourtype, text_begin, sizeof(colourtype));
@@ -167,7 +154,7 @@ void M600_manual() {
                 }
             }
         } else if ((colourtype_ptr = strstr(parser.string_arg, "C ")) != nullptr) {
-            text_begin = strchr(colourtype_ptr, ' ');
+            const char *text_begin = strchr(colourtype_ptr, ' ');
             if (text_begin) {
                 ++text_begin;
                 strlcpy(colourtype, text_begin, sizeof(colourtype));
@@ -190,10 +177,10 @@ void M600_manual() {
 #endif
 
     xyz_pos_t park_point =
-#ifdef NOZZLE_PARK_POINT_M600
-        NOZZLE_PARK_POINT_M600;
+#ifdef XYZ_NOZZLE_PARK_POINT_M600
+        XYZ_NOZZLE_PARK_POINT_M600;
 #else
-        NOZZLE_PARK_POINT;
+        XYZ_NOZZLE_PARK_POINT;
 #endif
 
     // Lift Z axis
@@ -224,14 +211,14 @@ void M600_manual() {
         parser.seen('U') ? std::make_optional(parser.value_axis_units(E_AXIS)) : std::nullopt,
         parser.seen('L') ? std::make_optional(parser.value_axis_units(E_AXIS)) : std::nullopt,
         parser.seen('E') ? std::make_optional(std::abs(parser.value_axis_units(E_AXIS))) : std::nullopt,
-        parser.seen('C') ? std::make_optional(filament::Colour::from_string(colourtype)) : std::nullopt,
+        parser.seen('C') ? Color::from_string(colourtype) : std::nullopt,
         parser.seen('S') ? std::make_optional(filament_to_be_loaded) : std::nullopt,
         pause::Settings::CalledFrom::Pause);
 }
 
 void M600_execute(xyz_pos_t park_point, uint8_t target_extruder, xyze_float_t resume_point,
     std::optional<float> unloadLength, std::optional<float> fastLoadLength, std::optional<float> retractLength,
-    std::optional<filament::Colour> filament_colour, std::optional<filament::Type> filament_type,
+    std::optional<Color> filament_colour, std::optional<FilamentType> filament_type,
     pause::Settings::CalledFrom called_from) {
 
     // Ignore estalls during filament change
@@ -252,14 +239,14 @@ void M600_execute(xyz_pos_t park_point, uint8_t target_extruder, xyze_float_t re
 
     // Check if we need to do a toolchange
     std::optional<ToolChangeData> tool_change_data {};
-    if (target_extruder != marlin_vars()->active_extruder) {
+    if (target_extruder != marlin_vars().active_extruder) {
         // Since the native coordinates contain hotend_currently_applied_offset we need to store the logical
         // version of these coordinates to make it easier to convert to the target_extruder's native coordinates.
         const auto logical_resume = resume_point.asLogical();
         tool_change_data = ToolChangeData {
             .original_resume_point = logical_resume,
             .target_extruder_original_temperature = Temperature::degTargetHotend(target_extruder),
-            .original_extruder = marlin_vars()->active_extruder,
+            .original_extruder = marlin_vars().active_extruder,
         };
 
         tool_change(target_extruder, tool_return_t::no_return, tool_change_lift_t::mbl_only_lift, true);
@@ -268,8 +255,8 @@ void M600_execute(xyz_pos_t park_point, uint8_t target_extruder, xyze_float_t re
         resume_point = prusa_toolchanger.get_tool_dock_position(target_extruder); // Sets only x, y coordinates
 
         // Preheat the tool for filament change -> normally we don't do that for M600. But the slicer team wanted this.
-        const auto &filament_data = filament::get_description(config_store().get_filament_type(target_extruder));
-        Temperature::setTargetHotend(filament_data.nozzle, target_extruder);
+        const auto filament_data = config_store().get_filament_type(target_extruder).parameters();
+        Temperature::setTargetHotend(filament_data.nozzle_temperature, target_extruder);
         Temperature::wait_for_hotend(target_extruder);
     }
 #endif
@@ -295,7 +282,7 @@ void M600_execute(xyz_pos_t park_point, uint8_t target_extruder, xyze_float_t re
         marlin_server::unpause_nozzle(target_extruder);
     }
 
-    const float disp_temp = marlin_vars()->hotend(target_extruder).display_nozzle;
+    const float disp_temp = marlin_vars().hotend(target_extruder).display_nozzle;
     const float targ_temp = Temperature::degTargetHotend(target_extruder);
 
     marlin_server::nozzle_timeout_off();
@@ -345,7 +332,7 @@ void M600_execute(xyz_pos_t park_point, uint8_t target_extruder, xyze_float_t re
 #if HAS_LOADCELL()
 void PrusaGcodeSuite::M1601() {
     M600_execute(
-        NOZZLE_PARK_POINT_M600,
+        XYZ_NOZZLE_PARK_POINT_M600,
         active_extruder,
         current_position,
         std::nullopt, std::nullopt, std::nullopt,

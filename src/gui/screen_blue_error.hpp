@@ -17,12 +17,12 @@
  *
  * @note No windowEvent() here, user must press reset to get rid of bluescreen.
  */
-class ScreenBlueError : public AddSuperWindow<ScreenResetError> {
+class ScreenBlueError : public ScreenResetError {
 public:
     ScreenBlueError();
 
     static const constexpr uint16_t fw_line_top = 265;
-    static const constexpr Rect16 description_rect = Rect16(13, title_rect.Bottom() + 5, display::GetW() - 26, fw_line_top - title_rect.Bottom() - 10);
+    static const constexpr Rect16 description_rect = Rect16(13, title_rect.Bottom() + 5, GuiDefaults::ScreenWidth - 26, fw_line_top - title_rect.Bottom() - 10);
 
     // Expected size of the description text
     static const constexpr Font description_font = Font::small;

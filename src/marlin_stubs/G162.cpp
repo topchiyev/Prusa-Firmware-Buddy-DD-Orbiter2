@@ -19,11 +19,11 @@
 static constexpr feedRate_t Z_CALIB_ALIGN_AXIS_FEEDRATE = 15.f; // mm/s
 static constexpr float Z_CALIB_EXTRA_HIGHT = 5.f; // mm
 
-#if PRINTER_IS_PRUSA_XL
+#if PRINTER_IS_PRUSA_XL()
     #include <module/prusa/toolchanger.h>
 
 void selftest::calib_Z([[maybe_unused]] bool move_down_after) {
-    FSM_CHANGE__LOGGING(PhasesSelftest::CalibZ);
+    marlin_server::fsm_change(PhasesSelftest::CalibZ);
 
     // backup original acceleration/feedrates and reset defaults for calibration
     Temporary_Reset_Motion_Parameters mp;
@@ -104,7 +104,7 @@ void selftest::calib_Z(bool move_down_after) {
     planner.set_max_acceleration(Z_AXIS, def_accel[Z_AXIS]);
 
     // Z axis lift
-    FSM_CHANGE__LOGGING(PhasesSelftest::CalibZ);
+    marlin_server::fsm_change(PhasesSelftest::CalibZ);
     endstops.enable(true); // Stall endstops need to be enabled manually as in G28
     if (!homeaxis(Z_AXIS, MMM_TO_MMS(HOMING_FEEDRATE_INVERTED_Z), true)) {
         fatal_error(ErrCode::ERR_ELECTRO_HOMING_ERROR_Z);
@@ -149,8 +149,8 @@ void PrusaGcodeSuite::G162() {
 #if HAS_PHASE_STEPPING()
         phase_stepping::EnsureDisabled ps_disabler;
 #endif
-        FSM_HOLDER__LOGGING(Selftest);
-        selftest::calib_Z(true);
+        marlin_server::FSM_Holder holder { PhasesSelftest::CalibZ };
+        selftest::calib_Z(PRINTER_IS_PRUSA_iX() ? false : true);
     }
 }
 

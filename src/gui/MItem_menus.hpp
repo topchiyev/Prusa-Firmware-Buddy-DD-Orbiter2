@@ -1,548 +1,198 @@
-/*****************************************************************************/
-// Screen openning menu items
 #pragma once
+
 #include "WindowMenuItems.hpp"
-#include "WindowMenuSwitch.hpp"
 #include "i18n.h"
 #include <option/has_toolchanger.h>
 #include <option/has_side_leds.h>
 #include <option/has_filament_sensors_menu.h>
 #include <option/has_leds.h>
+#include <option/has_sheet_profiles.h>
 #include <option/developer_mode.h>
-#include <common/sheet.hpp>
+#include <option/has_translations.h>
+#include <img_resources.hpp>
+#include <ScreenFactory.hpp>
 
-class MI_VERSION_INFO : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Version Info");
-
-public:
-    MI_VERSION_INFO();
-
+class MI_SCREEN_BASE : public IWindowMenuItem {
 protected:
-    virtual void click(IWindowMenu &window_menu) override;
+    // Two constructors for flash saving (so that we don't need to pass that many parameters)
+    MI_SCREEN_BASE(ScreenFactory::Creator::Func screen_ctor, const char *label);
+    MI_SCREEN_BASE(ScreenFactory::Creator::Func screen_ctor, const char *label, const img::Resource *icon, is_hidden_t is_hidden = is_hidden_t::no);
+
+    void click(IWindowMenu &) final;
+
+private:
+    const ScreenFactory::Creator::Func screen_ctor_;
 };
 
-class MI_SENSOR_INFO : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Sensor Info");
-
-public:
-    MI_SENSOR_INFO();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
+template <typename T>
+struct MI_SCREEN_CTOR {
+    // Implemented in the cpp file
+    static ScreenFactory::Creator::Func get();
 };
 
-class MI_ODOMETER : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Statistics");
-
+/// Usage:
+/// - Add here: using MI_XXX = MI_SCREEN<N_("Lavbel"), class ScreenClass>;
+/// - Include the relevant screen header in the cpp
+/// - Instantiate template struct MI_SCREEN_CTOR<ScreenClass>; in the cpp
+template <auto label_, class Screen_, auto... args>
+class MI_SCREEN final : public MI_SCREEN_BASE {
 public:
-    MI_ODOMETER();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
+    inline MI_SCREEN()
+        : MI_SCREEN_BASE(MI_SCREEN_CTOR<Screen_>::get(), label_, args...) {}
 };
 
-class MI_FILAMENT : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Filament");
+using MI_FILAMENT_MANAGEMENT
+    = MI_SCREEN<N_("Manage Filaments"), class ScreenFilamentManagement>;
 
-public:
-    MI_FILAMENT();
+using MI_EDIT_FILAMENTS
+    = MI_SCREEN<N_("Edit Filaments"), class ScreenFilamentManagementList>;
 
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
+using MI_REORDER_FILAMENTS
+    = MI_SCREEN<N_("Reorder Filaments"), class ScreenFilamentsReorder>;
 
-class MI_SYS_INFO : public IWindowMenuItem {
-    static constexpr const char *const label = N_("System Info");
+using MI_FILAMENTS_VISIBILITY
+    = MI_SCREEN<N_("Enable Filaments"), class ScreenFilamentsVisibility>;
 
-public:
-    MI_SYS_INFO();
+using MI_VERSION_INFO
+    = MI_SCREEN<N_("Version Info"), class ScreenMenuVersionInfo>;
 
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
+using MI_SENSOR_INFO
+    = MI_SCREEN<N_("Sensor Info"), class ScreenMenuSensorInfo>;
 
-class MI_STATISTIC_disabled : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Statistic");
+using MI_ODOMETER
+    = MI_SCREEN<N_("Statistics"), class ScreenMenuOdometer>;
 
-public:
-    MI_STATISTIC_disabled();
+using MI_SYS_INFO
+    = MI_SCREEN<N_("System Info"), class screen_sysinfo_data_t>;
 
-protected:
-    virtual void click([[maybe_unused]] IWindowMenu &window_menu) override {}
-};
+using MI_FAIL_STAT
+    = MI_SCREEN<N_("Fail Stats"), class ScreenMenuFailStat>;
 
-class MI_FAIL_STAT : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Fail Stats");
+using MI_TEMPERATURE
+    = MI_SCREEN<N_("Temperature"), class ScreenMenuTemperature, &img::temperature_16x16>;
 
-public:
-    MI_FAIL_STAT();
+using MI_MOVE_AXIS
+    = MI_SCREEN<N_("Move Axis"), class ScreenMenuMove, &img::move_16x16>;
 
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
+using MI_FW_UPDATE
+    = MI_SCREEN<N_("FW Update"), class ScreenMenuFwUpdate, nullptr, is_hidden_t::dev>;
 
-class MI_SUPPORT_disabled : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Support");
+using MI_METRICS_SETTINGS
+    = MI_SCREEN<N_("Metrics & Log"), class ScreenMenuMetricsSettings>;
 
-public:
-    MI_SUPPORT_disabled();
+using MI_ETH_SETTINGS
+    = MI_SCREEN<N_("Ethernet"), class ScreenMenuEthernetSettings, &img::lan_16x16>;
 
-protected:
-    virtual void click([[maybe_unused]] IWindowMenu &window_menu) override {}
-};
+using MI_WIFI_SETTINGS
+    = MI_SCREEN<N_("Wi-Fi"), class ScreenMenuWifiSettings, &img::wifi_16x16>;
 
-class MI_TEMPERATURE : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Temperature");
+using MI_MESSAGES
+    = MI_SCREEN<N_("Message History"), class screen_messages_data_t>;
 
-public:
-    MI_TEMPERATURE();
+using MI_PRUSA_CONNECT
+    = MI_SCREEN<N_("Prusa Connect"), class ScreenMenuConnect>;
 
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
+using MI_PRUSALINK
+    = MI_SCREEN<N_("PrusaLink"), class ScreenMenuPrusaLink>;
 
-class MI_MOVE_AXIS : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Move Axis");
+using MI_EEPROM
+    = MI_SCREEN<N_("EEPROM"), class ScreenMenuEeprom, nullptr, is_hidden_t::dev>;
 
-public:
-    MI_MOVE_AXIS();
+using MI_FOOTER_SETTINGS
+    = MI_SCREEN<N_("Footer"), class ScreenMenuFooterSettings>;
 
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
+using MI_FOOTER_SETTINGS_ADV
+    = MI_SCREEN<N_("Advanced"), class ScreenMenuFooterSettingsAdv, nullptr, is_hidden_t::dev>;
 
-class MI_SERVICE : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Service");
+using MI_EXPERIMENTAL_SETTINGS
+    = MI_SCREEN<N_("Experimental Settings"), class ScreenMenuExperimentalSettings, nullptr, is_hidden_t::dev>;
 
-public:
-    MI_SERVICE();
+using MI_USER_INTERFACE
+    = MI_SCREEN<N_("User Interface"), class ScreenMenuUserInterface>;
 
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
+using MI_LANG_AND_TIME
+    = MI_SCREEN<N_("Language & Time"), class ScreenMenuLangAndTime>;
+
+using MI_NETWORK
+    = MI_SCREEN<N_("Network"), class ScreenMenuNetwork>;
+
+using MI_NETWORK_STATUS
+    = MI_SCREEN<N_("Network Status"), class ScreenMenuNetworkStatus>;
+
+using MI_HARDWARE
+    = MI_SCREEN<N_("Hardware"), class ScreenMenuHardware>;
+
+using MI_HARDWARE_TUNE
+    = MI_SCREEN<N_("Hardware"), class ScreenMenuHardwareTune, nullptr, is_hidden_t::dev>;
+
+using MI_SYSTEM
+    = MI_SCREEN<N_("System"), class ScreenMenuSystem>;
+
+using MI_PRINT_STATISTICS
+    = MI_SCREEN<N_("Print Statistics"), class ScreenMenuStatistics>;
+
+using MI_INFO
+    = MI_SCREEN<N_("Info"), class ScreenMenuInfo>;
+
+using MI_OPEN_FACTORY_RESET
+    = MI_SCREEN<N_("Factory Reset"), class ScreenMenuFactoryReset>;
+
+using MI_INPUT_SHAPER
+    = MI_SCREEN<N_("Input Shaper"), class ScreenMenuInputShaper>;
+
+namespace screen_printer_setup_private {
+class ScreenPrinterSetup;
+}
+using MI_PRINTER_SETUP
+    = MI_SCREEN<N_("Printer Setup"), screen_printer_setup_private::ScreenPrinterSetup, nullptr, is_hidden_t::dev>;
 
 #if DEVELOPER_MODE()
-/**
- * @brief Test Errors as BSOD, redscreens, watchdog and so on.
- * @note Enabled only in developer mode. Can be used in release build.
- */
-class MI_ERROR_TEST : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Test Errors");
 
-public:
-    MI_ERROR_TEST();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
-#endif /*DEVELOPMENT_ITEMS()*/
-
-class MI_TEST : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Test");
-
-public:
-    MI_TEST();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
-
-class MI_FW_UPDATE : public IWindowMenuItem {
-    static constexpr const char *const label = N_("FW Update");
-
-public:
-    MI_FW_UPDATE();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
-
-class MI_METRICS_SETTINGS : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Metrics & Log");
-
-public:
-    MI_METRICS_SETTINGS();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
-
-class MI_ETH_SETTINGS : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Ethernet");
-
-public:
-    MI_ETH_SETTINGS();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
-
-class MI_WIFI_SETTINGS : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Wi-Fi");
-
-public:
-    MI_WIFI_SETTINGS();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
-
-class MI_MESSAGES : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Message History");
-
-public:
-    MI_MESSAGES();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
-
-class MI_PRUSA_CONNECT : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Prusa Connect");
-
-public:
-    MI_PRUSA_CONNECT();
-
-protected:
-    virtual void click(IWindowMenu &windowMenu) override;
-};
-
-class MI_HW_SETUP : public IWindowMenuItem {
-    static constexpr const char *const label = N_("HW Setup");
-
-public:
-    MI_HW_SETUP();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
-
-class MI_CURRENT_SHEET_PROFILE : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Sheet Profile");
-
-    static constexpr Font font = GuiDefaults::FontMenuItems;
-    static constexpr auto extension_width = Rect16::W_t((MAX_SHEET_NAME_LENGTH + 2) * width(font) + GuiDefaults::MenuPaddingItems.left + GuiDefaults::MenuPaddingItems.right);
-
-    std::array<char, MAX_SHEET_NAME_LENGTH + 3> extension_str;
-
-public:
-    MI_CURRENT_SHEET_PROFILE();
-
-protected:
-    void printExtension(Rect16 extension_rect, color_t color_text, color_t color_back, ropfn raster_op) const override;
-    void click(IWindowMenu &) override;
-};
-
-class MI_EEPROM : public IWindowMenuItem {
-    static constexpr const char *const label = "Eeprom";
-
-public:
-    MI_EEPROM();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
-
-class MI_DEVHASH_IN_QR : public WI_ICON_SWITCH_OFF_ON_t {
-    constexpr static const char *const label = N_("Device Hash in QR");
-
-public:
-    MI_DEVHASH_IN_QR();
-    virtual void OnChange(size_t old_index) override;
-};
-
-class MI_FOOTER_SETTINGS : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Footer");
-
-public:
-    MI_FOOTER_SETTINGS();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
-
-class MI_WAVETABLE_XYZ : public WI_ICON_SWITCH_OFF_ON_t {
-    static constexpr const char *const label = N_("Change Wave Table XYZ");
-
-public:
-    MI_WAVETABLE_XYZ();
-    virtual void OnChange(size_t old_index) override;
-};
-
-class MI_FOOTER_SETTINGS_ADV : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Advanced");
-
-public:
-    MI_FOOTER_SETTINGS_ADV();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
-
-class MI_EXPERIMENTAL_SETTINGS : public IWindowMenuItem {
-    static constexpr const char *const label = "Experimental Settings";
-
-public:
-    MI_EXPERIMENTAL_SETTINGS();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
-
-class MI_EEPROM_DIAGNOSTICS : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Eeprom Diagnostics");
-
-public:
-    MI_EEPROM_DIAGNOSTICS();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
-
-class MI_DIAGNOSTICS : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Diagnostics");
-
-public:
-    MI_DIAGNOSTICS();
-
-protected:
-    virtual void click(IWindowMenu &windowMenu) override;
-};
-
-class MI_USER_INTERFACE : public IWindowMenuItem {
-    static constexpr const char *const label = N_("User Interface");
-
-public:
-    MI_USER_INTERFACE();
-
-protected:
-    virtual void click(IWindowMenu &windowMenu) override;
-};
-
-class MI_LANG_AND_TIME : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Language & Time");
-
-public:
-    MI_LANG_AND_TIME();
-
-protected:
-    virtual void click(IWindowMenu &windowMenu) override;
-};
-
-class MI_LOAD_SETTINGS : public IWindowMenuItem {
-    constexpr static const char *const label = N_("Load Settings from File");
-
-public:
-    MI_LOAD_SETTINGS();
-
-    virtual void click(IWindowMenu &) override;
-};
-
-class MI_NETWORK : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Network");
-
-public:
-    MI_NETWORK();
-
-protected:
-    virtual void click(IWindowMenu &windowMenu) override;
-};
-
-class MI_HARDWARE : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Hardware");
-
-public:
-    MI_HARDWARE();
-
-protected:
-    virtual void click(IWindowMenu &windowMenu) override;
-};
-
-class MI_HARDWARE_TUNE : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Hardware");
-
-public:
-    MI_HARDWARE_TUNE();
-
-protected:
-    virtual void click(IWindowMenu &windowMenu) override;
-};
-
-class MI_SYSTEM : public IWindowMenuItem {
-    static constexpr const char *const label = N_("System");
-
-public:
-    MI_SYSTEM();
-
-protected:
-    virtual void click(IWindowMenu &windowMenu) override;
-};
-
-class MI_PRINT_STATISTICS : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Print Statistics");
-
-public:
-    MI_PRINT_STATISTICS();
-
-protected:
-    virtual void click(IWindowMenu &windowMenu) override;
-};
-
-class MI_INFO : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Info");
-
-public:
-    MI_INFO();
-
-protected:
-    virtual void click(IWindowMenu &windowMenu) override;
-};
-
-class MI_PRUSALINK : public IWindowMenuItem {
-    static constexpr const char *const label = "PrusaLink";
-
-public:
-    MI_PRUSALINK();
-
-protected:
-    virtual void click(IWindowMenu &windowMenu) override;
-};
-
-class MI_USB_MSC_ENABLE : public WI_ICON_SWITCH_OFF_ON_t {
-    constexpr static char const *label = "USB MSC";
-
-public:
-    MI_USB_MSC_ENABLE();
-    virtual void OnChange(size_t old_index) override;
-};
-#if HAS_LEDS()
-class MI_LEDS_ENABLE : public WI_ICON_SWITCH_OFF_ON_t {
-    static constexpr const char *const label = N_("RGB Status Bar");
-
-public:
-    MI_LEDS_ENABLE();
-    virtual void OnChange(size_t old_index) override;
-};
+using MI_ERROR_TEST
+    = MI_SCREEN<N_("Test Errors"), class ScreenMenuErrorTest, nullptr, is_hidden_t::dev>;
 #endif
 
-#if HAS_SIDE_LEDS()
-class MI_SIDE_LEDS_ENABLE : public WI_ICON_SWITCH_OFF_ON_t {
-    static constexpr const char *const label = N_("RGB Side Strip");
+#if HAS_TRANSLATIONS()
 
-public:
-    MI_SIDE_LEDS_ENABLE();
-    virtual void OnChange(size_t old_index) override;
-};
-
-class MI_SIDE_LEDS_DIMMING : public WI_ICON_SWITCH_OFF_ON_t {
-    static constexpr const char *const label = N_("RGB Side Strip Dimming");
-
-public:
-    MI_SIDE_LEDS_DIMMING();
-    virtual void OnChange(size_t old_index) override;
-};
+using MI_LANGUAGE
+    = MI_SCREEN<N_("Language"), class ScreenMenuLanguages, &img::language_16x16>;
 #endif
 
-#if HAS_TOOLCHANGER()
-class MI_TOOL_LEDS_ENABLE : public WI_ICON_SWITCH_OFF_ON_t {
-    static constexpr const char *const label = N_("Tool Light");
+#if HAS_SHEET_PROFILES()
 
-public:
-    MI_TOOL_LEDS_ENABLE();
-    virtual void OnChange(size_t old_index) override;
-};
-
-class MI_TOOLS_SETUP : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Tools");
-
-public:
-    MI_TOOLS_SETUP();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
-#endif /*HAS_TOOLCHANGER()*/
+using MI_STEEL_SHEETS
+    = MI_SCREEN<N_("Steel Sheets"), class ScreenMenuSteelSheets>;
+#endif
 
 #if HAS_FILAMENT_SENSORS_MENU()
-class MI_FILAMENT_SENSORS : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Filament sensors");
 
-public:
-    MI_FILAMENT_SENSORS();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
-#endif /*HAS_FILAMENT_SENSORS_MENU()*/
-
-class MI_TRIGGER_POWER_PANIC : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Trigger Power Panic");
-
-public:
-    MI_TRIGGER_POWER_PANIC();
-
-protected:
-    virtual void click(IWindowMenu &windowMenu) override;
-};
-
-class MI_PICK_PARK_TOOL : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Pick/Park Tool");
-
-public:
-    MI_PICK_PARK_TOOL();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
-
-class MI_CALIBRATE_DOCK : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Calibrate Dock Position");
-
-public:
-    MI_CALIBRATE_DOCK();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
-
-class MI_SELFTEST_SNAKE : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Calibrations & Tests");
-
-public:
-    MI_SELFTEST_SNAKE();
-
-protected:
-    virtual void click(IWindowMenu &windowMenu) override;
-};
-
-class MI_OPEN_FACTORY_RESET : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Factory Reset");
-
-public:
-    MI_OPEN_FACTORY_RESET();
-
-protected:
-    virtual void click(IWindowMenu &windowMenu) override;
-};
-
-class MI_INPUT_SHAPER : public IWindowMenuItem {
-    constexpr static const char *label = N_("Input Shaper");
-
-public:
-    MI_INPUT_SHAPER();
-
-protected:
-    virtual void click(IWindowMenu &windowMenu) override;
-};
-
-#if PRINTER_IS_PRUSA_MK3_5 || PRINTER_IS_PRUSA_MINI
-class MI_BED_LEVEL_CORRECTION : public IWindowMenuItem {
-    static constexpr const char *const label = N_("Bed Level Correction");
-
-public:
-    MI_BED_LEVEL_CORRECTION();
-
-protected:
-    virtual void click(IWindowMenu &window_menu) override;
-};
+using MI_FILAMENT_SENSORS
+    = MI_SCREEN<N_("Filament sensors"), class ScreenMenuFilamentSensors>;
 #endif
+
+#if HAS_SELFTEST()
+
+using MI_SELFTEST_SNAKE
+    = MI_SCREEN<N_("Calibrations & Tests"), class ScreenMenuSTSCalibrations, &img::calibrate_white_16x16>;
+#endif
+
+#if PRINTER_IS_PRUSA_MK3_5() || PRINTER_IS_PRUSA_MINI()
+
+using MI_BED_LEVEL_CORRECTION
+    = MI_SCREEN<N_("Bed Level Correction"), class ScreenMenuBedLevelCorrection>;
+#endif
+
+class MI_SERIAL_PRINTING_SCREEN_ENABLE : public WI_ICON_SWITCH_OFF_ON_t {
+    static constexpr const char *const label = N_("Serial Printing Screen");
+
+public:
+    MI_SERIAL_PRINTING_SCREEN_ENABLE();
+    virtual void OnChange(size_t old_index) override;
+};
+
+/// Opens toolhead 0 settings on single toolhead machines or submenu to select a toolhead on multi-toolhead machines
+class MI_TOOLHEAD_SETTINGS final : public IWindowMenuItem {
+public:
+    MI_TOOLHEAD_SETTINGS();
+    void click(IWindowMenu &) override;
+};

@@ -34,10 +34,10 @@ enum class printing_state_t : uint8_t {
 
 inline constexpr size_t POPUP_MSG_DUR_MS = 5000;
 
-class screen_printing_data_t : public AddSuperWindow<ScreenPrintingModel> {
+class screen_printing_data_t : public ScreenPrintingModel {
     static constexpr const char *caption = N_("PRINTING ...");
 
-#if defined(USE_ILI9488)
+#if HAS_LARGE_DISPLAY()
     PrintProgress print_progress;
 
     /**
@@ -69,10 +69,10 @@ class screen_printing_data_t : public AddSuperWindow<ScreenPrintingModel> {
     window_roll_text_t w_filename;
     WindowPrintProgress w_progress;
     WindowNumbPrintProgress w_progress_txt;
-#if defined(USE_ST7789)
+#if HAS_MINI_DISPLAY()
     window_text_t w_time_label;
     window_text_t w_time_value;
-#endif // USE_ST7789
+#endif
     window_text_t w_etime_label;
     window_text_t w_etime_value;
 
@@ -88,6 +88,8 @@ class screen_printing_data_t : public AddSuperWindow<ScreenPrintingModel> {
     void hide_time_information();
 
     std::array<char, 5> text_filament; // 999m\0 | 1.2m\0
+    std::array<char, FILE_NAME_BUFFER_LEN> text_filename;
+
     uint32_t message_timer;
     bool stop_pressed;
     bool waiting_for_abort; /// flag specific for stop pressed when MBL is performed
@@ -96,7 +98,7 @@ class screen_printing_data_t : public AddSuperWindow<ScreenPrintingModel> {
     float last_e_axis_position;
     const Rect16 popup_rect;
 
-#if defined(USE_ST7789)
+#if HAS_MINI_DISPLAY()
     PrintTime print_time;
     PT_t time_end_format;
 #else
@@ -121,15 +123,15 @@ public:
     screen_printing_data_t();
 
 protected:
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 
 private:
     void invalidate_print_state();
     void updateTimes();
 
-#if defined(USE_ST7789)
+#if HAS_MINI_DISPLAY()
     void update_print_duration(time_t rawtime);
-#endif // USE_ST7789
+#endif
     void screen_printing_reprint();
     void set_pause_icon_and_label();
     void set_tune_icon_and_label();

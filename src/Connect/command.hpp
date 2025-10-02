@@ -3,7 +3,7 @@
 #include "printer.hpp"
 
 #include <common/shared_buffer.hpp>
-#include <device/board.h>
+
 #include <cstdint>
 #include <string_view>
 #include <variant>
@@ -35,8 +35,12 @@ struct SendTransferInfo {};
 struct PausePrint {};
 struct ResumePrint {};
 struct StopPrint {};
+// NOTE: if you are changing this, change also the one in printer.hpp,
+//  it is at both places, otherwise it would create circular dependencies
+using ToolMapping = std::array<std::array<uint8_t, EXTRUDERS>, EXTRUDERS>;
 struct StartPrint {
     SharedPath path;
+    std::optional<ToolMapping> tool_mapping;
 };
 struct SetPrinterReady {};
 struct CancelPrinterReady {};
@@ -55,6 +59,15 @@ struct StartEncryptedDownload {
     Block iv;
     // Fatfs can't do bigger than 4GB files anyway, right?
     uint32_t orig_size;
+};
+struct StartInlineDownload {
+    uint64_t team_id;
+    uint32_t orig_size;
+    SharedPath path;
+    // TODO: In fact, that hash is base64-encoded 16-byte hash. We _could_ save
+    // some space by decoding/encoding as necessary.
+    static constexpr size_t HASH_BUFF = 29;
+    char hash[HASH_BUFF];
 };
 struct DeleteFile {
     SharedPath path;
@@ -76,25 +89,40 @@ struct DialogAction {
     Response response;
 };
 
-#if XL_ENCLOSURE_SUPPORT()
+#define NOZZLE_NAMES(i)      \
+    Nozzle##i##Diameter,     \
+        Nozzle##i##HighFlow, \
+        Nozzle##i##AntiAbrasive
+
 enum class PropertyName {
+    HostName,
+#if XL_ENCLOSURE_SUPPORT()
     EnclosureEnabled,
     EnclosurePrintingFiltration,
     EnclosurePostPrint,
     EnclosurePostPrintFiltrationTime,
+#endif
+    NozzleDiameter,
+    NozzleHighFlow,
+    NozzleHardened,
 };
+
+#undef NOZZLE_NAMES
 
 struct SetValue {
     PropertyName name;
-    bool bool_value;
-    uint32_t int_value;
-    SharedBorrow str_value;
+    // For names that relate to stuff we have more of… like nozzles.
+    size_t idx;
+    std::variant<bool, uint32_t, float, SharedBorrow> value;
+};
+struct CancelObject {
+    uint8_t id;
+};
+struct UncancelObject {
+    uint8_t id;
 };
 
-using CommandData = std::variant<UnknownCommand, BrokenCommand, GcodeTooLarge, ProcessingOtherCommand, ProcessingThisCommand, Gcode, SendInfo, SendJobInfo, SendFileInfo, SendTransferInfo, PausePrint, ResumePrint, StopPrint, StartPrint, SetPrinterReady, CancelPrinterReady, StartEncryptedDownload, DeleteFile, DeleteFolder, CreateFolder, StopTransfer, SetToken, ResetPrinter, SendStateInfo, DialogAction, SetValue>;
-#else
-using CommandData = std::variant<UnknownCommand, BrokenCommand, GcodeTooLarge, ProcessingOtherCommand, ProcessingThisCommand, Gcode, SendInfo, SendJobInfo, SendFileInfo, SendTransferInfo, PausePrint, ResumePrint, StopPrint, StartPrint, SetPrinterReady, CancelPrinterReady, StartEncryptedDownload, DeleteFile, DeleteFolder, CreateFolder, StopTransfer, SetToken, ResetPrinter, SendStateInfo, DialogAction>;
-#endif
+using CommandData = std::variant<UnknownCommand, BrokenCommand, GcodeTooLarge, ProcessingOtherCommand, ProcessingThisCommand, Gcode, SendInfo, SendJobInfo, SendFileInfo, SendTransferInfo, PausePrint, ResumePrint, StopPrint, StartPrint, SetPrinterReady, CancelPrinterReady, StartEncryptedDownload, StartInlineDownload, DeleteFile, DeleteFolder, CreateFolder, StopTransfer, SetToken, ResetPrinter, SendStateInfo, DialogAction, SetValue, CancelObject, UncancelObject>;
 
 struct Command {
     CommandId id;

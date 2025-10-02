@@ -9,7 +9,9 @@
 #include "gcode_info.hpp"
 #include "filament.hpp"
 #include <ctime>
+#include <tools_mapping.hpp>
 #include "option/development_items.h"
+#include <marlin_server.hpp>
 
 static constexpr uint32_t footer_temp_delay_sec = 5 * 60;
 static constexpr int64_t expiration_5day_reminder_period_sec = 5 * 24 * 3600;
@@ -23,10 +25,6 @@ static constexpr int32_t fan_stop_temp_treshold = 75; // °C
 static constexpr int32_t dwarf_board_temp_model_difference = -15; // °C
 
 static constexpr const int pwm_on_50_percent = (FANCTLENCLOSURE_PWM_MAX * 50) / 100;
-
-static bool is_same(const char *curr_filament, const GCodeInfo::filament_buff &filament_type) {
-    return strncmp(curr_filament, filament_type.begin(), filament_type.size()) == 0;
-}
 
 Enclosure xl_enclosure;
 
@@ -148,30 +146,29 @@ bool Enclosure::updatePostPrintFiltrationTimer(uint32_t curr_sec) {
 
 // Expiration timer + Expiration warning timer
 // expiration_shown flag and xl_enclosure_filter_timer EEPROM value are reused for 5 day reminder
-std::optional<WarningType> Enclosure::updateFilterExpirationTimer(uint32_t delta_sec) {
-    std::optional<WarningType> ret = std::nullopt;
+void Enclosure::checkFilterExpiration() {
+    if (!isEnabled()) {
+        return;
+    }
     int64_t expiration_timer = config_store().xl_enclosure_filter_timer.get();
 
     if (isExpirationShown()) {
         // 5 day reminder after filter already expired (RTC time)
         if (isReminderSet() && time(nullptr) - expiration_timer >= expiration_5day_reminder_period_sec) {
-            ret = { WarningType::EnclosureFilterExpiration };
+            marlin_server::set_warning(WarningType::EnclosureFilterExpiration);
         }
-        return ret;
+        return;
     }
 
     // check filter expiration
-    if (!isWarningShown() && expiration_timer + delta_sec >= expiration_warning_sec) {
+    if (!isWarningShown() && expiration_timer >= expiration_warning_sec) {
         setPersistentFlg(PERSISTENT::WARNING_SHOWN);
-        ret = { WarningType::EnclosureFilterExpirWarning };
-    } else if (!isExpirationShown() && expiration_timer + delta_sec >= expiration_deadline_sec) {
-        setPersistentFlg(PERSISTENT::EXPIRATION_SHOWN);
-        return { WarningType::EnclosureFilterExpiration };
+        marlin_server::set_warning(WarningType::EnclosureFilterExpirWarning);
     }
-
-    expiration_timer += delta_sec;
-    config_store().xl_enclosure_filter_timer.set(expiration_timer);
-    return ret;
+    if (!isExpirationShown() && expiration_timer >= expiration_deadline_sec) {
+        setPersistentFlg(PERSISTENT::EXPIRATION_SHOWN);
+        marlin_server::set_warning(WarningType::EnclosureFilterExpiration);
+    }
 }
 
 bool Enclosure::isPostPrintFiltrationNeeded() {
@@ -181,15 +178,17 @@ bool Enclosure::isPostPrintFiltrationNeeded() {
 
     EXTRUDER_LOOP() { // e == physical_extruder
         auto &extruder_info = GCodeInfo::getInstance().get_extruder_info(e);
-        if (!extruder_info.used() || !extruder_info.filament_name.has_value()) {
+        if (!extruder_info.used()) {
             continue;
         }
 
-        // If any of the filaments in filaments_requiring_filtration is used in the print -> activate post print filtration
-        for (const filament::Type type : filaments_requiring_filtration) {
-            if (is_same(filament::get_name(type), extruder_info.filament_name.value())) {
-                return true;
-            }
+        const uint8_t tool_index = tools_mapping::to_physical_tool(e);
+        if (tool_index == tools_mapping::no_tool) {
+            continue;
+        }
+
+        if (config_store().get_filament_type(tool_index).parameters().requires_filtration) {
+            return true;
         }
     }
     return false;
@@ -392,9 +391,8 @@ std::optional<WarningType> Enclosure::loop(int32_t MCU_modular_bed_temp, int16_t
     // Check timer every minute of active fan - longer period because it writes to EEPROM
     if (curr_sec - last_timer_update_sec >= timers_update_period_sec) {
         // Filter expiration notification
-        std::optional<WarningType> expir_warning = updateFilterExpirationTimer(curr_sec - last_timer_update_sec);
-        if (expir_warning.has_value()) {
-            warning_opt = expir_warning;
+        if (!isReminderSet()) {
+            config_store().xl_enclosure_filter_timer.set(config_store().xl_enclosure_filter_timer.get() + (curr_sec - last_timer_update_sec));
         }
         last_timer_update_sec = curr_sec;
     }

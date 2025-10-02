@@ -6,26 +6,27 @@
 /**
  * @brief Implementation of IGcodeReader for plaintext gcodes
  */
-class PlainGcodeReader final : public IGcodeReader {
+class PlainGcodeReader final : public GcodeReaderCommon {
 public:
     PlainGcodeReader(FILE &f, const struct stat &stat_info);
     PlainGcodeReader(PlainGcodeReader &&other) = default;
     PlainGcodeReader &operator=(PlainGcodeReader &&other) = default;
 
     virtual bool stream_metadata_start() override;
-    virtual bool stream_gcode_start(uint32_t offset = 0) override;
+    virtual Result_t stream_gcode_start(uint32_t offset = 0) override;
     virtual bool stream_thumbnail_start(uint16_t expected_width, uint16_t expected_height, ImgType expected_type, bool allow_larger = false) override;
-    virtual Result_t stream_get_line(GcodeBuffer &buffer) override;
-    virtual Result_t stream_get_block(char *out_data, size_t &size) override;
+    virtual Result_t stream_get_line(GcodeBuffer &buffer, Continuations) override;
     virtual uint32_t get_gcode_stream_size_estimate() override;
     virtual uint32_t get_gcode_stream_size() override;
     virtual FileVerificationResult verify_file(FileVerificationLevel level, std::span<uint8_t> crc_calc_buffer) const override;
     virtual bool valid_for_print() override;
+    virtual StreamRestoreInfo get_restore_info() override { return {}; }
+    virtual void set_restore_info(const StreamRestoreInfo &) override {}
 
 private:
     // Size of header that have to be valid before we start printing
-    // One big file was observed to have header with size of 428 kB, so this adds some headroom
-    static constexpr const size_t header_metadata_size = 512 * 1024;
+    // One big file was observed to have header with size of 740 kB, so this adds some headroom
+    static constexpr const size_t header_metadata_size = 1024 * 1024;
 
     // when reading metadata and we encounter this number of gcodes, skip to end of file to search further
     static constexpr const uint32_t stop_metadata_after_gcodes_num = 1;

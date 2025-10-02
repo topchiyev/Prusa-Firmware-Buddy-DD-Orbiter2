@@ -17,14 +17,13 @@ public:
     virtual uint16_t Cols() = 0;
     virtual uint16_t Rows() = 0;
     virtual uint16_t BuffRows() = 0;
-    virtual void clear(color_t clr) = 0;
+    virtual void clear(Color clr) = 0;
     virtual uint32_t GetpixelNativeColor(uint16_t point_x, uint16_t point_y) = 0;
     virtual void SetpixelNativeColor(uint16_t point_x, uint16_t point_y, uint32_t clr) = 0;
     virtual uint8_t *GetBlock(uint16_t start_x, uint16_t start_y, uint16_t end_x, uint16_t end_y) const = 0;
     virtual void FillRectNativeColor(uint16_t rect_x, uint16_t rect_y, uint16_t rect_w, uint16_t rect_h, uint32_t nativeclr) = 0;
     virtual uint8_t *getBuff() = 0;
     virtual void drawFromBuff(point_ui16_t pt, uint16_t w, uint16_t h) = 0;
-    virtual ~IMockDisplay() = default;
 };
 
 // template for different display sizes
@@ -34,9 +33,9 @@ public:
     virtual uint16_t Cols() override { return COLS; }
     virtual uint16_t Rows() override { return ROWS; }
     virtual uint16_t BuffRows() override { return BUFF_ROWS; }
-    virtual void clear(color_t clr) override {
-        std::array<color_t, COLS> row;
-        row.fill(clr);
+    virtual void clear(Color clr) override {
+        std::array<uint32_t, COLS> row;
+        row.fill(clr.raw);
         pixels.fill(row);
     }
     virtual uint32_t GetpixelNativeColor(uint16_t point_x, uint16_t point_y) override {
@@ -66,7 +65,7 @@ public:
     }
 
 private:
-    std::array<std::array<color_t, COLS>, ROWS> pixels;
+    std::array<std::array<uint32_t, COLS>, ROWS> pixels;
     uint32_t buffer[COLS * BUFF_ROWS];
 };
 

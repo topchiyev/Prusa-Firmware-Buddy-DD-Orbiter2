@@ -184,7 +184,9 @@ Temperature thermalManager;
   #endif
 
   /**
-   * Set the print fan speed for a target extruder
+   * Set the print fan speed for a target FAN
+   * !!! NOT EXTRUDER !!! THERMAL MANAGER DOES NOT WORK WITH NON-ACTIVE EXTRUDER FANS
+   * See BFW-6365
    */
   void Temperature::set_fan_speed(uint8_t target, uint16_t speed) {
 
@@ -296,6 +298,11 @@ Temperature thermalManager;
 // Initialized by settings.load()
 #if ENABLED(PIDTEMP)
   //hotend_pid_t Temperature::pid[HOTENDS];
+#endif
+
+#if PRINTER_IS_PRUSA_iX()
+  TempInfo Temperature::temp_psu;
+  TempInfo Temperature::temp_ambient;
 #endif
 
 #if ENABLED(PREVENT_COLD_EXTRUSION)
@@ -2144,7 +2151,7 @@ float scan_thermistor_table_bed(const int raw){
     #if ENABLED(HEATBREAK_USER_THERMISTOR)
       return user_thermistor_to_deg_c(CTI_HEATBREAK, raw);
     #elif ENABLED(HEATBREAK_USES_THERMISTOR)
-      #if (BOARD_IS_XBUDDY)
+      #if (BOARD_IS_XBUDDY())
           uint8_t loveboard_bom = hwio_get_loveboard_bomid();
           if ((loveboard_bom < 33 && loveboard_bom != 0) // error -> expect more common variant
               || loveboard_bom == 0xff) { // error when run in simulator -> simulator uses table 5
@@ -2220,6 +2227,12 @@ void Temperature::updateTemperaturesFromRawValues() {
   #endif
   #if HAS_TEMP_BOARD
     temp_board.celsius = analog_to_celsius_board(temp_board.raw);
+  #endif
+
+  #if PRINTER_IS_PRUSA_iX()
+    // Both psu and ambient temperatures use the MK4 bed thermistor
+    temp_psu.celsius = scan_thermistor_table_bed(temp_psu.raw);
+    temp_ambient.celsius = scan_thermistor_table_bed(temp_ambient.raw);
   #endif
 
   // Reset the watchdog on good temperature measurement
@@ -2392,6 +2405,10 @@ void Temperature::init() {
   #endif
   #if HAS_HEATED_BED
     HAL_ANALOG_SELECT(TEMP_BED_PIN);
+  #endif
+  #if PRINTER_IS_PRUSA_iX()
+    HAL_ANALOG_SELECT(TEMP_PSU_PIN);
+    HAL_ANALOG_SELECT(TEMP_AMBIENT_PIN);
   #endif
   #if HAS_TEMP_CHAMBER
     HAL_ANALOG_SELECT(TEMP_CHAMBER_PIN);
@@ -2993,6 +3010,11 @@ void Temperature::set_current_temp_raw() {
     temp_board.update();
   #endif
 
+  #if PRINTER_IS_PRUSA_iX()
+    temp_psu.update();
+    temp_ambient.update();
+  #endif
+
   #if HAS_JOY_ADC_X
     joystick.x.update();
   #endif
@@ -3037,6 +3059,11 @@ void Temperature::readings_ready() {
 
   #if HAS_TEMP_BOARD
     temp_board.reset();
+  #endif
+
+  #if PRINTER_IS_PRUSA_iX()
+    temp_psu.reset();
+    temp_ambient.reset();
   #endif
 
   #if HAS_JOY_ADC_X
@@ -3174,13 +3201,6 @@ void Temperature::readings_ready() {
 
 }
 
-
-bool isr_blocked = false;
-
-void blockISR() {
-  isr_blocked = true;
-}
-
 /**
  * Timer 0 is shared with millies so don't change the prescaler.
  *
@@ -3199,15 +3219,10 @@ void blockISR() {
 HAL_TEMP_TIMER_ISR() {
   HAL_timer_isr_prologue(TEMP_TIMER_NUM);
 
-  if (!isr_blocked) {
-#if (BOARD_IS_XBUDDY)
+#if (BOARD_IS_XBUDDY())
     AdcGet::sampleNozzle();
 #endif
     Temperature::isr();
-  } else {
-      hwio_safe_state();
-      watchdog_refresh();
-  }
 
   HAL_timer_isr_epilogue(TEMP_TIMER_NUM);
 }
@@ -3593,6 +3608,14 @@ void Temperature::isr() {
       case MeasureTemp_BOARD: ACCUMULATE_ADC(temp_board); break;
     #endif
 
+
+    #if PRINTER_IS_PRUSA_iX()
+      case PrepareTemp_PSU: HAL_START_ADC(TEMP_PSU_PIN); break;
+      case MeasureTemp_PSU: ACCUMULATE_ADC(temp_psu); break;
+      case PrepareTemp_AMBIENT: HAL_START_ADC(TEMP_AMBIENT_PIN); break;
+      case MeasureTemp_AMBIENT: ACCUMULATE_ADC(temp_ambient); break;
+    #endif
+
     #if HAS_TEMP_ADC_1
       case PrepareTemp_1: HAL_START_ADC(TEMP_1_PIN); break;
       case MeasureTemp_1: ACCUMULATE_ADC(temp_hotend[1]); break;
@@ -3914,7 +3937,7 @@ void Temperature::isr() {
       bool wants_to_cool = false;
       wait_for_heatup = true;
       millis_t now, next_temp_ms = 0, next_cool_check_ms = 0;
-      uint8_t fan_speed_at_start = fan_speed[target_extruder];
+      uint8_t fan_speed_at_start = fan_speed[0];
       bool fan_cools = false;
 
       if (isCoolingHotend(target_extruder) && fan_cooling) {

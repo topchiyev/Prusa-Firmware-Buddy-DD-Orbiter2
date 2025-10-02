@@ -8,7 +8,7 @@
 #pragma once
 #include "ifooter.hpp"
 
-class FooterDoubleLine : public AddSuperWindow<IFooter> {
+class FooterDoubleLine : public IFooter {
     FooterLine line_0;
     FooterLine line_1;
 
@@ -19,7 +19,7 @@ public:
     FooterDoubleLine(window_t *parent);
     template <class... T>
     FooterDoubleLine(window_t *parent, T... args)
-        : AddSuperWindow<IFooter>(parent)
+        : IFooter(parent)
         , line_0(this, 0)
         , line_1(this, 1) {
         line_1.Create(line1_defaults);
@@ -29,5 +29,5 @@ public:
     bool SetSlot(size_t slot_id, footer::Item item);
 
 protected:
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 };

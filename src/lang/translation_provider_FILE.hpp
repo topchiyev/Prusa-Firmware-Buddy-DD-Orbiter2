@@ -5,7 +5,6 @@
 #include <string.h>
 #include "gettext_string_hash.hpp"
 #include "translator.hpp"
-#include "file_raii.hpp"
 
 class FILETranslationProvider : public ITranslationProvider {
 
@@ -17,8 +16,6 @@ class FILETranslationProvider : public ITranslationProvider {
 public:
     FILETranslationProvider(const char *path);
 
-    ~FILETranslationProvider() override = default;
-
     /// translates key according to MO file
     /// \param key string to translate
     /// \return translated string in string view, If translation is not found returns string view with original string
@@ -28,6 +25,3 @@ public:
     /// \return true if successfully opened and checked, false if anything fails
     bool EnsureFile() const;
 };
-
-extern FILETranslationProvider fileProviderUSB;
-extern FILETranslationProvider fileProviderInternal;

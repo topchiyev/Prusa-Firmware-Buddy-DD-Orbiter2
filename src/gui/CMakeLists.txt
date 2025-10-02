@@ -11,7 +11,8 @@ endif()
 
 target_sources(
   firmware
-  PRIVATE box_unfinished_selftest.cpp
+  PRIVATE auto_layout.cpp
+          box_unfinished_selftest.cpp
           file_sort.cpp
           fonts.cpp
           frame_qr_layout.cpp
@@ -27,18 +28,19 @@ target_sources(
           logger.cpp
           menu_vars.cpp
           MItem_crash.cpp
-          MItem_eeprom.cpp
           MItem_experimental_tools.cpp
           MItem_filament.cpp
           MItem_hardware.cpp
           MItem_input_shaper.cpp
-          MItem_lan.cpp
           MItem_menus.cpp
+          MItem_network.cpp
           MItem_print.cpp
           MItem_tools.cpp
-          network_gui_tools.cpp
+          numeric_input_config_common.cpp
           print_time_module.cpp
+          pseudo_screen_callback.cpp
           qoi_decoder.cpp
+          qr.cpp
           screen_blue_error.cpp
           screen_bsod.cpp
           screen_change_filter.cpp
@@ -48,10 +50,8 @@ target_sources(
           screen_home.cpp
           screen_menu.cpp
           screen_menu_cancel_object.cpp
-          screen_menu_connect.cpp
           screen_menu_control.cpp
           screen_menu_eeprom.cpp
-          screen_menu_eeprom_diagnostics.cpp
           screen_menu_enclosure.cpp
           screen_menu_error_test.cpp
           screen_menu_factory_reset.cpp
@@ -61,15 +61,16 @@ target_sources(
           screen_menu_fw_update.cpp
           screen_menu_hardware.cpp
           screen_menu_hardware_tune.cpp
-          screen_menu_hw_setup.cpp
           screen_menu_info.cpp
           screen_menu_input_shaper.cpp
-          screen_menu_lan_settings.cpp
           screen_menu_lang_and_time.cpp
           screen_menu_metrics.cpp
+          screen_menu_metrics_list.cpp
           screen_menu_move.cpp
           screen_menu_move_utils.cpp
           screen_menu_network.cpp
+          screen_menu_network_settings.cpp
+          screen_menu_network_status.cpp
           screen_menu_odometer.cpp
           screen_menu_sensor_info_${PRINTER}.cpp
           screen_menu_settings.cpp
@@ -79,13 +80,14 @@ target_sources(
           screen_menu_tune.cpp
           screen_menu_user_interface.cpp
           screen_messages.cpp
+          screen_network_setup.cpp
           screen_print_preview.cpp
+          screen_printer_setup.cpp
           screen_printing.cpp
           screen_printing_end_result.cpp
           screen_prusa_link.cpp
           screen_qr_error.cpp
           screen_reset_error.cpp
-          screen_sheet_rename.cpp
           screen_splash.cpp
           screen_stack_overflow.cpp
           screen_sysinf.cpp
@@ -93,6 +95,7 @@ target_sources(
           ScreenFactory.cpp
           ScreenHandler.cpp
           ScreenPrintingModel.cpp
+          text_error_url.cpp
           time_tools.cpp
           window_file_list.cpp
           window_filebrowser.cpp
@@ -101,6 +104,7 @@ target_sources(
           window_print_progress.cpp
           window_thumbnail.cpp
   )
+
 if(PRINTER IN_LIST PRINTERS_WITH_CRASH_DETECTION)
   target_sources(firmware PRIVATE screen_crash_recovery.cpp)
 endif()
@@ -110,15 +114,11 @@ if(HAS_SERIAL_PRINT)
 endif()
 
 if(TRANSLATIONS_ENABLED)
-  target_sources(firmware PRIVATE menu_items_languages.cpp screen_menu_languages.cpp)
-else()
-  target_sources(firmware PRIVATE menu_items_no_languages.cpp)
+  target_sources(firmware PRIVATE screen_menu_languages.cpp)
 endif()
 
 if(HAS_XLCD_TOUCH_DRIVER)
-  target_sources(
-    firmware PRIVATE MItem_touch.cpp screen_touch_error.cpp screen_touch_playground.cpp
-    )
+  target_sources(firmware PRIVATE MItem_touch.cpp screen_touch_playground.cpp)
 endif()
 
 if(HAS_TOOLCHANGER)
@@ -135,7 +135,6 @@ if(HAS_MODULARBED)
 endif()
 
 if(DEBUG)
-  add_subdirectory(test)
   target_sources(firmware PRIVATE screen_menu_experimental_settings_debug.cpp)
 else()
   target_sources(firmware PRIVATE screen_menu_experimental_settings_release.cpp)
@@ -144,29 +143,17 @@ endif()
 if(HAS_SELFTEST)
   add_subdirectory(wizard)
   target_sources(
-    firmware
-    PRIVATE esp_frame.cpp
-            esp_frame_progress.cpp
-            esp_frame_qr.cpp
-            # steel sheets requiere first layer calibration, which require wizard, which require
-            # selftest TODO add HAS_STEEL_SHEETS property
-            esp_frame_text.cpp
-            MItem_basic_selftest.cpp
-            screen_menu_diagnostics.cpp
-            ScreenESP.cpp
-            ScreenSelftest.cpp
-            selftest_frame.cpp
+    firmware PRIVATE MItem_basic_selftest.cpp screen_menu_selftest_snake.cpp ScreenSelftest.cpp
+                     selftest_frame.cpp
     )
+endif()
 
-  if(HAS_SELFTEST_SNAKE)
-    target_sources(firmware PRIVATE screen_menu_selftest_snake.cpp)
-  endif()
+if(HAS_LOADCELL)
+  target_sources(firmware PRIVATE MItem_loadcell.cpp)
+endif()
 
-  if(HAS_LOADCELL)
-    target_sources(firmware PRIVATE MItem_loadcell.cpp)
-  endif()
-else()
-  target_sources(firmware PRIVATE MItem_basic_selftest_disabled.cpp)
+if(HAS_SHEET_PROFILES)
+  target_sources(firmware PRIVATE MItem_steel_sheets.cpp screen_menu_steel_sheets.cpp)
 endif()
 
 if(HAS_MMU2)
@@ -222,10 +209,6 @@ if(PRINTER IN_LIST PRINTERS_WITH_LOVE_BOARD)
   target_sources(firmware PRIVATE MItem_love_board.cpp)
 endif()
 
-if(NOT PRINTER IN_LIST PRINTERS_WITH_LOADCELL)
-  target_sources(firmware PRIVATE screen_menu_steel_sheets.cpp)
-endif()
-
 if(HAS_FILAMENT_SENSORS_MENU)
   target_sources(firmware PRIVATE screen_menu_filament_sensors.cpp)
 endif()
@@ -238,8 +221,20 @@ if(HAS_PHASE_STEPPING)
   target_sources(firmware PRIVATE screen_phase_stepping.cpp)
 endif()
 
+if(CONNECT)
+  target_sources(firmware PRIVATE screen_menu_connect.cpp)
+endif()
+
+if(HAS_INPUT_SHAPER_CALIBRATION)
+  target_sources(firmware PRIVATE screen_input_shaper_calibration.cpp)
+endif()
+
 add_subdirectory(dialogs)
 add_subdirectory(footer)
+add_subdirectory(screen)
+add_subdirectory(menu_item)
+add_subdirectory(standard_frame)
+
 if(HAS_LEDS)
   add_subdirectory(led_animations)
 endif()

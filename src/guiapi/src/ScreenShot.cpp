@@ -1,6 +1,6 @@
 #include <fcntl.h>
 #include "ScreenShot.hpp"
-#include "display.h"
+#include "display.hpp"
 #include <unique_file_ptr.hpp>
 #include <scope_guard.hpp>
 #include <inttypes.h>
@@ -10,9 +10,9 @@
 #include <guiconfig/GuiDefaults.hpp>
 #include <guiconfig/guiconfig.h>
 
-#if defined(USE_ILI9488)
+#if HAS_ILI9488_DISPLAY()
     #include "ili9488.hpp"
-#elif defined(USE_ST7789)
+#elif HAS_ST7789_DISPLAY()
     #include "st7789v.hpp"
 #else
     #error
@@ -20,7 +20,7 @@
 
 namespace {
 
-#if defined(USE_ILI9488)
+#if HAS_ILI9488_DISPLAY()
 
 // 3 bytes per pixel when reading
 using Pixel = uint8_t[3];
@@ -36,7 +36,7 @@ void transform_pixel(Pixel &pixel) {
     pixel[2] <<= 2;
 }
 
-#elif defined(USE_ST7789)
+#elif HAS_ST7789_DISPLAY()
 
 // 3 bytes per pixel when reading
 struct Pixel {
@@ -66,16 +66,16 @@ static_assert(sizeof(Pixel) == bytes_per_pixel);
 void transform_buffer(Pixel *buffer) {
     // Y-axis mirror image - because BMP pixel format has base origin in left-bottom corner not in left-top like on displays
     for (int row = 0; row < buffer_rows / 2; row++) {
-        const auto offset1 = row * display::GetW();
-        const auto offset2 = (buffer_rows - row - 1) * display::GetW();
+        const auto offset1 = row * GuiDefaults::ScreenWidth;
+        const auto offset2 = (buffer_rows - row - 1) * GuiDefaults::ScreenWidth;
 
-        for (int col = 0; col < display::GetW(); col++) {
+        for (size_t col = 0; col < GuiDefaults::ScreenWidth; col++) {
             std::swap(buffer[offset1 + col], buffer[offset2 + col]);
         }
     }
 
     // Apply display-specific pixel data transformations
-    for (Pixel *p = buffer, *e = buffer + buffer_rows * display::GetW(); p != e; p++) {
+    for (Pixel *p = buffer, *e = buffer + buffer_rows * GuiDefaults::ScreenWidth; p != e; p++) {
         transform_pixel(*p);
     }
 }
@@ -85,7 +85,7 @@ enum {
     BMP_INFO_HEADER_SIZE = 40,
     BMP_HEADER_SIZE = BMP_FILE_HEADER_SIZE + BMP_INFO_HEADER_SIZE,
 
-    BMP_IMAGE_DATA_SIZE = display::GetW() * display::GetH() * bytes_per_pixel,
+    BMP_IMAGE_DATA_SIZE = GuiDefaults::ScreenWidth * GuiDefaults::ScreenHeight * bytes_per_pixel,
     BMP_FILE_SIZE = BMP_FILE_HEADER_SIZE + BMP_INFO_HEADER_SIZE + BMP_IMAGE_DATA_SIZE,
     SCREENSHOT_FILE_NAME_MAX_LEN = 30,
     SCREENSHOT_FILE_NAME_BUFFER_LEN = SCREENSHOT_FILE_NAME_MAX_LEN + 3,
@@ -94,34 +94,90 @@ enum {
 constexpr const char screenshot_name[] = "/usb/screenshot";
 constexpr const char screenshot_format[] = ".bmp";
 
-constexpr const uint8_t bmp_header[] = {
-    'B', 'M', /// type "BM"                   [2B]
-    (unsigned char)BMP_FILE_SIZE, /// image file size in bytes    [4B]
-    (unsigned char)(BMP_FILE_SIZE >> 8),
-    (unsigned char)(BMP_FILE_SIZE >> 16),
-    (unsigned char)(BMP_FILE_SIZE >> 24),
-    0, 0, 0, 0, /// reserved                    [4B]
-    (unsigned char)(BMP_FILE_HEADER_SIZE + BMP_INFO_HEADER_SIZE), 0, 0, 0, /// start of pixel array        [4B]
-    (unsigned char)BMP_INFO_HEADER_SIZE, 0, 0, 0, /// header size                 [4B]
-    (unsigned char)display::GetW(), /// image width                 [4B]
-    (unsigned char)(display::GetW() >> 8),
+constexpr const uint8_t bmp_header[BMP_HEADER_SIZE] {
+    // [2B] type "BM"
+    'B',
+    'M',
+
+    // [4B] image file size in bytes
+    static_cast<uint8_t>(BMP_FILE_SIZE),
+    static_cast<uint8_t>(BMP_FILE_SIZE >> 8),
+    static_cast<uint8_t>(BMP_FILE_SIZE >> 16),
+    static_cast<uint8_t>(BMP_FILE_SIZE >> 24),
+
+    // [4B] reserved
     0,
     0,
-    (unsigned char)display::GetH(), /// image height                [4B]
-    (unsigned char)(display::GetH() >> 8),
     0,
     0,
-    1, 0, /// number of color planes      [2B]
-    (unsigned char)(bytes_per_pixel * 8), 0, /// bits per pixel              [2B]
-    0, 0, 0, 0, /// compression                 [4B]
-    (unsigned char)(display::GetW() * display::GetH() * bytes_per_pixel), /// image size                  [4B]
-    (unsigned char)((display::GetW() * display::GetH() * bytes_per_pixel) >> 8),
-    (unsigned char)((display::GetW() * display::GetH() * bytes_per_pixel) >> 16),
+
+    // [4B] Offset from beginning of file to the beginning of the bitmap data
+    static_cast<uint8_t>(BMP_HEADER_SIZE),
     0,
-    0, 0, 0, 0, /// horizontal resolution       [4B]
-    0, 0, 0, 0, /// vertical resolution         [4B]
-    0, 0, 0, 0, /// colors in color table       [4B]
-    0, 0, 0, 0, /// important color count       [4B]
+    0,
+    0,
+
+    // [4B] Size of InfoHeader =40
+    static_cast<uint8_t>(BMP_INFO_HEADER_SIZE),
+    0,
+    0,
+    0,
+
+    // [4B] Horizontal width of bitmap in pixels
+    static_cast<uint8_t>(GuiDefaults::ScreenWidth),
+    static_cast<uint8_t>(GuiDefaults::ScreenWidth >> 8),
+    0,
+    0,
+
+    // [4B] Vertical height of bitmap in pixels
+    static_cast<uint8_t>(GuiDefaults::ScreenHeight),
+    static_cast<uint8_t>(GuiDefaults::ScreenHeight >> 8),
+    0,
+    0,
+
+    // [2B] Number of Planes (=1)
+    1,
+    0,
+
+    // [2B] Bits per Pixel
+    static_cast<uint8_t>(bytes_per_pixel * 8),
+    0,
+
+    // [4B] Type of Compression | 0 = BI_RGB   no compression
+    0,
+    0,
+    0,
+    0,
+
+    // [4B] (compressed) Size of Image
+    static_cast<uint8_t>(BMP_IMAGE_DATA_SIZE),
+    static_cast<uint8_t>(BMP_IMAGE_DATA_SIZE >> 8),
+    static_cast<uint8_t>(BMP_IMAGE_DATA_SIZE >> 16),
+    0,
+
+    // [4B] horizontal resolution: Pixels/meter
+    0,
+    0,
+    0,
+    0,
+
+    // [4B] vertical resolution: Pixels/meter
+    0,
+    0,
+    0,
+    0,
+
+    // [4B] Number of actually used colors.
+    0,
+    0,
+    0,
+    0,
+
+    // [4B] Number of important colors  0 = all
+    0,
+    0,
+    0,
+    0,
 };
 
 } // namespace
@@ -152,17 +208,17 @@ bool TakeAScreenshotAs(const char *file_name) {
         return false;
     }
 
-    for (int block = display::GetH() / buffer_rows - 1; block >= 0; block--) {
+    for (int block = GuiDefaults::ScreenHeight / buffer_rows - 1; block >= 0; block--) {
         const point_ui16_t start = point_ui16(0, block * buffer_rows);
-        const point_ui16_t end = point_ui16(display::GetW() - 1, (block + 1) * buffer_rows - 1);
-        uint8_t *buffer = display::GetBlock(start, end); // this pointer is valid only until another display memory write is called
+        const point_ui16_t end = point_ui16(GuiDefaults::ScreenWidth - 1, (block + 1) * buffer_rows - 1);
+        uint8_t *buffer = display::get_block(start, end); // this pointer is valid only until another display memory write is called
         if (!buffer) {
             return false;
         }
 
         transform_buffer(reinterpret_cast<Pixel *>(buffer + read_start_offset));
 
-        const int write_size = display::GetW() * buffer_rows * bytes_per_pixel;
+        const int write_size = GuiDefaults::ScreenWidth * buffer_rows * bytes_per_pixel;
         if (fwrite(buffer + read_start_offset, 1, write_size, f.get()) != write_size) {
             return false;
         }

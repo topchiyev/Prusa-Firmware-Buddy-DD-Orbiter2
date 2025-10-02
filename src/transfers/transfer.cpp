@@ -17,7 +17,7 @@
 #include <state/printer_state.hpp>
 #include <option/has_human_interactions.h>
 
-#include <log.h>
+#include <logging/log.hpp>
 #include <type_traits>
 #include <variant>
 #include <optional>
@@ -137,7 +137,7 @@ Transfer::BeginResult Transfer::begin(const char *destination_path, const Downlo
     if (backup.get() == nullptr) {
         return Storage { "Failed to create backup file" };
     }
-    size_t file_size = request.encryption->orig_size;
+    size_t file_size = request.orig_size();
     preallocated = move(PartialFile::create(path.as_partial(), file_size));
     if (const char **err = get_if<const char *>(&preallocated); err != nullptr) {
         const char *e = *err; // Backup, cleanup resets preallocated state
@@ -235,8 +235,10 @@ void Transfer::init_download_order_if_needed() {
 }
 
 void Transfer::update_backup(bool force) {
+    const auto state = partial_file->get_state();
+    const auto crossed_size = !initial_part_done && state.get_valid_size() >= PlainGcodeDownloadOrder::MinimalFileSize /* This one is just a guess at "probably ready to print" */;
     bool backup_outdated = last_backup_update_ms.has_value() == false || ticks_ms() - *last_backup_update_ms > BackupUpdateIntervalMs;
-    if (force == false && !backup_outdated) {
+    if (force == false && !backup_outdated && !crossed_size) {
         return;
     }
 
@@ -252,6 +254,14 @@ void Transfer::update_backup(bool force) {
         log_info(transfers, "Backup file updated");
     }
     last_backup_update_ms = ticks_ms();
+
+    if (crossed_size) {
+        initial_part_done = true;
+    }
+
+    if (is_printable && !already_notified) {
+        notify_created();
+    }
 }
 
 std::optional<struct stat> Transfer::get_transfer_partial_file_stat(MutablePath &destination_path) {
@@ -347,9 +357,6 @@ Transfer::State Transfer::step(bool is_printing) {
 
                 switch (next_step) {
                 case Transfer::Action::Continue:
-                    if (is_printable && !already_notified) {
-                        notify_created();
-                    }
                     break;
                 case Transfer::Action::RangeJump:
                     download.reset();
@@ -359,6 +366,13 @@ Transfer::State Transfer::step(bool is_printing) {
                     break;
                 case Transfer::Action::Finished:
                     done(State::Finished, Monitor::Outcome::Finished);
+                    // With the plain gcodes where we download out of order, it
+                    // may happen that we already have the whole file, but the
+                    // download would still be able to provide some more data
+                    // and would say Continue. Fix that situation up here
+                    // (especially because we don't want to touch the now
+                    // thrown away partial file).
+                    step_result = DownloadStep::Finished;
                     break;
                 }
             }
@@ -440,7 +454,9 @@ bool Transfer::cleanup_transfers() {
 
             if (r.is_running()) {
                 can_cleanup = false;
-            } else if (r.partial_file_found && !cleanup_finalize(transfer_path)) {
+            } else if (r.is_aborted() && !cleanup_remove(transfer_path)) {
+                all_ok = false;
+            } else if (r.is_finished() && !cleanup_finalize(transfer_path)) {
                 all_ok = false;
             }
 
@@ -591,6 +607,8 @@ bool Transfer::cleanup_remove(Path &path) {
 
     if (success) {
         ChangedPath::instance.changed_path(path.as_destination(), ChangedPath::Type::File, ChangedPath::Incident::Deleted);
+    } else {
+        log_error(transfers, "Failed to remove aborted transfer %s", path.as_destination());
     }
     return success;
 }

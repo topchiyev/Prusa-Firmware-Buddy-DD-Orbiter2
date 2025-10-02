@@ -7,9 +7,10 @@
 #include <array>
 #include <stdint.h>
 #include "usbh_async_diskio.hpp"
-
+#include <printers.h>
 #include <common/unique_file_ptr.hpp>
-#include <common/freertos_mutex.hpp>
+#include <freertos/mutex.hpp>
+#include <freertos/counting_semaphore.hpp>
 
 namespace transfers {
 
@@ -40,7 +41,7 @@ namespace transfers {
 class PartialFile {
 public:
     static const size_t SECTOR_SIZE = 512;
-#if PRINTER_IS_PRUSA_MINI
+#if PRINTER_IS_PRUSA_MINI()
     static const size_t SECTORS_PER_WRITE = 1; // Low on RAM on mini
 #else
     static const size_t SECTORS_PER_WRITE = 8;
@@ -82,6 +83,10 @@ public:
                 bytes_overlap = valid_head->end - valid_tail->start;
             }
             return bytes_head + bytes_tail - bytes_overlap;
+        }
+
+        bool fully_valid() const {
+            return get_valid_size() == total_size;
         }
 
         size_t get_percent_valid() const {
@@ -132,7 +137,7 @@ private:
         // Protects the slots acquisition / mask
         freertos::Mutex mutex;
         // Represents the number of free slots (update of mask must be protected by this)
-        SemaphoreHandle_t semaphore;
+        freertos::CountingSemaphore semaphore;
 
         // Mask of acquired/free slots one bit per slot from least significant (1-acquired/unused, 0-free)
         uint32_t slot_mask;

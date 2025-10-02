@@ -33,8 +33,33 @@ static bool is_one_of(char c, std::string_view sv) {
     return false;
 }
 
+void M970_report(bool eeprom = false) {
+    SERIAL_ECHO("M970");
+    for (auto [axis, letter] : SUPPORTED_AXES) {
+        SERIAL_ECHOPAIR(" ", letter);
+        bool state = eeprom ? config_store().get_phase_stepping_enabled(axis)
+                            : phase_stepping::is_enabled(axis);
+        SERIAL_ECHO(state ? "1" : "0");
+    }
+    SERIAL_ECHOLN();
+}
+
+static void report_state() {
+#if HAS_BURST_STEPPING()
+    SERIAL_ECHO("phstep (burst)");
+#else
+    SERIAL_ECHO("phstep");
+#endif
+    if (phase_stepping::any_axis_enabled()) {
+        SERIAL_ECHOLN(": active");
+    } else {
+        SERIAL_ECHOLN(": disabled");
+    }
+    M970_report();
+}
+
 /**
- * @brief Enable phase stepping for axis
+ * @brief Set/enable phase stepping for axis
  *
  * - valid axes X, Y
  */
@@ -44,25 +69,11 @@ void GcodeSuite::M970() {
         if (!parser.seen(letter)) {
             continue;
         }
-        phase_stepping::enable(axis, true);
-        config_store().set_phase_stepping_enabled(axis, true);
+        bool enabled = parser.value_bool();
+        phase_stepping::enable(axis, enabled);
+        config_store().set_phase_stepping_enabled(axis, enabled);
     }
-}
-
-/**
- * @brief Disable phase stepping for axis
- *
- * - valid axes X, Y
- */
-void GcodeSuite::M971() {
-    planner.synchronize();
-    for (auto [axis, letter] : SUPPORTED_AXES) {
-        if (!parser.seen(letter)) {
-            continue;
-        }
-        phase_stepping::enable(axis, false);
-        config_store().set_phase_stepping_enabled(axis, false);
-    }
+    report_state();
 }
 
 /**
@@ -76,7 +87,7 @@ void GcodeSuite::M972() {
         if (!parser.seen(letter)) {
             continue;
         }
-        const phase_stepping::AxisState &axis_state = *phase_stepping::axis_states[axis];
+        const phase_stepping::AxisState &axis_state = phase_stepping::axis_states[axis];
         for (char dir : "FB"sv) {
             if (!parser.seen(letter)) {
                 continue;
@@ -151,7 +162,7 @@ void GcodeSuite::M973() {
     }
 
     AxisEnum axis = str_arg[0] == 'X' ? AxisEnum::X_AXIS : AxisEnum::Y_AXIS;
-    phase_stepping::AxisState &axis_state = *phase_stepping::axis_states[axis];
+    phase_stepping::AxisState &axis_state = phase_stepping::axis_states[axis];
     const bool forward_correction { str_arg[1] == 'F' };
     auto &lut = forward_correction
         ? axis_state.forward_current
@@ -198,28 +209,30 @@ static bool accelerometer_ok(PrusaAccelerometer &acc, YieldError yield_error) {
     case PrusaAccelerometer::Error::communication:
         yield_error("accelerometer communication");
         return false;
+#if HAS_REMOTE_ACCELEROMETER()
     case PrusaAccelerometer::Error::no_active_tool:
         yield_error("no active tool");
         return false;
     case PrusaAccelerometer::Error::busy:
         yield_error("busy");
         return false;
+#endif
+    case PrusaAccelerometer::Error::overflow_sensor:
+        yield_error("sample overrun on accelerometer sensor");
+        return false;
 #if HAS_REMOTE_ACCELEROMETER()
-    case PrusaAccelerometer::Error::corrupted_dwarf_overflow:
+    case PrusaAccelerometer::Error::overflow_buddy:
+        yield_error("buddy overflow");
+        return false;
+    case PrusaAccelerometer::Error::overflow_dwarf:
         yield_error("dwarf overflow");
         return false;
-    case PrusaAccelerometer::Error::corrupted_transmission_error:
+    case PrusaAccelerometer::Error::overflow_possible:
         yield_error("dwarf transmission error");
         return false;
 #endif
-    case PrusaAccelerometer::Error::corrupted_buddy_overflow:
-        yield_error("buddy overflow");
-        return false;
-    case PrusaAccelerometer::Error::corrupted_sample_overrun:
-        yield_error("overrun");
-        return false;
     }
-    bsod("Unrecognized accelerometer error");
+    bsod("Unrecognized accelerometer Error");
 }
 
 /**
@@ -317,6 +330,8 @@ void GcodeSuite::M975() {
         sampleNum++;
     };
 
+    accelerometer.clear();
+
     for (int i = 0; i < request_samples_num;) {
         PrusaAccelerometer::Acceleration measured_acceleration;
         const int samples = accelerometer.get_sample(measured_acceleration);
@@ -328,7 +343,9 @@ void GcodeSuite::M975() {
         }
     }
 
-    accelerometer_ok(accelerometer, print_error);
+    if (!accelerometer_ok(accelerometer, print_error)) {
+        return;
+    }
     SERIAL_ECHO("sample freq: ");
     SERIAL_ECHOLN(accelerometer.get_sampling_rate());
 }
@@ -443,7 +460,7 @@ public:
     void on_termination() override {
         SERIAL_ECHOLN("Calibration done");
 
-#if PRINTER_IS_PRUSA_XL
+#if PRINTER_IS_PRUSA_XL()
         SERIAL_ECHO("Overall score parameter 1: ");
         auto [p1_f, p1_b] = _calibration_results[0];
         auto [p3_f, p3_b] = _calibration_results[2];

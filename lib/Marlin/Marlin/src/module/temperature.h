@@ -42,6 +42,8 @@
   #include "prusa/toolchanger.h"
 #endif
 
+#include <atomic>
+
 #ifndef SOFT_PWM_SCALE
   #define SOFT_PWM_SCALE 0
 #endif
@@ -113,6 +115,10 @@ enum ADCSensorState : char {
   #endif
   #if HAS_TEMP_BOARD
     PrepareTemp_BOARD, MeasureTemp_BOARD,
+  #endif
+  #if PRINTER_IS_PRUSA_iX()
+    PrepareTemp_PSU, MeasureTemp_PSU,
+    PrepareTemp_AMBIENT, MeasureTemp_AMBIENT,
   #endif
   #if HAS_TEMP_ADC_1
     PrepareTemp_1, MeasureTemp_1,
@@ -348,6 +354,11 @@ class Temperature {
       static heatbreak_info_t temp_heatbreak[HOTENDS];
     #endif
 
+    #if PRINTER_IS_PRUSA_iX()
+      static TempInfo temp_psu;
+      static TempInfo temp_ambient;
+    #endif
+
     #if ENABLED(AUTO_POWER_E_FANS)
       static uint8_t autofan_speed[HOTENDS];
     #endif
@@ -360,6 +371,12 @@ class Temperature {
       static uint8_t soft_pwm_amount_fan[FAN_COUNT],
                      soft_pwm_count_fan[FAN_COUNT];
     #endif
+
+    // For metrics only
+    #if !HAS_MODULARBED()
+      std::atomic<int> bed_pwm;
+    #endif
+    std::atomic<int> nozzle_pwm;
 
     #if ENABLED(PREVENT_COLD_EXTRUSION)
       static bool allow_cold_extrude;
@@ -881,6 +898,11 @@ class Temperature {
       #endif
       FORCE_INLINE static float degBoard()            { return temp_board.celsius; }
     #endif // HAS_TEMP_BOARD
+
+    #if PRINTER_IS_PRUSA_iX()
+      FORCE_INLINE static float deg_psu() { return temp_psu.celsius; }
+      FORCE_INLINE static float deg_ambient() { return temp_ambient.celsius; }
+    #endif
 
     /**
      * The software PWM power for a heater

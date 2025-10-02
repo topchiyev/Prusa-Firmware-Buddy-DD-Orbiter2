@@ -1,12 +1,18 @@
 target_include_directories(firmware PRIVATE .)
 
 add_subdirectory(device)
+add_subdirectory(freertos)
 add_subdirectory(segger)
 add_subdirectory(hw)
 add_subdirectory(logging)
 add_subdirectory(common)
 
 if(BOARD MATCHES "BUDDY")
+  if(HAS_ESP_FLASH_TASK)
+    add_subdirectory(buddy-esp-serial-flasher)
+    target_link_libraries(firmware PRIVATE buddy-esp-serial-flasher)
+  endif()
+
   add_subdirectory(persistent_stores)
 
   if(CONNECT OR WUI)
@@ -67,4 +73,5 @@ elseif(BOARD STREQUAL "XL_DEV_KIT_XLB")
   add_subdirectory(marlin_stubs)
 endif()
 
-target_sources(firmware PRIVATE freertos.cpp freertos_openocd.cpp)
+target_sources(firmware PRIVATE freertos.cpp)
+target_link_libraries(firmware PRIVATE freertos)

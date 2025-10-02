@@ -1,6 +1,7 @@
 // bsod_gui.cpp - blue screen of death
 #include "bsod.h"
 #include "bsod_gui.hpp"
+#include "display.hpp"
 #include <find_error.hpp>
 #include "wdt.hpp"
 #include <crash_dump/dump.hpp>
@@ -113,7 +114,7 @@ below to enable the use of older kernel aware debuggers. */
 typedef tskTCB TCB_t;
 
 // current thread from FreeRTOS
-extern PRIVILEGED_INITIALIZED_DATA TCB_t *volatile pxCurrentTCB;
+extern PRIVILEGED_DATA TCB_t *volatile pxCurrentTCB;
 
 void raise_redscreen(ErrCode error_code, const char *error, const char *module) {
     crash_dump::save_message(crash_dump::MsgType::RSOD, ftrstd::to_underlying(error_code), error, module);
@@ -149,7 +150,7 @@ void fatal_error(const char *error, const char *module) {
         fatal_error(ErrCode::ERR_TEMPERATURE_HOTEND_MAXTEMP_ERROR);
     } else if (strcmp(MSG_ERR_MINTEMP, error) == 0) {
         fatal_error(ErrCode::ERR_TEMPERATURE_HOTEND_MINTEMP_ERROR);
-#if !PRINTER_IS_PRUSA_XL
+#if !PRINTER_IS_PRUSA_XL()
     } else if (strcmp(MSG_HEATING_FAILED_LCD_BED, error) == 0) {
         fatal_error(ErrCode::ERR_TEMPERATURE_BED_PREHEAT_ERROR);
     } else if (strcmp(MSG_THERMAL_RUNAWAY_BED, error) == 0) {
@@ -158,15 +159,15 @@ void fatal_error(const char *error, const char *module) {
         fatal_error(ErrCode::ERR_TEMPERATURE_BED_MAXTEMP_ERROR);
     } else if (strcmp(MSG_ERR_MINTEMP_BED, error) == 0) {
         fatal_error(ErrCode::ERR_TEMPERATURE_BED_MINTEMP_ERROR);
-#endif // !PRINTER_IS_PRUSA_XL
-#if !PRINTER_IS_PRUSA_MK3_5
+#endif // !PRINTER_IS_PRUSA_XL()
+#if !PRINTER_IS_PRUSA_MK3_5()
     } else if (strcmp(MSG_ERR_MINTEMP_HEATBREAK, error) == 0) {
         fatal_error(ErrCode::ERR_TEMPERATURE_HEATBREAK_MINTEMP_ERR);
     } else if (strcmp(MSG_ERR_MAXTEMP_HEATBREAK, error) == 0) {
         fatal_error(ErrCode::ERR_TEMPERATURE_HEATBREAK_MAXTEMP_ERR);
 #endif
     }
-#if PRINTER_IS_PRUSA_XL
+#if PRINTER_IS_PRUSA_XL()
     else if (strcmp(MSG_ERR_NOZZLE_OVERCURRENT, error) == 0) {
         fatal_error(ErrCode::ERR_ELECTRO_HEATER_HOTEND_OVERCURRENT, module);
     }
@@ -204,17 +205,11 @@ static const char *cut_path(const char *path_and_file) {
 static void stop_common(void) {
     hwio_safe_state();
 
-#ifdef USE_ST7789
-    st7789v_enable_safe_mode();
-#endif
-
-#ifdef USE_ILI9488
-    ili9488_enable_safe_mode();
-#endif
+    display::enable_safe_mode();
 
     hwio_beeper_notone();
-    display::Init();
-    display::Init();
+    display::init();
+    display::init();
 }
 
 /**
@@ -237,7 +232,7 @@ static void fallback_bsod(const char *fmt, const char *file_name, int line_numbe
     stop_common();
 
     ///< Clear with dark blue color
-    display::Clear(COLOR_NAVY);
+    display::clear(COLOR_NAVY);
 
     char fallback_bsod_text[300];
 
@@ -293,7 +288,7 @@ void _bsod(const char *fmt, const char *file_name, int line_number, ...) {
 
 #ifdef configCHECK_FOR_STACK_OVERFLOW
 
-extern "C" void vApplicationStackOverflowHook([[maybe_unused]] TaskHandle_t xTask, signed char *pcTaskName) {
+extern "C" void vApplicationStackOverflowHook([[maybe_unused]] TaskHandle_t xTask, char *pcTaskName) {
     // Save task name as title
     crash_dump::save_message(crash_dump::MsgType::STACK_OVF, 0, "", reinterpret_cast<char *>(pcTaskName));
 

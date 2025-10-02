@@ -6,16 +6,10 @@
 # cmake .. <other options> -DPRINTER=MINI
 # ~~~
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 set(PRINTER_VALID_OPTS "MINI" "MK4" "MK3.5" "XL" "iX" "XL_DEV_KIT")
-set(BOARD_VALID_OPTS
-    "<default>"
-    "BUDDY"
-    "XBUDDY"
-    "XLBUDDY"
-    "DWARF"
-    "MODULARBED"
-    "XL_DEV_KIT_XLB"
-    )
+set(BOARD_VALID_OPTS "BUDDY" "XBUDDY" "XLBUDDY" "DWARF" "MODULARBED" "XL_DEV_KIT_XLB")
 set(MCU_VALID_OPTS "<default>" "STM32F407VG" "STM32F429VI" "STM32F427ZI" "STM32G070RBT6")
 set(BOOTLOADER_VALID_OPTS "NO" "EMPTY" "YES")
 set(TRANSLATIONS_ENABLED_VALID_OPTS "<default>" "NO" "YES")
@@ -32,13 +26,13 @@ set(BOOTLOADER
     CACHE STRING "Selects the bootloader mode (valid values are ${BOOTLOADER_VALID_OPTS})."
     )
 set(BOARD
-    "<default>"
+    "<invalid>"
     CACHE
       STRING
       "Select the board for which you want to compile the project (valid values are ${BOARD_VALID_OPTS})."
     )
 set(BOARD_VERSION
-    "<default>"
+    "<invalid>"
     CACHE STRING "Specify the version of the board to comiple the project for (e.g. 1.2.3)"
     )
 set(MCU
@@ -47,13 +41,9 @@ set(MCU
       STRING
       "Select the MCU for which you want to compile the project (valid values are ${MCU_VALID_OPTS})."
     )
-set(GENERATE_BBF
-    "NO"
-    CACHE BOOL "Whether a .bbf version should be generated."
-    )
 set(GENERATE_DFU
     "NO"
-    CACHE BOOL "Whether a .dfu file should be generated. Implies GENERATE_BBF."
+    CACHE BOOL "Whether a .dfu file should be generated."
     )
 set(SIGNING_KEY
     ""
@@ -78,10 +68,6 @@ set(BUILD_NUMBER
 set(CUSTOM_COMPILE_OPTIONS
     ""
     CACHE STRING "Allows adding custom C/C++ flags"
-    )
-set(PRESET_COMPILE_OPTIONS
-    ""
-    CACHE STRING "Allows adding custom C/C++ flags. To be used from preset files."
     )
 
 if(${BOARD} STREQUAL "XL_DEV_KIT_XLB")
@@ -141,65 +127,6 @@ endforeach()
 
 # define simple options
 define_boolean_option(BOOTLOADER ${BOOTLOADER})
-
-# set board to its default if not specified
-if(${BOARD} STREQUAL "<default>")
-  if(${PRINTER} MATCHES "^(MINI)$")
-    set(BOARD
-        "BUDDY"
-        CACHE STRING "System board" FORCE
-        )
-  elseif(${PRINTER} MATCHES "^(iX|MK4|MK3.5)$")
-    set(BOARD
-        "XBUDDY"
-        CACHE STRING "System board" FORCE
-        )
-  elseif(${PRINTER} STREQUAL "XL")
-    set(BOARD
-        "XLBUDDY"
-        CACHE STRING "System board" FORCE
-        )
-  else()
-    message(FATAL_ERROR "No default board set for printer ${PRINTER}")
-  endif()
-endif()
-
-# set board version to its default if not specified
-if(${BOARD_VERSION} STREQUAL "<default>")
-  if(${BOARD} STREQUAL "BUDDY")
-    set(BOARD_VERSION
-        "1.0.0"
-        CACHE STRING "Buddy board version" FORCE
-        )
-  elseif(${BOARD} STREQUAL "XBUDDY")
-    set(BOARD_VERSION
-        "0.2.1"
-        CACHE STRING "XBuddy board version" FORCE
-        )
-  elseif(${BOARD} STREQUAL "XLBUDDY")
-    set(BOARD_VERSION
-        "0.5.0"
-        CACHE STRING "XLBuddy board version" FORCE
-        )
-  elseif(${BOARD} STREQUAL "DWARF")
-    set(BOARD_VERSION
-        "0.6.0"
-        CACHE STRING "Dwarf board version" FORCE
-        )
-  elseif(${BOARD} STREQUAL "MODULARBED")
-    set(BOARD_VERSION
-        "0.7.0"
-        CACHE STRING "ModularBed board version" FORCE
-        )
-  elseif(${BOARD} STREQUAL "XL_DEV_KIT_XLB")
-    set(BOARD_VERSION
-        "0.1.0"
-        CACHE STRING "XL_DEV_KIT_XLB board version" FORCE
-        )
-  else()
-    message(FATAL_ERROR "No default board version set for board ${BOARD}")
-  endif()
-endif()
 
 # Set BOARD_IS_MASTER_BOARD - means main board of entire printer, non-main board are puppies
 if(BOARD MATCHES ".*BUDDY" OR BOARD MATCHES "XL_DEV_KIT_XLB")
@@ -275,7 +202,6 @@ message(
   )
 message(STATUS "MCU: ${MCU}")
 message(STATUS "Custom Compile Options (C/C++ flags): ${CUSTOM_COMPILE_OPTIONS}")
-message(STATUS "Preset Compile Options (C/C++ flags): ${PRESET_COMPILE_OPTIONS}")
 message(STATUS "Web User Interface: ${WUI}")
 message(STATUS "Connect client: ${CONNECT}")
 message(STATUS "Resources: ${RESOURCES}")
@@ -285,17 +211,16 @@ set(PRINTERS_WITH_FILAMENT_SENSOR_BINARY "MINI" "MK3.5")
 set(PRINTERS_WITH_FILAMENT_SENSOR_ADC "MK4" "XL" "iX" "XL_DEV_KIT")
 set(PRINTERS_WITH_INIT_TRINAMIC_FROM_MARLIN_ONLY "MINI" "MK4" "MK3.5" "XL" "iX")
 set(PRINTERS_WITH_ADVANCED_PAUSE "MINI" "MK4" "MK3.5" "iX" "XL" "XL_DEV_KIT")
-set(PRINTERS_WITH_CRASH_DETECTION "MINI" "MK4" "MK3.5" "XL") # this does require selftest to work
-set(PRINTERS_WITH_POWER_PANIC "MK4" "MK3.5" "XL") # this does require selftest and crash detection
-                                                  # to work
+set(PRINTERS_WITH_CRASH_DETECTION "MINI" "MK4" "MK3.5" "iX" "XL") # this does require selftest to
+                                                                  # work
+set(PRINTERS_WITH_POWER_PANIC "MK4" "MK3.5" "iX" "XL") # this does require selftest and crash
+                                                       # detection to work
 set(PRINTERS_WITH_PRECISE_HOMING "MK4" "MK3.5")
-set(PRINTERS_WITH_PRECISE_HOMING_COREXY "XL" "XL_DEV_KIT")
-set(PRINTERS_WITH_PHASE_STEPPING "XL")
+set(PRINTERS_WITH_PRECISE_HOMING_COREXY "iX" "XL" "XL_DEV_KIT")
+set(PRINTERS_WITH_PHASE_STEPPING "XL" "iX")
 set(PRINTERS_WITH_BURST_STEPPING "XL")
-# private MINI would not fit to 1MB so it has disabled selftest set(PRINTERS_WITH_SELFTEST "MINI"
-# "MK4")
+set(PRINTERS_WITH_INPUT_SHAPER_CALIBRATION "MK4" "MK3.5" "XL" "XL_DEV_KIT")
 set(PRINTERS_WITH_SELFTEST "MK4" "MK3.5" "XL" "iX" "MINI")
-set(PRINTERS_WITH_SELFTEST_SNAKE "XL" "MK4" "MINI" "MK3.5")
 set(PRINTERS_WITH_HUMAN_INTERACTIONS "MINI" "MK4" "MK3.5" "XL")
 set(PRINTERS_WITH_LOADCELL "MK4" "iX" "XL" "XL_DEV_KIT")
 set(PRINTERS_WITH_HEATBREAK_TEMP "MK4" "iX" "XL" "XL_DEV_KIT")
@@ -306,13 +231,16 @@ set(PRINTERS_WITH_DWARF "XL" "XL_DEV_KIT")
 set(PRINTERS_WITH_MODULARBED "iX" "XL" "XL_DEV_KIT")
 set(PRINTERS_WITH_TOOLCHANGER "XL" "XL_DEV_KIT")
 set(PRINTERS_WITH_SIDE_FSENSOR "iX" "XL")
+set(PRINTERS_WITH_ESP_FLASH_TASK "MK4" "MK3.5" "XL" "MINI") # iX does not need ESP flashing
 set(PRINTERS_WITH_EMBEDDED_ESP32 "XL")
 set(PRINTERS_WITH_SIDE_LEDS "XL" "iX")
 set(PRINTERS_WITH_TRANSLATIONS "MK4" "MK3.5" "XL" "MINI")
 set(PRINTERS_WITH_EXTFLASH_TRANSLATIONS "MINI")
 set(PRINTERS_WITH_LOVE_BOARD "MK4" "iX")
+set(PRINTERS_WITH_XLCD "MK4" "MK3.5" "iX" "XL")
 set(PRINTERS_WITH_MMU2 "MK4" "MK3.5")
 set(PRINTERS_WITH_CONFIG_STORE_WITHOUT_BACKEND "XL_DEV_KIT")
+set(PRINTERS_WITH_SWITCHED_FAN_TEST "MK4" "MK3.5")
 
 # Set GUI settings
 set(PRINTERS_WITH_GUI "MINI" "MK4" "MK3.5" "XL" "iX")
@@ -325,11 +253,19 @@ set(PRINTERS_WITH_SERIAL_PRINTING "MK4" "MK3.5" "XL" "iX" "MINI")
 set(PRINTERS_WITH_LOCAL_ACCELEROMETER "MK3.5" "MK4" "iX")
 set(PRINTERS_WITH_REMOTE_ACCELEROMETER "XL" "XL_DEV_KIT")
 
-set(PRINTERS_WITH_COLDPULL "MK4")
+set(PRINTERS_WITH_COLDPULL "MK3.5" "MK4" "XL")
 
 set(PRINTERS_WITH_BED_LEVEL_CORRECTION "MK3.5" "MINI")
 
 set(PRINTERS_WITH_SHEET_SUPPORT "MINI" "MK3.5")
+
+set(PRINTERS_WITH_NFC "MK3.5" "MK4")
+
+set(PRINTERS_WITH_NOZZLE_CLEANER "iX")
+set(PRINTERS_WITH_BELT_TUNING)
+set(PRINTERS_WITH_I2C_EXPANDER "MK3.5" "MK4")
+set(PRINTERS_WITH_PRINT_FAN_TYPE "XL")
+
 # Set printer board
 set(BOARDS_WITH_ADVANCED_POWER "XBUDDY" "XLBUDDY" "DWARF")
 set(BOARDS_WITH_ILI9488 "XBUDDY" "XLBUDDY")
@@ -419,14 +355,10 @@ if(${RESOURCES} STREQUAL "<auto>")
 endif()
 define_boolean_option(RESOURCES ${RESOURCES})
 
-# in order to generate DFU file for bootloader, we need a BFU
-if(GENERATE_DFU
-   AND BOOTLOADER
-   OR RESOURCES
-   )
-
+# A DFU file with bootloader always requires a BBF
+if(RESOURCES OR (GENERATE_DFU AND BOOTLOADER))
   set(GENERATE_BBF "YES")
-elseif(NOT BOARD_IS_MASTER_BOARD)
+else()
   set(GENERATE_BBF "NO")
 endif()
 
@@ -474,6 +406,13 @@ else()
 endif()
 define_boolean_option(HAS_CONFIG_STORE_WO_BACKEND ${HAS_CONFIG_STORE_WO_BACKEND})
 
+if(${PRINTER} IN_LIST PRINTERS_WITH_SWITCHED_FAN_TEST)
+  set(HAS_SWITCHED_FAN_TEST YES)
+else()
+  set(HAS_SWITCHED_FAN_TEST NO)
+endif()
+define_boolean_option(HAS_SWITCHED_FAN_TEST ${HAS_SWITCHED_FAN_TEST})
+
 if(${PRINTER} IN_LIST PRINTERS_WITH_HUMAN_INTERACTIONS)
   define_boolean_option(HAS_HUMAN_INTERACTIONS YES)
 else()
@@ -497,12 +436,22 @@ else()
 endif()
 define_boolean_option(HAS_BURST_STEPPING ${HAS_BURST_STEPPING})
 
+if(${PRINTER} IN_LIST PRINTERS_WITH_INPUT_SHAPER_CALIBRATION AND BOARD_IS_MASTER_BOARD)
+  set(HAS_INPUT_SHAPER_CALIBRATION YES)
+else()
+  set(HAS_INPUT_SHAPER_CALIBRATION NO)
+endif()
+define_boolean_option(HAS_INPUT_SHAPER_CALIBRATION ${HAS_INPUT_SHAPER_CALIBRATION})
+
 if(${PRINTER} IN_LIST PRINTERS_WITH_LOADCELL AND BOARD_IS_MASTER_BOARD)
   set(HAS_LOADCELL YES)
+  set(HAS_SHEET_PROFILES NO)
 else()
   set(HAS_LOADCELL NO)
+  set(HAS_SHEET_PROFILES YES)
 endif()
 define_boolean_option(HAS_LOADCELL ${HAS_LOADCELL})
+define_boolean_option(HAS_SHEET_PROFILES ${HAS_SHEET_PROFILES})
 
 if(${PRINTER} IN_LIST PRINTERS_WITH_HEATBREAK_TEMP AND BOARD_IS_MASTER_BOARD)
   set(HAS_HEATBREAK_TEMP YES)
@@ -531,6 +480,20 @@ else()
   set(HAS_ACCELEROMETER NO)
 endif()
 define_boolean_option(HAS_ACCELEROMETER ${HAS_ACCELEROMETER})
+
+if(${PRINTER} IN_LIST PRINTERS_WITH_LOVE_BOARD)
+  set(HAS_LOVE_BOARD YES)
+else()
+  set(HAS_LOVE_BOARD NO)
+endif()
+define_boolean_option(HAS_LOVE_BOARD ${HAS_LOVE_BOARD})
+
+if(${PRINTER} IN_LIST PRINTERS_WITH_XLCD)
+  set(HAS_XLCD YES)
+else()
+  set(HAS_XLCD NO)
+endif()
+define_boolean_option(HAS_XLCD ${HAS_XLCD})
 
 if(${PRINTER} IN_LIST PRINTERS_WITH_MMU2)
   set(HAS_MMU2 YES)
@@ -641,9 +604,6 @@ if(ENABLE_PUPPY_BOOTLOAD)
         CACHE PATH "Where to have build directory for the modular bed firmware."
         )
   endif()
-
-  # A BBF is required to update puppies
-  set(GENERATE_BBF "YES")
 endif()
 
 if(BOARD MATCHES "XL_DEV_KIT_XLB")
@@ -683,19 +643,18 @@ else()
 endif()
 define_boolean_option(HAS_TOOLCHANGER ${HAS_TOOLCHANGER})
 
-if(${PRINTER} IN_LIST PRINTERS_WITH_SELFTEST_SNAKE)
-  set(HAS_SELFTEST_SNAKE YES)
-else()
-  set(HAS_SELFTEST_SNAKE NO)
-endif()
-define_boolean_option(HAS_SELFTEST_SNAKE ${HAS_SELFTEST_SNAKE})
-
 if(${PRINTER} IN_LIST PRINTERS_WITH_SIDE_FSENSOR)
   set(HAS_SIDE_FSENSOR YES)
 else()
   set(HAS_SIDE_FSENSOR NO)
 endif()
 define_boolean_option(HAS_SIDE_FSENSOR ${HAS_SIDE_FSENSOR})
+
+if(${PRINTER} IN_LIST PRINTERS_WITH_ESP_FLASH_TASK)
+  define_boolean_option(HAS_ESP_FLASH_TASK YES)
+else()
+  define_boolean_option(HAS_ESP_FLASH_TASK NO)
+endif()
 
 if(${PRINTER} IN_LIST PRINTERS_WITH_EMBEDDED_ESP32)
   define_boolean_option(HAS_EMBEDDED_ESP32 YES)
@@ -748,12 +707,46 @@ else()
   define_boolean_option(NETWORKING_BENCHMARK_ENABLED NO)
 endif()
 
+if(${PRINTER} IN_LIST PRINTERS_WITH_NFC)
+  define_boolean_option(HAS_NFC YES)
+else()
+  define_boolean_option(HAS_NFC NO)
+endif()
+
+if(${PRINTER} IN_LIST PRINTERS_WITH_NOZZLE_CLEANER)
+  define_boolean_option(HAS_NOZZLE_CLEANER YES)
+else()
+  define_boolean_option(HAS_NOZZLE_CLEANER NO)
+endif()
+
+if(${PRINTER} IN_LIST PRINTERS_WITH_BELT_TUNING)
+  set(HAS_BELT_TUNING YES)
+else()
+  set(HAS_BELT_TUNING NO)
+endif()
+define_boolean_option(HAS_BELT_TUNING ${HAS_BELT_TUNING})
+
+if(${PRINTER} IN_LIST PRINTERS_WITH_I2C_EXPANDER AND BOARD_IS_MASTER_BOARD)
+  set(HAS_I2C_EXPANDER YES)
+else()
+  set(HAS_I2C_EXPANDER NO)
+endif()
+define_boolean_option(HAS_I2C_EXPANDER ${HAS_I2C_EXPANDER})
+
+if(${PRINTER} IN_LIST PRINTERS_WITH_PRINT_FAN_TYPE AND BOARD_IS_MASTER_BOARD)
+  set(HAS_PRINT_FAN_TYPE YES)
+else()
+  set(HAS_PRINT_FAN_TYPE NO)
+endif()
+define_boolean_option(HAS_PRINT_FAN_TYPE ${HAS_PRINT_FAN_TYPE})
+
 # define enabled features
 
 if(BOOTLOADER STREQUAL "YES"
    AND (PRINTER STREQUAL "MINI"
         OR PRINTER STREQUAL "MK4"
         OR PRINTER STREQUAL "MK3.5"
+        OR PRINTER STREQUAL "iX"
         OR BOARD STREQUAL "XLBUDDY"
        )
    )
@@ -788,8 +781,18 @@ set(WEBSOCKET
     CACHE BOOL "Use websocket to talk to connect. In development"
     )
 define_boolean_option(WEBSOCKET ${WEBSOCKET})
+
 set(MDNS
     "ON"
     CACHE BOOL "Enable MDNS responder"
     )
 define_boolean_option(MDNS ${MDNS})
+
+# MINI + JA ran out of FLASH so we sacrifice file log facility. This will be hopefully fixed in next
+# version.
+if(PRINTER STREQUAL "MINI" AND TRANSLATIONS_LIST STREQUAL "ja")
+  set(HAS_FILE_LOG NO)
+else()
+  set(HAS_FILE_LOG YES)
+endif()
+define_boolean_option(HAS_FILE_LOG ${HAS_FILE_LOG})

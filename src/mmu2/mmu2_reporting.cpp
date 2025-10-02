@@ -10,7 +10,7 @@
 #include "mmu2_reporter.hpp"
 #include "fail_bucket.hpp"
 #include "pause_stubbed.hpp"
-#include "log.h"
+#include <logging/log.hpp>
 #include <config_store/store_instance.hpp>
 #include <odometer.hpp>
 #include "gui/dialogs/DialogLoadUnload.hpp"
@@ -150,13 +150,19 @@ void ScreenClear() {
 }
 
 void IncrementLoadFails() {
-    config_store().mmu2_load_fails.set(config_store().mmu2_load_fails.get() + 1);
-    config_store().mmu2_total_load_fails.set(config_store().mmu2_total_load_fails.get() + 1);
+    auto &store = config_store();
+    auto transaction = store.get_backend().transaction_guard();
+    store.mmu2_load_fails.set(store.mmu2_load_fails.get() + 1);
+    store.mmu2_total_load_fails.set(store.mmu2_total_load_fails.get() + 1);
 }
 
 void IncrementMMUFails() {
-    config_store().mmu2_fails.set(config_store().mmu2_fails.get() + 1);
-    config_store().mmu2_total_fails.set(config_store().mmu2_total_fails.get() + 1);
+    {
+        auto &store = config_store();
+        auto transaction = store.get_backend().transaction_guard();
+        store.mmu2_fails.set(store.mmu2_fails.get() + 1);
+        store.mmu2_total_fails.set(store.mmu2_total_fails.get() + 1);
+    }
     FailLeakyBucket::instance.add_failure();
 }
 

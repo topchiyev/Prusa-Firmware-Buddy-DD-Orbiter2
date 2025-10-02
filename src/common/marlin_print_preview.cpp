@@ -4,11 +4,11 @@
 
 #include "marlin_print_preview.hpp"
 #include <M73_PE.h>
-#include "media.hpp"
 #include "client_fsm_types.h"
 #include "client_response.hpp"
 #include "general_response.hpp"
 #include "marlin_server.hpp"
+#include <media_prefetch_instance.hpp>
 #include "timing.h"
 #include "filament_sensors_handler.hpp"
 #include "filament.hpp"
@@ -21,7 +21,6 @@
     #include "screen_menu_filament_changeall.hpp"
     #include "box_unfinished_selftest.hpp"
 #endif
-#include <option/has_selftest_snake.h>
 
 #include <option/has_toolchanger.h>
 #if ENABLED(PRUSA_TOOLCHANGER)
@@ -33,6 +32,7 @@
 #include <module/prusa/tool_mapper.hpp>
 #include <module/prusa/spool_join.hpp>
 #include <mmu2_toolchanger_common.hpp>
+#include <common/gcode/gcode_info_scan.hpp>
 
 // would be nice to have option leave phase as it was
 // something like std::pair<enum {delete, leave, has_value },PhasesPrintPreview>
@@ -108,20 +108,16 @@ void IPrintPreview::setFsm(std::optional<PhasesPrintPreview> wantedPhase) {
         break;
 
     case FSM_action::create:
-        if (wantedPhase && *wantedPhase != PhasesPrintPreview::loading) {
-            FSM_CREATE_WITH_DATA__LOGGING(PrintPreview, *wantedPhase, fsm::PhaseData({ 0, 0, 0, 0 }));
-        } else {
-            FSM_CREATE__LOGGING(PrintPreview);
-        }
+        marlin_server::fsm_create(wantedPhase.value_or(PhasesPrintPreview::loading));
         break;
 
     case FSM_action::destroy:
-        // do not call FSM_DESTROY__LOGGING(PrintPreview);
+        // do not call marlin_server::fsm_destroy(ClientFSM::PrintPreview);
         // we need to call it manually later to be atomic
         break;
 
     case FSM_action::change:
-        FSM_CHANGE__LOGGING(*wantedPhase); // wantedPhase is not nullopt, FSM_action would not be change otherwise
+        marlin_server::fsm_change(*wantedPhase); // wantedPhase is not nullopt, FSM_action would not be change otherwise
         break;
     }
     phase = wantedPhase;
@@ -131,17 +127,14 @@ Response IPrintPreview::GetResponse() {
     return phase ? marlin_server::get_response_from_phase(*phase) : Response::_none;
 }
 
-static bool is_same(const char *curr_filament, const GCodeInfo::filament_buff &filament_type) {
-    return strncmp(curr_filament, filament_type.begin(), filament_type.size()) == 0;
-}
-static bool filament_known(const char *curr_filament) {
-    return strncmp(curr_filament, "---", 3) != 0;
-}
-
 #if ENABLED(PRUSA_SPOOL_JOIN) && ENABLED(PRUSA_TOOL_MAPPING)
 
 bool PrintPreview::ToolsMappingValidty::all_ok() const {
-    return unassigned_gcodes.count() == 0 && mismatched_filaments.count() == 0 && mismatched_nozzles.count() == 0 && unloaded_tools.count() == 0;
+    return unassigned_gcodes.count() == 0 &&
+    #if not HAS_MMU2()
+        mismatched_filaments.count() == 0 &&
+    #endif
+        mismatched_nozzles.count() == 0 && unloaded_tools.count() == 0;
 }
 
 auto PrintPreview::check_tools_mapping_validity(const ToolMapper &mapper, const SpoolJoin &joiner, const GCodeInfo &gcode) -> ToolsMappingValidty {
@@ -223,7 +216,7 @@ auto PrintPreview::check_tools_mapping_validity(const ToolMapper &mapper, const 
 
 #endif
 
-bool PrintPreview::check_extruder_need_filament_load(uint8_t physical_extruder, uint8_t no_gcode_value, std::function<uint8_t(uint8_t)> gcode_extruder_getter) {
+bool PrintPreview::check_extruder_need_filament_load(uint8_t physical_extruder, uint8_t no_gcode_value, stdext::inplace_function<uint8_t(uint8_t)> gcode_extruder_getter) {
     auto gcode_extruder = gcode_extruder_getter(physical_extruder);
     if (gcode_extruder == no_gcode_value) {
         return false; // if this physical_extruder is not printing, no need to check its filament
@@ -241,7 +234,7 @@ static bool check_extruder_need_filament_load_tools_mapping(uint8_t physical_ext
     return PrintPreview::check_extruder_need_filament_load(physical_extruder, tools_mapping::no_tool, tools_mapping::to_gcode_tool);
 }
 
-bool PrintPreview::check_correct_filament_type(uint8_t physical_extruder, uint8_t no_gcode_value, std::function<uint8_t(uint8_t)> gcode_extruder_getter) {
+bool PrintPreview::check_correct_filament_type(uint8_t physical_extruder, uint8_t no_gcode_value, stdext::inplace_function<uint8_t(uint8_t)> gcode_extruder_getter) {
     const auto gcode_extruder = gcode_extruder_getter(physical_extruder);
     if (gcode_extruder == no_gcode_value) {
         return true; // nothing to check, this extruder doesn't print anything
@@ -256,10 +249,11 @@ bool PrintPreview::check_correct_filament_type(uint8_t physical_extruder, uint8_
         return true; // filament type unspecified, return tool OK
     }
 
-    const auto loaded_filament_type = config_store().get_filament_type(physical_extruder);
-    const auto loaded_filament_name = filament::get_name(loaded_filament_type);
-    // when loaded filament type not known, return that filament type is OK
-    return !filament_known(extruder_info.filament_name.value().data()) || is_same(loaded_filament_name, extruder_info.filament_name.value());
+    const FilamentType loaded_filament_type = config_store().get_filament_type(physical_extruder);
+    const FilamentTypeParameters loaded_filament_params = loaded_filament_type.parameters();
+
+    // when filament type not known, return that filament type is OK
+    return strcmp(extruder_info.filament_name->data(), "---") == 0 || strcmp(extruder_info.filament_name->data(), loaded_filament_params.name) == 0;
 }
 
 static bool check_correct_filament_type_tools_mapping(uint8_t physical_extruder) {
@@ -321,7 +315,8 @@ static void queue_filament_load_gcodes() {
             : "";
 #if HOTENDS > 1
         // if printer has multiple hotends (eg: XL), preheat all that will be loaded to save time for user
-        auto target_temp = filament::get_description(filament::get_type(filament_name, strlen(filament_name))).nozzle;
+        // We're loading a new filament, do not fallback into ad-hoc one -> extruder_index = std::nullopt
+        const auto target_temp = FilamentType::from_name(filament_name).parameters().nozzle_temperature;
         thermalManager.setTargetHotend(target_temp, e);
         marlin_server::set_temp_to_display(target_temp, e);
 #endif
@@ -349,7 +344,7 @@ static void queue_filament_change_gcodes() {
 
 #if HOTENDS > 1 // Here we would love mapping of extruder -> hotend, but since we don't have it, this check will have to suffice
         // if printer has multiple hotends (eg: XL), preheat all that will be loaded to save time for user
-        auto temp_old = filament::get_description(config_store().get_filament_type(e)).nozzle;
+        auto temp_old = config_store().get_filament_type(e).parameters().nozzle_temperature;
 
         thermalManager.setTargetHotend(temp_old, e);
         marlin_server::set_temp_to_display(temp_old, e);
@@ -378,9 +373,13 @@ void PrintPreview::tools_mapping_cleanup(bool leaving_to_print) {
     if (!leaving_to_print) {
         // stop preheating bed
         marlin_server::set_target_bed(0);
+#if ENABLED(PRUSA_TOOL_MAPPING)
+        tool_mapper.reset();
+        spool_join.reset();
+#endif
     }
 
-#if PRINTER_IS_PRUSA_XL
+#if PRINTER_IS_PRUSA_XL()
     // set dwarf leds to be handled 'normally'
     HOTEND_LOOP() {
         prusa_toolchanger.getTool(e).set_cheese_led(); // Default LED config
@@ -409,7 +408,7 @@ PrintPreview::Result PrintPreview::Loop() {
         return Result::Inactive;
 
     case State::init:
-        osSignalSet(prefetch_thread_id, PREFETCH_SIGNAL_GCODE_INFO_INIT);
+        gcode_info_scan::start_scan();
 
         // Reset print progress to 0. Need to be at this point because Connect is already starting to snitch the info.
         oProgressData.mInit();
@@ -422,44 +421,78 @@ PrintPreview::Result PrintPreview::Loop() {
         }
         break;
 
-    case State::download_wait:
-        switch (response) {
-
-        case Response::Quit:
-            osSignalSet(prefetch_thread_id, PREFETCH_SIGNAL_GCODE_INFO_STOP);
+    case State::download_wait: {
+        if (response == Response::Quit) {
+            gcode_info_scan::cancel_scan();
             ChangeState(State::inactive);
             return Result::Abort;
+        }
 
-        default:
+        if (gcode_info.has_error()) {
+            ChangeState(State::file_error_wait_user);
+            break;
+
+        } else if (!gcode_info.can_be_printed()) {
+            // Wait till we have downloaded enough
             break;
         }
 
-        if (gcode_info.can_be_printed()) {
-            ChangeState(State::loading);
-        } else if (gcode_info.has_error()) {
-            ChangeState(State::file_error_wait_user);
-        }
-        break;
+        const auto prefetch_ready = marlin_server::media_prefetch.check_ready_to_start_print();
+        if (prefetch_ready == MediaPrefetchManager::ReadyToStartPrintResult::needs_fetching) {
+            // Make sure we have the prefetch buffer full before start the print
+            // If we got into the "downloading" phase, do the prefetch checking here, because we're waiting for the file to download more
+            marlin_server::media_prefetch.issue_fetch();
+            break;
 
-    case State::loading:
-        if (gcode_info.start_load_result() == GCodeInfo::StartLoadResult::None) {
+        } else if (prefetch_ready == MediaPrefetchManager::ReadyToStartPrintResult::error) {
+            // This is a bit hacky way, but the error reporting is done through gcode_info, so we gotta put the error there.
+            gcode_info.set_error(N_("The file is corrupt."));
+            ChangeState(State::file_error_wait_user);
+            break;
+        }
+
+        ChangeState(State::loading);
+        break;
+    }
+
+    case State::loading: {
+        if (gcode_info_scan::scan_start_result() == gcode_info_scan::ScanStartResult::not_started) {
+            // Wait for the gcode scan to start
             break;
         }
 
         if (gcode_info.has_error()) {
             ChangeState(State::file_error_wait_user);
             break;
-        }
 
-        if (!gcode_info.can_be_printed()) {
+        } else if (!gcode_info.can_be_printed()) {
+            // The file is not fully downloaded, wait till we have downloaded enough for printing
             ChangeState(State::download_wait);
+            break;
+
+        } else if (!gcode_info.is_loaded()) {
+            // Wait for the gcode info to fully load
             break;
         }
 
-        if (gcode_info.is_loaded()) {
-            ChangeState((skip_if_able > marlin_server::PreviewSkipIfAble::no) ? stateFromSelftestCheck() : State::preview_wait_user);
+        const auto prefetch_ready = marlin_server::media_prefetch.check_ready_to_start_print();
+        if (prefetch_ready == MediaPrefetchManager::ReadyToStartPrintResult::needs_fetching) {
+            // Make sure we have the prefetch buffer full before start the print
+            // If we got into the "downloading" phase, do the prefetch checking here, because we're waiting for the file to download more
+            marlin_server::media_prefetch.issue_fetch();
+            break;
+
+        } else if (prefetch_ready == MediaPrefetchManager::ReadyToStartPrintResult::error) {
+            // This is a bit hacky way, but the error reporting is done through gcode_info, so we gotta put the error there.
+            gcode_info.set_error(N_("The file is corrupt."));
+            ChangeState(State::file_error_wait_user);
+            break;
         }
+
+        // We're ready to print now
+        ChangeState((skip_if_able > marlin_server::PreviewSkipIfAble::no) ? stateFromSelftestCheck() : State::preview_wait_user);
         break;
+    }
 
     case State::preview_wait_user:
         switch (response) {
@@ -483,9 +516,12 @@ PrintPreview::Result PrintPreview::Loop() {
         }
 
         // Periodically kindly ask the prefetch thread to check if the file is still valid and update GCodeInfo::has_error
-        if (ticks_diff(curr_ms, last_still_valid_check_ms) > 1000) {
+        if (ticks_diff(curr_ms, last_still_valid_check_ms) > 1000 && !still_valid_check_job.is_active()) {
             last_still_valid_check_ms = curr_ms;
-            osSignalSet(prefetch_thread_id, PREFETCH_SIGNAL_CHECK);
+
+            still_valid_check_job.issue([](AsyncJobExecutionControl &) {
+                GCodeInfo::getInstance().check_still_valid();
+            });
         }
 
         // Still check for file validity - file could be downloaded enough for the info to show,
@@ -660,7 +696,7 @@ PrintPreview::Result PrintPreview::Loop() {
         break;
 
     case State::checks_done:
-#if PRINTER_IS_PRUSA_iX
+#if PRINTER_IS_PRUSA_iX()
         // We've removed reset_bounding_rect at the end of the print for the iX (in marlin_server.cpp::finalize_print).
         // So now, just to make sure, we reset the bounding rect at the start if we don't see it being set in the gcode.
         // BFW-5085
@@ -744,12 +780,7 @@ void PrintPreview::Init() {
 }
 
 IPrintPreview::State PrintPreview::stateFromSelftestCheck() {
-#if (!DEVELOPER_MODE() && HAS_SELFTEST_SNAKE())
-    const bool show_warning = !selftest_warning_selftest_finished();
-#else
-    const bool show_warning = false;
-#endif
-    if (show_warning) {
+    if (!selftest_warning_selftest_finished()) {
         return State::unfinished_selftest_wait_user;
     } else {
         return stateFromUpdateCheck();

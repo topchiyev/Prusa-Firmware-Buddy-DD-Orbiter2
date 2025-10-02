@@ -21,7 +21,7 @@ constexpr const uint16_t visual_delimeter = 10;
 constexpr const Rect16 descr_rect = Rect16(
     text_padding,
     GuiDefaults::HeaderHeight + visual_delimeter,
-    display::GetW() - 2 * text_padding - GuiDefaults::QRSize - visual_delimeter,
+    GuiDefaults::ScreenWidth - 2 * text_padding - GuiDefaults::QRSize - visual_delimeter,
     GuiDefaults::MsgBoxLayoutRect.Height() / 2);
 constexpr const Rect16 help_rect = Rect16(descr_rect.Left(), descr_rect.Bottom() + 20, descr_rect.Width(), descr_rect.Height());
 constexpr const Rect16 qr_rect = Rect16(descr_rect.Right() + visual_delimeter, descr_rect.Top(), GuiDefaults::QRSize, GuiDefaults::QRSize);
@@ -32,18 +32,16 @@ constexpr const char *txt_help = N_("To learn how to change XL enclosure filter,
 }; // namespace
 
 ScreenChangeFilter::ScreenChangeFilter()
-    : AddSuperWindow<screen_t>()
+    : screen_t()
     , header(this)
     , description(this, descr_rect, is_multiline::yes)
     , help(this, help_rect, is_multiline::yes)
-    , qr(this, qr_rect, 1, Align_t::RightTop())
+    , qr(this, qr_rect, Align_t::RightTop(), qr_link)
     , radio(this, GuiDefaults::GetButtonRect(GetRect()), responses_change_filter) {
     CaptureNormalWindow(radio);
 
     header.SetIcon(&img::info_16x16);
     header.SetText(_("FILTER CHANGE"));
-
-    qr.SetText(qr_link);
 
     description.SetAlignment(Align_t::LeftTop());
     description.SetText(_(txt_descr));
@@ -52,7 +50,7 @@ ScreenChangeFilter::ScreenChangeFilter()
     help.SetText(_(txt_help));
 }
 
-void ScreenChangeFilter::windowEvent(EventLock /*has private ctor*/, [[maybe_unused]] window_t *sender, [[maybe_unused]] GUI_event_t event, void *param) {
+void ScreenChangeFilter::windowEvent([[maybe_unused]] window_t *sender, [[maybe_unused]] GUI_event_t event, void *param) {
     switch (event) {
     case GUI_event_t::CHILD_CLICK:
         switch (event_conversion_union { .pvoid = param }.response) {

@@ -40,8 +40,10 @@
 #include "mapi/motion.hpp"
 #include <cmath>
 #include <config_store/store_instance.hpp>
+#include <option/has_human_interactions.h>
 #include <option/has_mmu2.h>
 #include <scope_guard.hpp>
+#include <filament_to_load.hpp>
 
 #ifndef NOZZLE_UNPARK_XY_FEEDRATE
     #define NOZZLE_UNPARK_XY_FEEDRATE NOZZLE_PARK_XY_FEEDRATE
@@ -172,7 +174,7 @@ void PausePrivatePhase::setPhase(PhasesLoadUnload ph, uint8_t progress) {
     phase = ph;
     if (load_unload_mode) {
         ProgressSerializerLoadUnload serializer(*load_unload_mode, progress);
-        FSM_CHANGE_WITH_DATA__LOGGING(phase, serializer.Serialize());
+        marlin_server::fsm_change(phase, serializer.Serialize());
     }
 }
 
@@ -264,7 +266,7 @@ bool Pause::ensureSafeTemperatureNotifyProgress(uint8_t progress_min, uint8_t pr
     setPhase(settings.can_stop ? PhasesLoadUnload::WaitingTemp_stoppable : PhasesLoadUnload::WaitingTemp_unstoppable, progress_min);
 
     PauseFsmNotifier N(*this, Temperature::degHotend(active_extruder),
-        Temperature::degTargetHotend(active_extruder) - heating_phase_min_hotend_diff, progress_min, progress_max, marlin_vars()->hotend(active_extruder).temp_nozzle);
+        Temperature::degTargetHotend(active_extruder) - heating_phase_min_hotend_diff, progress_min, progress_max, marlin_vars().hotend(active_extruder).temp_nozzle);
 
     // Wait until temperature is close
     while (Temperature::degHotend(active_extruder) < (Temperature::degTargetHotend(active_extruder) - heating_phase_min_hotend_diff)) {
@@ -283,7 +285,7 @@ bool Pause::ensureSafeTemperatureNotifyProgress(uint8_t progress_min, uint8_t pr
 }
 
 void Pause::do_e_move_notify_progress(const float &length, const feedRate_t &fr_mm_s, uint8_t progress_min, uint8_t progress_max) {
-    PauseFsmNotifier N(*this, current_position.e, current_position.e + length, progress_min, progress_max, marlin_vars()->native_pos[MARLIN_VAR_INDEX_E]);
+    PauseFsmNotifier N(*this, current_position.e, current_position.e + length, progress_min, progress_max, marlin_vars().native_pos[MARLIN_VAR_INDEX_E]);
 
     mapi::extruder_move(length, fr_mm_s);
 
@@ -338,7 +340,7 @@ void Pause::loop_load(Response response) {
 }
 
 void Pause::loop_load_purge(Response response) {
-    const float purge_ln = settings.purge_length;
+    const float purge_ln = settings.purge_length();
 
     // transitions
     switch (getLoadPhase()) {
@@ -381,7 +383,7 @@ void Pause::loop_load_purge(Response response) {
 }
 
 void Pause::loop_load_not_blocking([[maybe_unused]] Response response) {
-    const float purge_ln = settings.purge_length;
+    const float purge_ln = settings.purge_length();
 
     // transitions
     switch (getLoadPhase()) {
@@ -451,7 +453,7 @@ void Pause::loop_autoload(Response response) {
 }
 
 void Pause::loop_load_common(Response response, CommonLoadType load_type) {
-    const float purge_ln = settings.purge_length;
+    const float purge_ln = settings.purge_length();
 
     // Provide default values just in case, the following switch should cover everything
     bool is_unstoppable = true;
@@ -518,13 +520,24 @@ void Pause::loop_load_common(Response response, CommonLoadType load_type) {
         break;
 
     case LoadPhases_t::check_filament_sensor_and_user_push__ask:
+        if constexpr (!option::has_human_interactions) {
+            setPhase(PhasesLoadUnload::Inserting_unstoppable);
+            if (FSensors_instance().has_filament(true)) {
+                set(LoadPhases_t::load_in_gear);
+            }
+
+            break;
+        }
+
         if (FSensors_instance().has_filament(false)) {
             setPhase(is_unstoppable ? PhasesLoadUnload::MakeSureInserted_unstoppable : PhasesLoadUnload::MakeSureInserted_stoppable);
 
             // With extruder MMU rework, we gotta assist the user with inserting the filament
             // BFW-5134
             if (settings.extruder_mmu_rework) {
+#if ENABLED(PREVENT_COLD_EXTRUSION)
                 AutoRestore ar_ce(thermalManager.allow_cold_extrude, true);
+#endif
                 mapi::extruder_schedule_turning(3);
             }
 
@@ -581,6 +594,12 @@ void Pause::loop_load_common(Response response, CommonLoadType load_type) {
         // Extrude filament to get into hotend
         setPhase(is_unstoppable ? PhasesLoadUnload::Purging_unstoppable : PhasesLoadUnload::Purging_stoppable, 70);
         do_e_move_notify_progress_hotextrude(purge_ln, ADVANCED_PAUSE_PURGE_FEEDRATE, 70, 99);
+
+        if constexpr (!option::has_human_interactions) {
+            set(LoadPhases_t::_finish);
+            break;
+        }
+
         setPhase(PhasesLoadUnload::IsColor, 99);
         set(LoadPhases_t::ask_is_color_correct);
         handle_filament_removal(LoadPhases_t::check_filament_sensor_and_user_push__ask);
@@ -713,7 +732,7 @@ bool Pause::ToolChange([[maybe_unused]] uint8_t target_extruder, [[maybe_unused]
         settings.park_pos.y = std::numeric_limits<float>::quiet_NaN();
 
         // Park Z and show toolchange screen
-        FSM_HOLDER_LOAD_UNLOAD_LOGGING(*this, mode);
+        FSM_HolderLoadUnload holder(*this, mode);
         setPhase(PhasesLoadUnload::ChangingTool);
 
         // Change tool, don't lift or return Z as it was done by parking
@@ -725,44 +744,44 @@ bool Pause::ToolChange([[maybe_unused]] uint8_t target_extruder, [[maybe_unused]
 }
 
 bool Pause::UnloadFromGear() {
-    FSM_HOLDER_LOAD_UNLOAD_LOGGING(*this, LoadUnloadMode::Unload);
+    FSM_HolderLoadUnload holder(*this, LoadUnloadMode::Unload);
     return filamentUnload(&Pause::loop_unloadFromGear);
 }
 
 bool Pause::FilamentUnload(const pause::Settings &settings_) {
     settings = settings_;
-    FSM_HOLDER_LOAD_UNLOAD_LOGGING(*this, LoadUnloadMode::Unload);
+    FSM_HolderLoadUnload holder(*this, LoadUnloadMode::Unload);
     return filamentUnload(FSensors_instance().HasMMU() ? &Pause::loop_unload_mmu : &Pause::loop_unload);
 }
 
 bool Pause::FilamentUnload_AskUnloaded(const pause::Settings &settings_) {
     settings = settings_;
-    FSM_HOLDER_LOAD_UNLOAD_LOGGING(*this, LoadUnloadMode::Unload);
+    FSM_HolderLoadUnload holder(*this, LoadUnloadMode::Unload);
     return filamentUnload(&Pause::loop_unload_AskUnloaded);
     // TODO specify behavior for FSensors_instance().HasMMU()
 }
 
 bool Pause::FilamentLoad(const pause::Settings &settings_) {
     settings = settings_;
-    FSM_HOLDER_LOAD_UNLOAD_LOGGING(*this, settings.fast_load_length ? LoadUnloadMode::Load : LoadUnloadMode::Purge);
+    FSM_HolderLoadUnload holder(*this, settings.fast_load_length ? LoadUnloadMode::Load : LoadUnloadMode::Purge);
     return filamentLoad(FSensors_instance().HasMMU() ? &Pause::loop_load_mmu : (settings.fast_load_length ? &Pause::loop_load : &Pause::loop_load_purge));
 }
 
 bool Pause::FilamentLoadNotBlocking(const pause::Settings &settings_) {
     settings = settings_;
-    FSM_HOLDER_LOAD_UNLOAD_LOGGING(*this, LoadUnloadMode::Load);
+    FSM_HolderLoadUnload holder(*this, LoadUnloadMode::Load);
     return filamentLoad(&Pause::loop_load_not_blocking);
 }
 
 bool Pause::FilamentAutoload(const pause::Settings &settings_) {
     settings = settings_;
-    FSM_HOLDER_LOAD_UNLOAD_LOGGING(*this, LoadUnloadMode::Load);
+    FSM_HolderLoadUnload holder(*this, LoadUnloadMode::Load);
     return filamentLoad(&Pause::loop_autoload);
 }
 
 bool Pause::LoadToGear(const pause::Settings &settings_) {
     settings = settings_;
-    FSM_HOLDER_LOAD_UNLOAD_LOGGING(*this, LoadUnloadMode::Load);
+    FSM_HolderLoadUnload holder(*this, LoadUnloadMode::Load);
     return filamentLoad(&Pause::loop_loadToGear);
 }
 
@@ -917,7 +936,7 @@ void Pause::loop_unload_common(Response response, CommonUnloadType unload_type) 
             break;
         }
 
-        config_store().set_filament_type(settings.GetExtruder(), filament::Type::NONE);
+        config_store().set_filament_type(settings.GetExtruder(), FilamentType::none);
 
         switch (unload_type) {
 
@@ -928,8 +947,15 @@ void Pause::loop_unload_common(Response response, CommonUnloadType unload_type) 
         case CommonUnloadType::ask_unloaded:
         case CommonUnloadType::filament_change:
         case CommonUnloadType::filament_stuck:
+#if !HAS_HUMAN_INTERACTIONS()
+            runout_timer_ms = ticks_ms();
+            set(UnloadPhases_t::filament_not_in_fs);
+            break;
+#endif
+
             setPhase(PhasesLoadUnload::IsFilamentUnloaded, 100);
             set(UnloadPhases_t::unloaded__ask);
+
             break;
         }
         break;
@@ -949,7 +975,20 @@ void Pause::loop_unload_common(Response response, CommonUnloadType unload_type) 
     case UnloadPhases_t::filament_not_in_fs:
         setPhase(PhasesLoadUnload::FilamentNotInFS);
         if (!FSensors_instance().has_filament(true)) { // Either no filament in FS or unknown (FS off)
+#if !HAS_HUMAN_INTERACTIONS()
+            // In case of no human interactions, require no filament being
+            // detected for at least 1s to avoid FS flicking off and on due
+            // to filament movement and reloading the just-unloaded
+            // filament remnant back in.
+            if (ticks_diff(ticks_ms(), runout_timer_ms) < 1000) {
+                break;
+            }
+#endif
             set(UnloadPhases_t::_finish);
+        } else {
+#if !HAS_HUMAN_INTERACTIONS()
+            runout_timer_ms = ticks_ms();
+#endif
         }
         break;
 
@@ -1124,7 +1163,7 @@ void Pause::park_nozzle_and_notify() {
         if (axes_need_homing(_BV(Z_AXIS))) {
             unhomed_z_lift(target_Z);
         } else {
-            PauseFsmNotifier N(*this, current_position.z, target_Z, 0, parkMoveZPercent(Z_len, XY_len), marlin_vars()->native_pos[MARLIN_VAR_INDEX_Z]);
+            PauseFsmNotifier N(*this, current_position.z, target_Z, 0, parkMoveZPercent(Z_len, XY_len), marlin_vars().native_pos[MARLIN_VAR_INDEX_Z]);
             plan_park_move_to(current_position.x, current_position.y, target_Z, NOZZLE_PARK_XY_FEEDRATE, Z_feedrate);
             if (wait_for_motion_finish_or_user_stop()) {
                 return;
@@ -1139,11 +1178,11 @@ void Pause::park_nozzle_and_notify() {
             GcodeSuite::G28_no_parser(false, false, 0, false, true, true, false);
 
             // We have moved both axes, go to park position if not requested otherwise
-    #ifdef NOZZLE_PARK_POINT_M600
-            static constexpr xyz_pos_t park = NOZZLE_PARK_POINT_M600;
-    #else /*NOZZLE_PARK_POINT_M600*/
-            static constexpr xyz_pos_t park = NOZZLE_PARK_POINT;
-    #endif /*NOZZLE_PARK_POINT_M600*/
+    #ifdef XYZ_NOZZLE_PARK_POINT_M600
+            static constexpr xyz_pos_t park = XYZ_NOZZLE_PARK_POINT_M600;
+    #else /*XYZ_NOZZLE_PARK_POINT_M600*/
+            static constexpr xyz_pos_t park = XYZ_NOZZLE_PARK_POINT;
+    #endif /*XYZ_NOZZLE_PARK_POINT_M600*/
             LOOP_XY(axis) {
                 if (isnan(settings.park_pos.pos[axis])) {
                     settings.park_pos.pos[axis] = park[axis];
@@ -1175,13 +1214,13 @@ void Pause::park_nozzle_and_notify() {
 #endif /*CORE_IS_XY*/
 
         if (x_greater_than_y) {
-            PauseFsmNotifier N(*this, begin_pos, end_pos, parkMoveZPercent(Z_len, XY_len), 100, marlin_vars()->native_pos[MARLIN_VAR_INDEX_X]); // from Z% to 100%
+            PauseFsmNotifier N(*this, begin_pos, end_pos, parkMoveZPercent(Z_len, XY_len), 100, marlin_vars().native_pos[MARLIN_VAR_INDEX_X]); // from Z% to 100%
             plan_park_move_to_xyz(settings.park_pos, NOZZLE_PARK_XY_FEEDRATE, Z_feedrate);
             if (wait_for_motion_finish_or_user_stop()) {
                 return;
             }
         } else {
-            PauseFsmNotifier N(*this, begin_pos, end_pos, parkMoveZPercent(Z_len, XY_len), 100, marlin_vars()->native_pos[MARLIN_VAR_INDEX_Y]); // from Z% to 100%
+            PauseFsmNotifier N(*this, begin_pos, end_pos, parkMoveZPercent(Z_len, XY_len), 100, marlin_vars().native_pos[MARLIN_VAR_INDEX_Y]); // from Z% to 100%
             plan_park_move_to_xyz(settings.park_pos, NOZZLE_PARK_XY_FEEDRATE, Z_feedrate);
             if (wait_for_motion_finish_or_user_stop()) {
                 return;
@@ -1215,10 +1254,10 @@ void Pause::unpark_nozzle_and_notify() {
     }
 
     if (x_greater_than_y) {
-        PauseFsmNotifier N(*this, begin_pos, end_pos, 0, parkMoveXYPercent(Z_len, XY_len), marlin_vars()->native_pos[MARLIN_VAR_INDEX_X]);
+        PauseFsmNotifier N(*this, begin_pos, end_pos, 0, parkMoveXYPercent(Z_len, XY_len), marlin_vars().native_pos[MARLIN_VAR_INDEX_X]);
         do_blocking_move_to_xy(settings.resume_pos, NOZZLE_UNPARK_XY_FEEDRATE);
     } else {
-        PauseFsmNotifier N(*this, begin_pos, end_pos, 0, parkMoveXYPercent(Z_len, XY_len), marlin_vars()->native_pos[MARLIN_VAR_INDEX_Y]);
+        PauseFsmNotifier N(*this, begin_pos, end_pos, 0, parkMoveXYPercent(Z_len, XY_len), marlin_vars().native_pos[MARLIN_VAR_INDEX_Y]);
         do_blocking_move_to_xy(settings.resume_pos, NOZZLE_UNPARK_XY_FEEDRATE);
     }
 
@@ -1233,7 +1272,7 @@ void Pause::unpark_nozzle_and_notify() {
         planner.apply_leveling(resume_pos_adj);
 #endif
 
-        PauseFsmNotifier N(*this, current_position.z, resume_pos_adj.z, parkMoveXYPercent(Z_len, XY_len), 100, marlin_vars()->native_pos[MARLIN_VAR_INDEX_Z]); // from XY% to 100%
+        PauseFsmNotifier N(*this, current_position.z, resume_pos_adj.z, parkMoveXYPercent(Z_len, XY_len), 100, marlin_vars().native_pos[MARLIN_VAR_INDEX_Z]); // from XY% to 100%
         // FIXME: use a beter movement api when available
         do_blocking_move_to_z(resume_pos_adj.z, feedRate_t(NOZZLE_PARK_Z_FEEDRATE));
         // But since the plan_park_move_to overrides the current position values (which are by default in
@@ -1298,7 +1337,7 @@ void Pause::FilamentChange(const pause::Settings &settings_) {
 
     switch (settings.called_from) {
     case pause::Settings::CalledFrom::Pause: {
-        FSM_HOLDER_LOAD_UNLOAD_LOGGING(*this, LoadUnloadMode::Change);
+        FSM_HolderLoadUnload holder(*this, LoadUnloadMode::Change);
 
         if (settings.unload_length) { // Unload the filament
             filamentUnload(FSensors_instance().HasMMU() ? &Pause::loop_unload_mmu_change : &Pause::loop_unload_change);
@@ -1319,7 +1358,7 @@ void Pause::FilamentChange(const pause::Settings &settings_) {
         }
     } break;
     case pause::Settings::CalledFrom::FilamentStuck: {
-        FSM_HOLDER_LOAD_UNLOAD_LOGGING(*this, LoadUnloadMode::FilamentStuck); //@@TODO how to start in a different state? We need FilamentStuck...
+        FSM_HolderLoadUnload holder(*this, LoadUnloadMode::FilamentStuck); //@@TODO how to start in a different state? We need FilamentStuck...
         // @@TODO how to disable heating after the timer runs out?
         filamentUnload(&Pause::loop_unload_filament_stuck);
         if (filamentLoad(&Pause::loop_load_filament_stuck)) { // @@TODO force load filament ... what happens if the user decides to stop it? We cannot continue without the filament
@@ -1409,6 +1448,10 @@ const RammingSequence &Pause::get_ramming_sequence(const RammingType type) const
 }
 
 bool Pause::check_user_stop() {
+    if (user_stop_pending) {
+        return true;
+    }
+
     const Response response = getResponse();
     if (response != Response::Stop) {
         return false;
@@ -1456,7 +1499,7 @@ void Pause::handle_filament_removal(LoadPhases_t phase_to_set) {
     // only if there is no filament present and we are sure (FS on and sees no filament)
     if (FSensors_instance().has_filament(false)) {
         set(phase_to_set);
-        config_store().set_filament_type(settings.GetExtruder(), filament::Type::NONE);
+        config_store().set_filament_type(settings.GetExtruder(), FilamentType::none);
         return;
     }
     return;
@@ -1473,8 +1516,8 @@ void Pause::FSM_HolderLoadUnload::unbindFromSafetyTimer() {
     SafetyTimer::Instance().UnbindPause(pause);
 }
 
-Pause::FSM_HolderLoadUnload::FSM_HolderLoadUnload(Pause &p, LoadUnloadMode mode, const char *fnc, const char *file, int line)
-    : FSM_Holder(ClientFSM::Load_unload, fnc, file, line)
+Pause::FSM_HolderLoadUnload::FSM_HolderLoadUnload(Pause &p, LoadUnloadMode mode)
+    : FSM_Holder(PhasesLoadUnload::initial)
     , pause(p) {
     pause.set_mode(mode);
     pause.clrRestoreTemp();

@@ -490,10 +490,7 @@
     #define DEFAULT_Ki 1.00
     #define DEFAULT_Kd 100.00
 
-    #define STEADY_STATE_HOTEND // Enable support for STEADY_STATE_HOTEND (feed-forward thermal management)
-    #define STEADY_STATE_HOTEND_LINEAR_COOLING_TERM 0.322
-    #define STEADY_STATE_HOTEND_QUADRATIC_COOLING_TERM 0.0002
-    #define STEADY_STATE_HOTEND_FAN_COOLING_TERM 9.24
+    // STEADY_STATE_HOTEND IS CONFIGURED ON DWARF CONFIG, ANYTHING PUT HERE WILL BE POINTLESS
 #endif // PIDTEMP
 
 //===========================================================================
@@ -775,19 +772,14 @@
  * Override with M203
  *                                      X, Y, Z, E0 [, E1[, E2[, E3[, E4[, E5]]]]]
  */
-
-#if (BOARD_VER_EQUAL_TO(0, 4, 0))
-    #define DEFAULT_MAX_MAX_E_FEEDRATE 25 // E speed is limited by slow E step convertor
-#else
-    #define DEFAULT_MAX_MAX_E_FEEDRATE 45
-#endif
+#define DEFAULT_MAX_MAX_E_FEEDRATE 45
 
 #define DEFAULT_MAX_FEEDRATE \
     { 550, 550, 12, DEFAULT_MAX_MAX_E_FEEDRATE }
 
 /// HW limits of feed rate
 #define HWLIMIT_NORMAL_MAX_FEEDRATE \
-    { 400, 400, 20, 100 }
+    { 460, 460, 20, 100 }
 #define HWLIMIT_STEALTH_MAX_FEEDRATE \
     { 140, 140, 12, 100 }
 
@@ -1576,11 +1568,6 @@
 //
 //#define INCH_MODE_SUPPORT
 
-/**
- * R1 Redirect gcode support
- */
-//#define REDIRECT_GCODE_SUPPORT
-
 //
 // M149 Set temperature units support
 //
@@ -1622,13 +1609,22 @@
     #define Y_AXIS_UNLOAD_POS  Y_AXIS_PURGE_POS
     #define X_AXIS_LOAD_POS  (std::numeric_limits<float>::quiet_NaN())
     #define X_AXIS_UNLOAD_POS  (std::numeric_limits<float>::quiet_NaN())
+
     // Specify a park position as { X, Y, Z }
     // Park at the back of XL
-    #define NOZZLE_PARK_POINT \
-        { (X_MIN_POS + 10), (Y_MAX_POS - 110), 20 }
+    #define X_NOZZLE_PARK_POINT (X_MIN_POS + 10)
+    #define Y_NOZZLE_PARK_POINT (Y_MAX_POS - 110)
+    #define Z_NOZZLE_PARK_POINT 20
+    #define XYZ_NOZZLE_PARK_POINT \
+        {X_NOZZLE_PARK_POINT, Y_NOZZLE_PARK_POINT, Z_NOZZLE_PARK_POINT}
+
     // Filament exchange in the front of XL
-    #define NOZZLE_PARK_POINT_M600 \
-        { (X_MIN_POS + 50), Y_AXIS_PURGE_POS, 20 }
+    #define X_NOZZLE_PARK_POINT_M600    (X_MIN_POS + 50)
+    #define Y_NOZZLE_PARK_POINT_M600    Y_AXIS_PURGE_POS
+    #define Z_NOZZLE_PARK_POINT_M600    20
+    #define XYZ_NOZZLE_PARK_POINT_M600 \
+        {X_NOZZLE_PARK_POINT_M600, Y_NOZZLE_PARK_POINT_M600, Z_NOZZLE_PARK_POINT_M600}
+
     #define NOZZLE_PARK_XY_FEEDRATE 100 // (mm/s) X and Y axes feedrate (also used for delta Z axis)
     #define NOZZLE_PARK_Z_FEEDRATE 5 // (mm/s) Z axis feedrate (not used for delta printers)
 
@@ -1963,12 +1959,6 @@
 //
 
 //
-// Elefu RA Board Control Panel
-// http://www.elefu.com/index.php?route=product/product&product_id=53
-//
-#define RA_CONTROL_PANEL
-
-//
 // Sainsmart (YwRobot) LCD Displays
 //
 // These require F.Malpartida's LiquidCrystal_I2C library
@@ -2179,11 +2169,6 @@
 //
 // CONTROLLER TYPE: Standalone / Serial
 //
-
-//
-// LCD for Malyan M200 printers.
-//
-//#define MALYAN_LCD
 
 //
 // CONTROLLER TYPE: Keypad / Add-on

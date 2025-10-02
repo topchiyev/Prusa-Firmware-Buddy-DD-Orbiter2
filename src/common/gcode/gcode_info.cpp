@@ -11,13 +11,14 @@
 #include <tools_mapping.hpp>
 #include <module/prusa/spool_join.hpp>
 #include "mutable_path.hpp"
-#include "log.h"
+#include <logging/log.hpp>
 #include <option/has_mmu2.h>
+#include "common/printer_model.hpp"
 
 LOG_COMPONENT_REF(Buddy);
 
 #if ENABLED(PRUSA_MMU2)
-    #include "../../lib/Marlin/Marlin/src/feature/prusa/MMU2/mmu2_mk4.h"
+    #include "Marlin/src/feature/prusa/MMU2/mmu2_mk4.h"
 #endif
 #if HAS_TOOLCHANGER()
     #include <module/prusa/toolchanger.h>
@@ -30,17 +31,17 @@ GCodeInfo &GCodeInfo::getInstance() {
     return instance;
 }
 
-void GCodeInfo::Init(const char *fname, const char *fpath) {
-    gcode_file_name = fname;
-    gcode_file_path = fpath;
-}
-
 const char *GCodeInfo::GetGcodeFilename() {
-    return gcode_file_name;
+    return gcode_file_name.data();
 }
 
 const char *GCodeInfo::GetGcodeFilepath() {
-    return gcode_file_path;
+    return gcode_file_path.data();
+}
+
+void GCodeInfo::set_gcode_file(const char *filepath_sfn, const char *filename_lfn) {
+    strlcpy(gcode_file_path.data(), filepath_sfn, gcode_file_path.size());
+    strlcpy(gcode_file_name.data(), filename_lfn, gcode_file_name.size());
 }
 
 #if HAS_GUI()
@@ -49,73 +50,13 @@ bool GCodeInfo::hasThumbnail(IGcodeReader &reader, size_ui16_t size) {
 }
 #endif
 
-uint32_t printer_model2code(const char *model) {
-    struct {
-        const char *model;
-        uint32_t code;
-    } models[] = {
-        { "MK1", 100 },
-        { "MK2", 200 },
-        { "MK2MM", 201 },
-        { "MK2S", 202 },
-        { "MK2SMM", 203 },
-        { "MK2.5", 250 },
-        { "MK2.5MMU2", 20250 },
-        { "MK2.5S", 252 },
-        { "MK2.5SMMU2S", 20252 },
-        { "MK3", 300 },
-        { "MK3MMU2", 20300 },
-        { "MK3S", 302 },
-        { "MK3SMMU2S", 20302 },
-        { "MK3.5", 230 },
-        { "MK3.5MMU3", 30230 },
-        { "MK3.9", 210 },
-        { "MK3.9MMU3", 30210 },
-        { "MINI", 120 },
-        { "MK4", 130 },
-        { "MK4MMU3", 30130 },
-        { "iX", 160 },
-        { "XL", 170 },
-    };
-
-    for (auto &m : models) {
-        if (std::string_view(m.model) == model) {
-            return m.code;
-        }
-    }
-    assert(false);
-    return 0;
-}
-
 GCodeInfo::GCodeInfo()
-    : printer_model_code(printer_model2code(PRINTER_MODEL))
-    , printing_time { "?" }
+    : printing_time { "?" }
     , has_preview_thumbnail_(false)
     , has_progress_thumbnail_(false)
     , filament_described(false)
-    , per_extruder_info()
-    , gcode_file_path(nullptr)
-    , gcode_file_name(nullptr) {
-}
-
-bool GCodeInfo::start_load(AnyGcodeFormatReader &file_reader) {
-    reset_info();
-
-    file_reader.open(gcode_file_path);
-    if (file_reader.is_open()) {
-        start_load_result_ = StartLoadResult::Started;
-        check_valid_for_print(file_reader); // This only updates is_valid, will change over the prefetch change
-        return true;
-
-    } else {
-        error_str_ = N_("Failed to open file");
-        start_load_result_ = StartLoadResult::Failed;
-        return false;
-    }
-}
-
-void GCodeInfo::end_load(AnyGcodeFormatReader &file_reader) {
-    file_reader.close();
+    , per_extruder_info() //
+{
 }
 
 bool GCodeInfo::check_still_valid() {
@@ -128,12 +69,8 @@ bool GCodeInfo::check_still_valid() {
     return !has_error();
 }
 
-bool GCodeInfo::check_valid_for_print(AnyGcodeFormatReader &file_reader) {
-    assert(file_reader.is_open());
-    auto &reader = *file_reader.get();
-
-    transfers::Transfer::Path path(GetGcodeFilepath());
-    reader.update_validity(path);
+bool GCodeInfo::check_valid_for_print(IGcodeReader &reader) {
+    reader.update_validity(GetGcodeFilepath());
     is_printable_ = reader.valid_for_print();
 
     if (reader.has_error()) {
@@ -143,34 +80,57 @@ bool GCodeInfo::check_valid_for_print(AnyGcodeFormatReader &file_reader) {
     return is_printable_;
 }
 
-bool GCodeInfo::verify_file(AnyGcodeFormatReader &file_reader) {
-    assert(file_reader.is_open());
-
-    log_info(Buddy, "Starting file verify...");
-
-    // TODO: enable CRC verification, but now its disabled because it takes ages due to slow USB read and suboptimal implementation
-    // For now we're only doing quick verification
-    if (auto result = file_reader.get()->verify_file(IGcodeReader::FileVerificationLevel::quick); !result) {
-        error_str_ = result.error_str;
-        log_info(Buddy, "File verify FAIL: %s", result.error_str);
-        return false;
-    }
-
-    log_info(Buddy, "File verify OK");
-    return true;
-}
-
-void GCodeInfo::load(AnyGcodeFormatReader &file_reader) {
-    assert(file_reader.is_open()); // assert file is open
+void GCodeInfo::load(IGcodeReader &reader) {
 #if HAS_GUI()
-    has_preview_thumbnail_ = hasThumbnail(*file_reader.get(), GuiDefaults::PreviewThumbnailRect.Size());
-    has_progress_thumbnail_ = hasThumbnail(*file_reader.get(), GuiDefaults::ProgressThumbnailRect.Size());
+    has_preview_thumbnail_ = hasThumbnail(reader, GuiDefaults::PreviewThumbnailRect.Size());
+    has_progress_thumbnail_ = hasThumbnail(reader, GuiDefaults::ProgressThumbnailRect.Size());
     if (!has_progress_thumbnail_) {
-        has_progress_thumbnail_ = hasThumbnail(*file_reader.get(), { GuiDefaults::OldSlicerProgressImgWidth, GuiDefaults::ProgressThumbnailRect.Height() });
+        has_progress_thumbnail_ = hasThumbnail(reader, { GuiDefaults::OldSlicerProgressImgWidth, GuiDefaults::ProgressThumbnailRect.Height() });
     }
 #endif
+
     // scan info G-codes and comments
-    PreviewInit(*file_reader.get());
+    valid_printer_settings = ValidPrinterSettings(); // reset to valid state
+    per_extruder_info = {}; // Reset extruder info
+#if EXTRUDERS > 1
+    filament_wipe_tower_g = std::nullopt;
+#endif
+
+    GcodeBuffer buffer;
+
+    // parse metadata
+    if (reader.stream_metadata_start()) {
+        while (true) {
+            auto res = reader.stream_get_line(buffer, IGcodeReader::Continuations::Discard);
+
+            // valid_for_print should is supposed to make sure that file is downloaded-enough to not run out of bounds here.
+            assert(res != IGcodeReader::Result_t::RESULT_OUT_OF_RANGE);
+            if (res != IGcodeReader::Result_t::RESULT_OK) {
+                break;
+            }
+
+            parse_comment(buffer.line);
+        }
+
+    } else {
+        log_error(Buddy, "Metadata in gcode not found");
+    }
+
+    // parse first few gcodes
+    if (reader.stream_gcode_start() == IGcodeReader::Result_t::RESULT_OK) {
+        uint32_t gcode_counter = 0;
+        while (true) {
+            // valid_for_print should is supposed to make sure that file is downloaded-enough to not run out of bounds here.
+            auto res = reader.stream_get_line(buffer, IGcodeReader::Continuations::Discard);
+            assert(res != IGcodeReader::Result_t::RESULT_OUT_OF_RANGE);
+            if (res != IGcodeReader::Result_t::RESULT_OK || gcode_counter >= search_first_x_gcodes) {
+                break;
+            }
+
+            parse_gcode(buffer.line, gcode_counter);
+        }
+    }
+
     is_loaded_ = true;
 }
 
@@ -193,12 +153,7 @@ void GCodeInfo::reset_info() {
     valid_printer_settings = ValidPrinterSettings();
     per_extruder_info.fill({});
     printing_time[0] = 0;
-    start_load_result_ = StartLoadResult::None;
     error_str_ = {};
-}
-
-uint32_t GCodeInfo::getPrinterModelCode() const {
-    return printer_model_code;
 }
 
 void GCodeInfo::EvaluateToolsValid() {
@@ -221,25 +176,30 @@ void GCodeInfo::EvaluateToolsValid() {
         }
 #endif
 
-        // nozzle diameter of this tool in gcode is different then printer has
-        if (per_extruder_info[e].nozzle_diameter.has_value()) {
-            auto do_nozzle_check = [&](uint8_t hotend) {
-                assert(hotend < HOTENDS);
-                float nozzle_diameter_distance = std::abs(per_extruder_info[e].nozzle_diameter.value() - config_store().get_nozzle_diameter(hotend));
-                if (nozzle_diameter_distance > 0.001f) {
-                    valid_printer_settings.wrong_nozzle_diameter.fail();
-                }
-            };
+        auto do_nozzle_check = [&](uint8_t hotend) {
+            assert(hotend < HOTENDS);
+
+            const auto &extruder_info = per_extruder_info[hotend];
+
+            if (auto dia = extruder_info.nozzle_diameter; dia && std::abs(*dia - config_store().get_nozzle_diameter(hotend)) > 0.001f) {
+                valid_printer_settings.wrong_nozzle_diameter.fail();
+            }
+            if (extruder_info.requires_hardened_nozzle.value_or(false) && !config_store().nozzle_is_hardened.get()[hotend]) {
+                valid_printer_settings.nozzle_not_hardened.fail();
+            }
+            if (extruder_info.requires_high_flow_nozzle.value_or(false) && !config_store().nozzle_is_high_flow.get()[hotend]) {
+                valid_printer_settings.nozzle_not_high_flow.fail();
+            }
+        };
 
 #if ENABLED(SINGLENOZZLE)
-            do_nozzle_check(0);
+        do_nozzle_check(0);
 #else
-            tools_mapping::execute_on_whole_chain(physical_tool,
-                [&](uint8_t physical) {
-                    do_nozzle_check(physical); // here should be map to hotend from this extruder but the #if ENABLED(SINGLENOZZLE) should be enough for now
-                });
+        tools_mapping::execute_on_whole_chain(physical_tool,
+            [&](uint8_t physical) {
+                do_nozzle_check(physical); // here should be map to hotend from this extruder but the #if ENABLED(SINGLENOZZLE) should be enough for now
+            });
 #endif
-        }
     }
 }
 
@@ -258,22 +218,41 @@ void GCodeInfo::ValidPrinterSettings::add_unsupported_feature(const char *featur
 }
 
 bool GCodeInfo::ValidPrinterSettings::is_valid(bool is_tools_mapping_possible) const {
-    return wrong_printer_model.is_valid() && wrong_gcode_level.is_valid() && wrong_firmware.is_valid() && mk3_compatibility_mode.is_valid() && !unsupported_features
+    return wrong_printer_model.is_valid() && wrong_gcode_level.is_valid() && wrong_firmware.is_valid()
+#if ENABLED(GCODE_COMPATIBILITY_MK3)
+        && gcode_compatibility_mode.is_valid()
+#endif
+#if ENABLED(FAN_COMPATIBILITY_MK4_MK3)
+        && fan_compatibility_mode.is_valid()
+#endif
+        && !unsupported_features
         && (is_tools_mapping_possible // if is_possible -> always true -> handled by tools_mapping screen
-            || (wrong_tools.is_valid() && wrong_nozzle_diameter.is_valid()));
+            || (wrong_tools.is_valid() && wrong_nozzle_diameter.is_valid() && nozzle_not_hardened.is_valid() && nozzle_not_high_flow.is_valid()));
 }
 
 bool GCodeInfo::ValidPrinterSettings::is_fatal(bool is_tools_mapping_possible) const {
-    return wrong_printer_model.is_fatal() || wrong_gcode_level.is_fatal() || wrong_firmware.is_fatal() || mk3_compatibility_mode.is_fatal()
+    return wrong_printer_model.is_fatal() || wrong_gcode_level.is_fatal() || wrong_firmware.is_fatal()
+#if ENABLED(GCODE_COMPATIBILITY_MK3)
+        || gcode_compatibility_mode.is_fatal()
+#endif
+#if ENABLED(FAN_COMPATIBILITY_MK4_MK3)
+        || fan_compatibility_mode.is_fatal()
+#endif
         || (!is_tools_mapping_possible // if is_possible -> always false -> handled by tools_mapping screen
-            && (wrong_tools.is_fatal() || wrong_nozzle_diameter.is_fatal()));
+            && (wrong_tools.is_fatal() || wrong_nozzle_diameter.is_fatal() || nozzle_not_hardened.is_fatal() || nozzle_not_high_flow.is_fatal()));
 }
 
 bool GCodeInfo::is_up_to_date(const char *new_version_string) {
     // Parse version from G-code
     // supported formats: MAJOR.MINOR.PATCH, MAJOR.MINOR.PATCH+BUILD_NUMBER, MAJOR.MINOR.PATCH-PRERELEASE+BUILD_NUMBER
     // only MAJOR, MINOR, PATH, BUILD_NUMBER are used for version comparison,
-    ValidPrinterSettings::GcodeFwVersion parsed;
+    struct {
+        unsigned major = 0;
+        unsigned minor = 0;
+        unsigned patch = 0;
+        unsigned build_number = 0;
+    } parsed;
+
     if (sscanf(new_version_string, "%u.%u.%u", &parsed.major, &parsed.minor, &parsed.patch) != 3) {
         return true;
     }
@@ -361,52 +340,71 @@ void GCodeInfo::parse_m862(GcodeBuffer::String cmd) {
     char subcode = cmd.pop_front();
     cmd.skip_ws();
 
+    const auto check_compatibility = [&](const PrinterModelInfo *gcode_printer) {
+        // Unknown gcode printer, sayonara!
+        if (!gcode_printer) {
+            valid_printer_settings.wrong_printer_model.fail();
+            return;
+        }
+        const PrinterGCodeCompatibilityReport compatibility = PrinterModelInfo::current().gcode_compatibility_report(*gcode_printer);
+
+        // If there isn't full compatibility of the gcode, report wrong printer model
+        if (compatibility != PrinterGCodeCompatibilityReport { .is_compatible = true }) {
+            valid_printer_settings.wrong_printer_model.fail();
+        }
+
+#if ENABLED(GCODE_COMPATIBILITY_MK3)
+        if (compatibility.mk3_compatibility_mode) {
+            valid_printer_settings.gcode_compatibility_mode.fail();
+        }
+#endif
+
+#if ENABLED(FAN_COMPATIBILITY_MK4_MK3)
+        if (compatibility.mk4s_fan_compatibility_mode) {
+            valid_printer_settings.fan_compatibility_mode.fail();
+        }
+#endif
+    };
+
     // Parse parameters
     [[maybe_unused]] uint8_t tool = 0; // Default is first tool
-    float p_diameter = NAN;
+    std::optional<float> p_diameter;
+    std::optional<bool> requires_hardened_nozzle, requires_high_flow_nozzle;
     while (!cmd.is_empty()) {
-        char letter = cmd.pop_front();
+        const char letter = cmd.pop_front();
         if (letter == 'T') {
             tool = cmd.get_uint(); // Check particular tool (only for M862.1)
         } else if (letter == 'P') {
             switch (subcode) {
+
             case '1':
                 p_diameter = cmd.get_float(); // Only store value in case Tx comes later
                 break;
-            case '3': {
-#if ENABLED(GCODE_COMPATIBILITY_MK3)
-                if (strncmp(cmd.get_string().c_str(), "MK3", 3) == 0 && strncmp(cmd.get_string().c_str(), "MK3.", 4) != 0) { // second condition due to MK3.5 & MK3.9
-                    valid_printer_settings.mk3_compatibility_mode.fail();
-                }
-#endif
 
-                // Check basic printer model as MK4 or XL
-                if (!is_printer_compatible(cmd.get_string(), printer_compatibility_list)) {
-                    valid_printer_settings.wrong_printer_model.fail();
-                }
+            case '3': {
+                const auto gcode_printer_str = cmd.get_string();
+                check_compatibility(PrinterModelInfo::from_id_str(std::string_view(gcode_printer_str.begin, gcode_printer_str.end)));
                 break;
             }
+
             case '4':
                 // Parse M862.4 for minimal required firmware version
                 if (!is_up_to_date(cmd.c_str())) {
                     valid_printer_settings.wrong_firmware.fail();
                 }
                 break;
+
             case '2':
-#if PRINTER_IS_PRUSA_MK4
-                if (cmd.get_uint() != printer_model_code && cmd.get_uint() != printer_model2code("MK3.9")) {
-#else
-                if (cmd.get_uint() != printer_model_code) {
-#endif
-                    valid_printer_settings.wrong_printer_model.fail();
-                }
+                check_compatibility(PrinterModelInfo::from_gcode_check_code(cmd.get_uint()));
                 break;
+
             case '5':
                 if (cmd.get_uint() > gcode_level) {
                     valid_printer_settings.wrong_gcode_level.fail();
                 }
                 break;
-            case '6':
+
+            case '6': {
                 auto compare = [](GcodeBuffer::String &a, const char *b) {
                     for (char *c = a.begin;; ++c, ++b) {
                         if (c == a.end || *b == '\0') {
@@ -440,27 +438,57 @@ void GCodeInfo::parse_m862(GcodeBuffer::String cmd) {
                 }
                 break;
             }
+            }
+        } else if (letter == 'A') {
+            switch (subcode) {
+
+            case '1':
+                requires_hardened_nozzle = cmd.get_uint();
+                break;
+
+            default:
+                break;
+            }
+        } else if (letter == 'F') {
+            switch (subcode) {
+
+            case '1':
+                requires_high_flow_nozzle = cmd.get_uint();
+                break;
+
+            default:
+                break;
+            }
         }
         cmd.skip_nws();
         cmd.skip_ws();
     }
 
+    const auto visit_tool = [&](const auto &visitor) {
 #if ENABLED(PRUSA_MMU2)
-    // Store nozzle diameter - MMU-equipped printers have only one nozzle diameter for all tools/slots
-    // Makes the pre-print screen hide the nozzle sizes, which is both good and bad at the same time
-    // -> "?.??" is gone, but no actual diameter is shown anymore - that can be tweaked further on the visualization side.
-    // Here, we must set the correct nozzle diameter for all tools if specified.
-    if (!isnan(p_diameter)) {
+        // MMU-equipped printers have only one nozzle diameter for all tools/slots
+        // Makes the pre-print screen hide the nozzle sizes, which is both good and bad at the same time
+        // -> "?.??" is gone, but no actual diameter is shown anymore - that can be tweaked further on the visualization side.
+        // Here, we must set the correct nozzle diameter for all tools if specified.
         EXTRUDER_LOOP() {
-            per_extruder_info[e].nozzle_diameter = p_diameter;
+            visitor(per_extruder_info[e]);
         }
-    }
 #else
-    // store nozzle diameter per tool
-    if (!isnan(p_diameter) && tool < EXTRUDERS) {
-        per_extruder_info[tool].nozzle_diameter = p_diameter;
-    }
+        if (tool < EXTRUDERS) {
+            visitor(per_extruder_info[tool]);
+        }
 #endif
+    };
+
+    if (p_diameter.has_value()) {
+        visit_tool([&](auto &info) { info.nozzle_diameter = *p_diameter; });
+    }
+    if (requires_hardened_nozzle.has_value()) {
+        visit_tool([&](auto &info) { info.requires_hardened_nozzle = *requires_hardened_nozzle; });
+    }
+    if (requires_high_flow_nozzle.has_value()) {
+        visit_tool([&](auto &info) { info.requires_high_flow_nozzle = *requires_high_flow_nozzle; });
+    }
 }
 
 void GCodeInfo::parse_gcode(GcodeBuffer::String cmd, uint32_t &gcode_counter) {
@@ -538,11 +566,10 @@ void GCodeInfo::parse_comment(GcodeBuffer::String comment) {
         if (is_filament_type || is_filament_used_g || is_filament_used_mm || is_extruder_colour) {
             std::span<char> value(val.c_str(), val.len());
             size_t extruder = 0;
-            while (std::optional<std::span<char>> item = iterate_items(value, is_filament_type || is_extruder_colour ? ';' : ',')) {
-                if (!item.has_value()) {
-                    break;
-                } else if (extruder >= per_extruder_info.size()) {
+            while (const auto item = iterate_items(value, is_filament_type || is_extruder_colour ? ';' : ',')) {
+                if (extruder >= per_extruder_info.size()) {
                     continue;
+
                 } else if (is_filament_type) {
                     filament_buff filament_name;
                     snprintf(filament_name.begin(), filament_name.size(), "%.*s", item->size(), item->data());
@@ -560,17 +587,7 @@ void GCodeInfo::parse_comment(GcodeBuffer::String comment) {
                     per_extruder_info[extruder].filament_used_g = filament_used_g;
 
                 } else if (is_extruder_colour) {
-                    uint32_t red;
-                    uint32_t green;
-                    uint32_t blue;
-                    // uint8_t doesn't work properly, so tmps are uint32_t
-                    if (sscanf(item->data(), "#%02lX%02lX%02lX", &red, &green, &blue) == 3) {
-                        per_extruder_info[extruder].extruder_colour = {
-                            .red = static_cast<uint8_t>(red),
-                            .green = static_cast<uint8_t>(green),
-                            .blue = static_cast<uint8_t>(blue),
-                        };
-                    }
+                    per_extruder_info[extruder].extruder_colour = Color::from_string(*item);
                 }
                 extruder++;
             }
@@ -586,50 +603,7 @@ void GCodeInfo::parse_comment(GcodeBuffer::String comment) {
     }
 }
 
-void GCodeInfo::PreviewInit(IGcodeReader &reader) {
-    valid_printer_settings = ValidPrinterSettings(); // reset to valid state
-    per_extruder_info = {}; // Reset extruder info
-#if EXTRUDERS > 1
-    filament_wipe_tower_g = std::nullopt;
-#endif
-
-    GcodeBuffer buffer;
-
-    // parse metadata
-    if (reader.stream_metadata_start()) {
-        while (true) {
-            auto res = reader.stream_get_line(buffer);
-
-            // valid_for_print should is supposed to make sure that file is downloaded-enough to not run out of bounds here.
-            assert(res != IGcodeReader::Result_t::RESULT_OUT_OF_RANGE);
-            if (res != IGcodeReader::Result_t::RESULT_OK) {
-                break;
-            }
-
-            parse_comment(buffer.line);
-        }
-
-    } else {
-        log_error(Buddy, "Metadata in gcode not found");
-    }
-
-    // parse first few gcodes
-    if (reader.stream_gcode_start()) {
-        uint32_t gcode_counter = 0;
-        while (true) {
-            // valid_for_print should is supposed to make sure that file is downloaded-enough to not run out of bounds here.
-            auto res = reader.stream_get_line(buffer);
-            assert(res != IGcodeReader::Result_t::RESULT_OUT_OF_RANGE);
-            if (res != IGcodeReader::Result_t::RESULT_OK || gcode_counter >= search_first_x_gcodes) {
-                break;
-            }
-
-            parse_gcode(buffer.line, gcode_counter);
-        }
-    }
-}
-
-std::optional<std::span<char>> GCodeInfo::iterate_items(std::span<char> &buffer, char separator) {
+std::optional<std::string_view> GCodeInfo::iterate_items(std::span<char> &buffer, char separator) {
     // skip leading spaces
     while (buffer[0] && isspace(*buffer.data())) {
         buffer = buffer.subspan(1);
@@ -649,12 +623,9 @@ std::optional<std::span<char>> GCodeInfo::iterate_items(std::span<char> &buffer,
         item_length--;
     }
 
-    auto item = buffer.subspan(0, item_length);
+    const auto result = item_length ? std::make_optional(std::string_view(buffer.begin(), buffer.begin() + item_length)) : std::nullopt;
     buffer = next_buffer;
-    if (item_length == 0) {
-        return std::nullopt;
-    }
-    return item;
+    return result;
 }
 
 bool GCodeInfo::is_singletool_gcode() const {

@@ -13,11 +13,13 @@
 #include <option/has_side_fsensor.h>
 #include <option/has_mmu2.h>
 #include <find_error.hpp>
+#include <filament_to_load.hpp>
+#include <common/enum_array.hpp>
 
 RadioButtonNotice::RadioButtonNotice(window_t *parent, Rect16 rect)
-    : AddSuperWindow<RadioButton>(parent, rect) {}
+    : RadioButton(parent, rect) {}
 
-void RadioButtonNotice::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void RadioButtonNotice::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     switch (event) {
     case GUI_event_t::CLICK: {
         Response response = Click();
@@ -25,7 +27,7 @@ void RadioButtonNotice::windowEvent(EventLock /*has private ctor*/, window_t *se
         break;
     }
     default:
-        SuperWindowEvent(sender, event, param);
+        RadioButton::windowEvent(sender, event, param);
     }
 }
 
@@ -36,15 +38,6 @@ void RadioButtonNotice::ChangePhase(PhasesLoadUnload phase, PhaseResponses respo
 
 /*****************************************************************************/
 // clang-format off
-static const PhaseTexts ph_txt_stop          = { get_response_text(Response::Stop),             get_response_text(Response::_none), get_response_text(Response::_none), get_response_text(Response::_none) };
-static const PhaseTexts ph_txt_continue      = { get_response_text(Response::Continue),         get_response_text(Response::_none), get_response_text(Response::_none), get_response_text(Response::_none) };
-static const PhaseTexts ph_txt_continue_stop = { get_response_text(Response::Continue),         get_response_text(Response::Stop),  get_response_text(Response::_none), get_response_text(Response::_none) };
-static const PhaseTexts ph_txt_none          = { get_response_text(Response::_none),            get_response_text(Response::_none), get_response_text(Response::_none), get_response_text(Response::_none) };
-static const PhaseTexts ph_txt_yesno         = { get_response_text(Response::Yes),              get_response_text(Response::No),    get_response_text(Response::_none), get_response_text(Response::_none) };
-static const PhaseTexts ph_txt_iscolor       = { get_response_text(Response::Yes),              get_response_text(Response::No),    get_response_text(Response::Retry), get_response_text(Response::_none) };
-static const PhaseTexts ph_txt_iscolor_purge = { get_response_text(Response::Yes),              get_response_text(Response::No),    get_response_text(Response::_none), get_response_text(Response::_none) };
-static const PhaseTexts ph_txt_unload        = { get_response_text(Response::Unload),           get_response_text(Response::_none), get_response_text(Response::_none), get_response_text(Response::_none) };
-
 static constexpr const char *txt_first              = N_("Finishing buffered gcodes");
 static constexpr const char *txt_tool               = N_("Changing tool");
 static constexpr const char *txt_parking            = N_("Parking");
@@ -108,110 +101,102 @@ static constexpr const char *txt_mmu_insert_filament= N_("Press CONTINUE and pus
 static constexpr const char *txt_mmu_err_wait_user  = find_error(ErrCode::CONNECT_MMU_LOAD_UNLOAD_ERROR).err_text;
 #endif
 
+// clang-format on
+/*****************************************************************************/
+
 // function pointer for onEnter & onExit callbacks
 using change_state_cb_t = void (*)();
 
 struct State {
-    constexpr State(const char *lbl, const PhaseResponses &btn_resp, const PhaseTexts &btn_labels, change_state_cb_t enter_cb = NULL, change_state_cb_t exit_cb = NULL)
-        : label(lbl)
-        , btn_resp(btn_resp)
-        , btn_labels(btn_labels)
-        , onEnter(enter_cb)
-        , onExit(exit_cb) {}
     const char *label;
-    const PhaseResponses &btn_resp;
-    const PhaseTexts &btn_labels;
     // callbacks for phase start/end
-    change_state_cb_t onEnter;
-    change_state_cb_t onExit;
+    change_state_cb_t onEnter = nullptr;
+    change_state_cb_t onExit = nullptr;
 };
 
-static constexpr State states[CountPhases<PhasesLoadUnload>()] = {
-        { txt_first,                 ClientResponses::GetResponses(PhasesLoadUnload::initial),                       ph_txt_none },
-        { txt_tool,                  ClientResponses::GetResponses(PhasesLoadUnload::ChangingTool),                  ph_txt_none },
-        { txt_parking,               ClientResponses::GetResponses(PhasesLoadUnload::Parking_stoppable),             ph_txt_stop },
-        { txt_parking,               ClientResponses::GetResponses(PhasesLoadUnload::Parking_unstoppable),           ph_txt_none },
-        { txt_wait_temp,             ClientResponses::GetResponses(PhasesLoadUnload::WaitingTemp_stoppable),         ph_txt_stop },
-        { txt_wait_temp,             ClientResponses::GetResponses(PhasesLoadUnload::WaitingTemp_unstoppable),       ph_txt_none },
-        { txt_prep_ram,              ClientResponses::GetResponses(PhasesLoadUnload::PreparingToRam_stoppable),      ph_txt_stop },
-        { txt_prep_ram,              ClientResponses::GetResponses(PhasesLoadUnload::PreparingToRam_unstoppable),    ph_txt_none },
-        { txt_ram,                   ClientResponses::GetResponses(PhasesLoadUnload::Ramming_stoppable),             ph_txt_stop },
-        { txt_ram,                   ClientResponses::GetResponses(PhasesLoadUnload::Ramming_unstoppable),           ph_txt_none },
-        { txt_unload,               ClientResponses::GetResponses(PhasesLoadUnload::Unloading_stoppable),           ph_txt_stop },
-        { txt_unload,               ClientResponses::GetResponses(PhasesLoadUnload::Unloading_unstoppable),         ph_txt_none },
-        { txt_unload,               ClientResponses::GetResponses(PhasesLoadUnload::RemoveFilament),                ph_txt_stop },
-        { txt_unload_confirm,       ClientResponses::GetResponses(PhasesLoadUnload::IsFilamentUnloaded),            ph_txt_yesno, DialogLoadUnload::phaseWaitSound },
-        { txt_filament_not_in_fs,   ClientResponses::GetResponses(PhasesLoadUnload::FilamentNotInFS),               ph_txt_none, DialogLoadUnload::phaseAlertSound},
-        { txt_manual_unload,        ClientResponses::GetResponses(PhasesLoadUnload::ManualUnload),                  ph_txt_continue, DialogLoadUnload::phaseStopSound },
-        { txt_push_fil,             ClientResponses::GetResponses(PhasesLoadUnload::UserPush_stoppable),            ph_txt_continue_stop, DialogLoadUnload::phaseAlertSound },
-        { txt_push_fil,             ClientResponses::GetResponses(PhasesLoadUnload::UserPush_unstoppable),          ph_txt_continue, DialogLoadUnload::phaseAlertSound },
-        { txt_make_sure_inserted,   ClientResponses::GetResponses(PhasesLoadUnload::MakeSureInserted_stoppable),    ph_txt_stop, DialogLoadUnload::phaseAlertSound },
-        { txt_make_sure_inserted,   ClientResponses::GetResponses(PhasesLoadUnload::MakeSureInserted_unstoppable),  ph_txt_none, DialogLoadUnload::phaseAlertSound },
-        { txt_inserting,            ClientResponses::GetResponses(PhasesLoadUnload::Inserting_stoppable),           ph_txt_stop },
-        { txt_inserting,            ClientResponses::GetResponses(PhasesLoadUnload::Inserting_unstoppable),         ph_txt_none },
-        { txt_is_filament_in_gear,  ClientResponses::GetResponses(PhasesLoadUnload::IsFilamentInGear),              ph_txt_yesno },
-        { txt_ejecting,             ClientResponses::GetResponses(PhasesLoadUnload::Ejecting_stoppable),            ph_txt_stop },
-        { txt_ejecting,             ClientResponses::GetResponses(PhasesLoadUnload::Ejecting_unstoppable),          ph_txt_none },
-        { txt_loading,              ClientResponses::GetResponses(PhasesLoadUnload::Loading_stoppable),             ph_txt_stop },
-        { txt_loading,              ClientResponses::GetResponses(PhasesLoadUnload::Loading_unstoppable),           ph_txt_none },
-        { txt_purging,              ClientResponses::GetResponses(PhasesLoadUnload::Purging_stoppable),             ph_txt_stop },
-        { txt_purging,              ClientResponses::GetResponses(PhasesLoadUnload::Purging_unstoppable),           ph_txt_none },
-        { txt_is_color,             ClientResponses::GetResponses(PhasesLoadUnload::IsColor),                       ph_txt_iscolor, DialogLoadUnload::phaseAlertSound },
-        { txt_is_color,             ClientResponses::GetResponses(PhasesLoadUnload::IsColorPurge),                  ph_txt_iscolor_purge, DialogLoadUnload::phaseAlertSound },
-        { txt_unparking,            ClientResponses::GetResponses(PhasesLoadUnload::Unparking),                     ph_txt_stop },
+static constexpr EnumArray<PhasesLoadUnload, State, CountPhases<PhasesLoadUnload>()> states { {
+    { PhasesLoadUnload::initial, { txt_first } },
+    { PhasesLoadUnload::ChangingTool, { txt_tool } },
+    { PhasesLoadUnload::Parking_stoppable, { txt_parking } },
+    { PhasesLoadUnload::Parking_unstoppable, { txt_parking } },
+    { PhasesLoadUnload::WaitingTemp_stoppable, { txt_wait_temp } },
+    { PhasesLoadUnload::WaitingTemp_unstoppable, { txt_wait_temp } },
+    { PhasesLoadUnload::PreparingToRam_stoppable, { txt_prep_ram } },
+    { PhasesLoadUnload::PreparingToRam_unstoppable, { txt_prep_ram } },
+    { PhasesLoadUnload::Ramming_stoppable, { txt_ram } },
+    { PhasesLoadUnload::Ramming_unstoppable, { txt_ram } },
+    { PhasesLoadUnload::Unloading_stoppable, { txt_unload } },
+    { PhasesLoadUnload::Unloading_unstoppable, { txt_unload } },
+    { PhasesLoadUnload::RemoveFilament, { txt_unload } },
+    { PhasesLoadUnload::IsFilamentUnloaded, { txt_unload_confirm, DialogLoadUnload::phaseWaitSound } },
+    { PhasesLoadUnload::FilamentNotInFS, { txt_filament_not_in_fs, DialogLoadUnload::phaseAlertSound } },
+    { PhasesLoadUnload::ManualUnload, { txt_manual_unload, DialogLoadUnload::phaseStopSound } },
+    { PhasesLoadUnload::UserPush_stoppable, { txt_push_fil, DialogLoadUnload::phaseAlertSound } },
+    { PhasesLoadUnload::UserPush_unstoppable, { txt_push_fil, DialogLoadUnload::phaseAlertSound } },
+    { PhasesLoadUnload::MakeSureInserted_stoppable, { txt_make_sure_inserted, DialogLoadUnload::phaseAlertSound } },
+    { PhasesLoadUnload::MakeSureInserted_unstoppable, { txt_make_sure_inserted, DialogLoadUnload::phaseAlertSound } },
+    { PhasesLoadUnload::Inserting_stoppable, { txt_inserting } },
+    { PhasesLoadUnload::Inserting_unstoppable, { txt_inserting } },
+    { PhasesLoadUnload::IsFilamentInGear, { txt_is_filament_in_gear } },
+    { PhasesLoadUnload::Ejecting_stoppable, { txt_ejecting } },
+    { PhasesLoadUnload::Ejecting_unstoppable, { txt_ejecting } },
+    { PhasesLoadUnload::Loading_stoppable, { txt_loading } },
+    { PhasesLoadUnload::Loading_unstoppable, { txt_loading } },
+    { PhasesLoadUnload::Purging_stoppable, { txt_purging } },
+    { PhasesLoadUnload::Purging_unstoppable, { txt_purging } },
+    { PhasesLoadUnload::IsColor, { txt_is_color, DialogLoadUnload::phaseAlertSound } },
+    { PhasesLoadUnload::IsColorPurge, { txt_is_color, DialogLoadUnload::phaseAlertSound } },
+    { PhasesLoadUnload::Unparking, { txt_unparking } },
 #if HAS_LOADCELL()
-        { txt_filament_stuck,       ClientResponses::GetResponses(PhasesLoadUnload::FilamentStuck),                 ph_txt_unload, DialogLoadUnload::phaseAlertSound },
+    { PhasesLoadUnload::FilamentStuck, { txt_filament_stuck, DialogLoadUnload::phaseAlertSound } },
 #endif
 #if HAS_MMU2()
-        { txt_mmu_insert_filament,  ClientResponses::GetResponses(PhasesLoadUnload::LoadFilamentIntoMMU),   ph_txt_none }, // TODO how the button is Continue
-        { txt_mmu_engag_idler,      ClientResponses::GetResponses(PhasesLoadUnload::MMU_EngagingIdler),     ph_txt_none },
-        { txt_mmu_diseng_idler,     ClientResponses::GetResponses(PhasesLoadUnload::MMU_DisengagingIdler),  ph_txt_none },
-        { txt_mmu_unload_finda,     ClientResponses::GetResponses(PhasesLoadUnload::MMU_UnloadingToFinda),  ph_txt_none },
-        { txt_mmu_unload_pulley,    ClientResponses::GetResponses(PhasesLoadUnload::MMU_UnloadingToPulley), ph_txt_none },
-        { txt_mmu_feed_finda,       ClientResponses::GetResponses(PhasesLoadUnload::MMU_FeedingToFinda),    ph_txt_none },
-        { txt_mmu_feed_bondtech,    ClientResponses::GetResponses(PhasesLoadUnload::MMU_FeedingToBondtech), ph_txt_none },
-        { txt_mmu_feed_nozzle,      ClientResponses::GetResponses(PhasesLoadUnload::MMU_FeedingToNozzle),   ph_txt_none },
-        { txt_mmu_avoid_grind,      ClientResponses::GetResponses(PhasesLoadUnload::MMU_AvoidingGrind),     ph_txt_none },
-        { txt_mmu_finish_moves,     ClientResponses::GetResponses(PhasesLoadUnload::MMU_FinishingMoves),    ph_txt_none },
-        { txt_mmu_diseng_idler,     ClientResponses::GetResponses(PhasesLoadUnload::MMU_ERRDisengagingIdler),ph_txt_none },
-        { txt_mmu_engag_idler,      ClientResponses::GetResponses(PhasesLoadUnload::MMU_ERREngagingIdler),  ph_txt_none },
+    { PhasesLoadUnload::LoadFilamentIntoMMU, { txt_mmu_insert_filament } }, // TODO how the button is Continue
+    { PhasesLoadUnload::MMU_EngagingIdler, { txt_mmu_engag_idler } },
+    { PhasesLoadUnload::MMU_DisengagingIdler, { txt_mmu_diseng_idler } },
+    { PhasesLoadUnload::MMU_UnloadingToFinda, { txt_mmu_unload_finda } },
+    { PhasesLoadUnload::MMU_UnloadingToPulley, { txt_mmu_unload_pulley } },
+    { PhasesLoadUnload::MMU_FeedingToFinda, { txt_mmu_feed_finda } },
+    { PhasesLoadUnload::MMU_FeedingToBondtech, { txt_mmu_feed_bondtech } },
+    { PhasesLoadUnload::MMU_FeedingToNozzle, { txt_mmu_feed_nozzle } },
+    { PhasesLoadUnload::MMU_AvoidingGrind, { txt_mmu_avoid_grind } },
+    { PhasesLoadUnload::MMU_FinishingMoves, { txt_mmu_finish_moves } },
+    { PhasesLoadUnload::MMU_ERRDisengagingIdler, { txt_mmu_diseng_idler } },
+    { PhasesLoadUnload::MMU_ERREngagingIdler, { txt_mmu_engag_idler } },
 
-        // the one and only MMU Error screen
-        { txt_mmu_err_wait_user,    ClientResponses::GetResponses(PhasesLoadUnload::MMU_ERRWaitingForUser), ph_txt_none },
+    // the one and only MMU Error screen
+    { PhasesLoadUnload::MMU_ERRWaitingForUser, { txt_mmu_err_wait_user } },
 
-        { txt_mmu_err_internal,     ClientResponses::GetResponses(PhasesLoadUnload::MMU_ERRInternal),       ph_txt_none },
-        { txt_mmu_err_help_fil,     ClientResponses::GetResponses(PhasesLoadUnload::MMU_ERRHelpingFilament),ph_txt_none },
-        { txt_mmu_err_tmc,          ClientResponses::GetResponses(PhasesLoadUnload::MMU_ERRTMCFailed),      ph_txt_none },
-        { txt_mmu_unload_filament,  ClientResponses::GetResponses(PhasesLoadUnload::MMU_UnloadingFilament), ph_txt_none },
-        { txt_mmu_load_filament,    ClientResponses::GetResponses(PhasesLoadUnload::MMU_LoadingFilament),   ph_txt_none },
-        { txt_mmu_select_slot,      ClientResponses::GetResponses(PhasesLoadUnload::MMU_SelectingFilamentSlot),ph_txt_none },
-        { txt_mmu_prepare_blade,    ClientResponses::GetResponses(PhasesLoadUnload::MMU_PreparingBlade),    ph_txt_none },
-        { txt_mmu_push_filament,    ClientResponses::GetResponses(PhasesLoadUnload::MMU_PushingFilament),   ph_txt_none },
-        { txt_mmu_perform_cut,      ClientResponses::GetResponses(PhasesLoadUnload::MMU_PerformingCut),     ph_txt_none },
-        { txt_mmu_return_selector,  ClientResponses::GetResponses(PhasesLoadUnload::MMU_ReturningSelector), ph_txt_none },
-        { txt_mmu_park_selector,    ClientResponses::GetResponses(PhasesLoadUnload::MMU_ParkingSelector),   ph_txt_none },
-        { txt_mmu_eject_filament,   ClientResponses::GetResponses(PhasesLoadUnload::MMU_EjectingFilament),  ph_txt_none },
-        { txt_mmu_retract_finda,    ClientResponses::GetResponses(PhasesLoadUnload::MMU_RetractingFromFinda),ph_txt_none },
-        { txt_mmu_homing,           ClientResponses::GetResponses(PhasesLoadUnload::MMU_Homing),            ph_txt_none },
-        { txt_mmu_moving_selector,  ClientResponses::GetResponses(PhasesLoadUnload::MMU_MovingSelector),    ph_txt_none },
-        { txt_mmu_feeding_fsensor,  ClientResponses::GetResponses(PhasesLoadUnload::MMU_FeedingToFSensor),  ph_txt_none },
-        { txt_mmu_hw_test_begin,    ClientResponses::GetResponses(PhasesLoadUnload::MMU_HWTestBegin),       ph_txt_none },
-        { txt_mmu_hw_test_idler,    ClientResponses::GetResponses(PhasesLoadUnload::MMU_HWTestIdler),       ph_txt_none },
-        { txt_mmu_hw_test_sel,      ClientResponses::GetResponses(PhasesLoadUnload::MMU_HWTestSelector),    ph_txt_none },
-        { txt_mmu_hw_test_pulley,   ClientResponses::GetResponses(PhasesLoadUnload::MMU_HWTestPulley),      ph_txt_none },
-        { txt_mmu_hw_test_cleanup,  ClientResponses::GetResponses(PhasesLoadUnload::MMU_HWTestCleanup),     ph_txt_none },
-        { txt_mmu_hw_test_exec,     ClientResponses::GetResponses(PhasesLoadUnload::MMU_HWTestExec),        ph_txt_none },
-        { txt_mmu_hw_test_display,  ClientResponses::GetResponses(PhasesLoadUnload::MMU_HWTestDisplay),     ph_txt_none },
-        { txt_mmu_errhw_test_fail,  ClientResponses::GetResponses(PhasesLoadUnload::MMU_ErrHwTestFailed),   ph_txt_none },
+    { PhasesLoadUnload::MMU_ERRInternal, { txt_mmu_err_internal } },
+    { PhasesLoadUnload::MMU_ERRHelpingFilament, { txt_mmu_err_help_fil } },
+    { PhasesLoadUnload::MMU_ERRTMCFailed, { txt_mmu_err_tmc } },
+    { PhasesLoadUnload::MMU_UnloadingFilament, { txt_mmu_unload_filament } },
+    { PhasesLoadUnload::MMU_LoadingFilament, { txt_mmu_load_filament } },
+    { PhasesLoadUnload::MMU_SelectingFilamentSlot, { txt_mmu_select_slot } },
+    { PhasesLoadUnload::MMU_PreparingBlade, { txt_mmu_prepare_blade } },
+    { PhasesLoadUnload::MMU_PushingFilament, { txt_mmu_push_filament } },
+    { PhasesLoadUnload::MMU_PerformingCut, { txt_mmu_perform_cut } },
+    { PhasesLoadUnload::MMU_ReturningSelector, { txt_mmu_return_selector } },
+    { PhasesLoadUnload::MMU_ParkingSelector, { txt_mmu_park_selector } },
+    { PhasesLoadUnload::MMU_EjectingFilament, { txt_mmu_eject_filament } },
+    { PhasesLoadUnload::MMU_RetractingFromFinda, { txt_mmu_retract_finda } },
+    { PhasesLoadUnload::MMU_Homing, { txt_mmu_homing } },
+    { PhasesLoadUnload::MMU_MovingSelector, { txt_mmu_moving_selector } },
+    { PhasesLoadUnload::MMU_FeedingToFSensor, { txt_mmu_feeding_fsensor } },
+    { PhasesLoadUnload::MMU_HWTestBegin, { txt_mmu_hw_test_begin } },
+    { PhasesLoadUnload::MMU_HWTestIdler, { txt_mmu_hw_test_idler } },
+    { PhasesLoadUnload::MMU_HWTestSelector, { txt_mmu_hw_test_sel } },
+    { PhasesLoadUnload::MMU_HWTestPulley, { txt_mmu_hw_test_pulley } },
+    { PhasesLoadUnload::MMU_HWTestCleanup, { txt_mmu_hw_test_cleanup } },
+    { PhasesLoadUnload::MMU_HWTestExec, { txt_mmu_hw_test_exec } },
+    { PhasesLoadUnload::MMU_HWTestDisplay, { txt_mmu_hw_test_display } },
+    { PhasesLoadUnload::MMU_ErrHwTestFailed, { txt_mmu_errhw_test_fail } },
 #endif
-    };
+} };
 
 static const State &get_current_state(PhasesLoadUnload current_phase) {
     return states[uint8_t(current_phase)];
 }
-
-// clang-format on
-/*****************************************************************************/
 
 static constexpr Rect16 notice_title_rect = { 86, 44, 374, 22 };
 static constexpr Rect16 notice_text_rect = { 86, 72, 244, 140 };
@@ -219,7 +204,6 @@ static constexpr Rect16 notice_link_rect = { 86, 218, 244, 32 };
 static constexpr Rect16 notice_icon_rect = { 370, 180, 59, 72 };
 static constexpr Rect16 notice_icon_type_rect = { 24, 44, 48, 48 };
 static constexpr Rect16 notice_qr_rect = { 350, 72, 100, 100 };
-static constexpr char error_code_link_format[] = N_("More detail at\nprusa.io/%05u");
 namespace {
 constexpr size_t color_size { 16 };
 constexpr size_t text_height { 21 };
@@ -292,7 +276,7 @@ void DialogLoadUnload::set_progress_percent(uint8_t val) {
 }
 
 DialogLoadUnload::DialogLoadUnload(fsm::BaseData data)
-    : AddSuperWindow<IDialogMarlin>(GuiDefaults::RectScreenNoHeader)
+    : IDialogMarlin(GuiDefaults::RectScreenNoHeader)
     , progress_frame(this, get_frame_rect(GetRect()))
     , title(&progress_frame, get_title_rect(GetRect()), is_multiline::no, is_closed_on_click_t::no, get_name(ProgressSerializerLoadUnload(data.GetData()).mode))
     , progress_bar(&progress_frame, get_progress_bar_rect(GetRect()), COLOR_ORANGE, GuiDefaults::EnableDialogBigLayout ? COLOR_DARK_GRAY : COLOR_GRAY, PROGRESS_BAR_CORNER_RADIUS)
@@ -318,10 +302,10 @@ DialogLoadUnload::DialogLoadUnload(fsm::BaseData data)
     , notice_frame(this, get_frame_rect(GetRect()))
     , notice_title(&notice_frame, notice_title_rect, is_multiline::no)
     , notice_text(&notice_frame, notice_text_rect, is_multiline::yes)
-    , notice_link(&notice_frame, notice_link_rect, is_multiline::yes)
+    , notice_link(&notice_frame, notice_link_rect, ErrCode::ERR_UNDEF)
     , notice_icon_hand(&notice_frame, notice_icon_rect, &img::hand_qr_59x72)
     , notice_icon_type(&notice_frame, notice_icon_type_rect, &img::warning_48x48)
-    , notice_qr(&notice_frame, notice_qr_rect)
+    , notice_qr(&notice_frame, notice_qr_rect, ErrCode::ERR_UNDEF)
     , notice_radio_button(&notice_frame, GuiDefaults::GetButtonRect_AvoidFooter(GetRect()))
     , filament_type_text(&progress_frame, filament_type_text_rect, is_multiline::no)
     , filament_color_icon(&progress_frame, filament_color_icon_rect)
@@ -421,7 +405,7 @@ bool DialogLoadUnload::Change(fsm::BaseData base_data) {
     if (is_notice(phase)) {
     #if HAS_MMU2()
         if (is_notice_mmu(phase)) {
-            const MMU2::MMUErrDesc *ptr_desc = fsm::PointerSerializer<MMU2::MMUErrDesc>(data).Get();
+            const auto *ptr_desc = fsm::deserialize_data<const MMU2::MMUErrDesc *>(data);
             PhaseResponses responses {
                 MMU2::ButtonOperationToResponse(ptr_desc->buttons[0]),
                 MMU2::ButtonOperationToResponse(ptr_desc->buttons[1]),
@@ -488,10 +472,9 @@ void DialogLoadUnload::notice_update(uint16_t errCode, const char *errTitle, con
     notice_title.SetText(_(errTitle));
     notice_text.SetText(_(errDesc));
 
-    snprintf(error_code_str, sizeof(error_code_str), error_code_link_format, errCode);
-    notice_link.SetText(string_view_utf8::MakeRAM((const uint8_t *)error_code_str));
+    notice_link.set_error_code(ErrCode(errCode));
 
-    notice_qr.SetQRHeader(errCode);
+    notice_qr.set_error_code(ErrCode(errCode));
 }
 
 string_view_utf8 DialogLoadUnload::get_name(LoadUnloadMode mode) {
@@ -527,8 +510,8 @@ void DialogLoadUnload::phaseExit() {
         return;
     }
 
-    if (get_current_state(*current_phase).onExit) {
-        get_current_state(*current_phase).onExit();
+    if (auto f = get_current_state(*current_phase).onExit) {
+        f();
     }
 }
 
@@ -544,29 +527,24 @@ void DialogLoadUnload::phaseEnter() {
         }
     }
 
-    if (mode == LoadUnloadMode::Load) { // Change is currently split into Load/Unload, therefore no need to if (mode == change)
-        if (filament::get_type_to_load() != filament::Type::NONE) {
-            filament_type_text.Show();
-            auto fil_name = filament::get_name(filament::get_type_to_load());
-            filament_type_text.SetText(_(fil_name));
-            if (filament::get_color_to_load().has_value()) {
+    const FilamentType filament_to_load = (mode == LoadUnloadMode::Load) ? filament::get_type_to_load() : FilamentType::none;
+    const bool has_filament_to_load = (filament_to_load != FilamentType::none);
+    const bool has_color_to_load = has_filament_to_load && filament::get_color_to_load().has_value();
 
-                int16_t left_pos = (GuiDefaults::ScreenWidth - (width(Font::normal) + 1) * (strlen(fil_name) + 1 + 1) - color_size) / 2; // make the pos to be on the left of the text (+ one added space to the left of the text, + additional one for some reason makes it work )
-                auto rect = filament_color_icon_rect + Rect16::X_t { static_cast<int16_t>(left_pos) };
+    filament_type_text.set_visible(has_filament_to_load);
+    filament_color_icon.set_visible(has_color_to_load);
 
-                auto col = filament::get_color_to_load().value();
-                filament_color_icon.SetBackColor(to_color_t(col.red, col.green, col.blue));
-                filament_color_icon.SetRect(rect);
-                filament_color_icon.Show();
-            } else {
-                filament_color_icon.Hide();
-            }
-        } else {
-            filament_type_text.Hide();
-            filament_color_icon.Hide();
-        }
-    } else {
-        filament_color_icon.Hide();
-        filament_type_text.Hide();
+    if (has_filament_to_load) {
+        filament_type_parameters = filament_to_load.parameters();
+        filament_type_text.SetText(string_view_utf8::MakeRAM(filament_type_parameters.name));
+    }
+
+    if (has_color_to_load) {
+        const int16_t left_pos = (GuiDefaults::ScreenWidth - (width(Font::normal) + 1) * (strlen(filament_type_parameters.name) + 1 + 1) - color_size) / 2; // make the pos to be on the left of the text (+ one added space to the left of the text, + additional one for some reason makes it work )
+        const auto rect = filament_color_icon_rect + Rect16::X_t { static_cast<int16_t>(left_pos) };
+
+        const auto col = filament::get_color_to_load().value();
+        filament_color_icon.SetBackColor(col);
+        filament_color_icon.SetRect(rect);
     }
 }

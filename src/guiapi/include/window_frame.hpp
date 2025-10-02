@@ -6,7 +6,7 @@
 #include "window.hpp"
 #include "window_filter.hpp"
 
-class window_frame_t : public AddSuperWindow<window_t> {
+class window_frame_t : public window_t {
     // stored rect to print in draw method (exept when enetire screen is invalid)
     // hiding, or unregistration of window sets it
     Rect16 invalid_area;
@@ -33,7 +33,8 @@ public:
 
     window_frame_t(window_t *parent = nullptr, Rect16 rect = GuiDefaults::RectScreen, win_type_t type = win_type_t::normal, is_closed_on_timeout_t timeout = is_closed_on_timeout_t::yes, is_closed_on_printing_t close_on_printing = is_closed_on_printing_t::yes);
     window_frame_t(window_t *parent, Rect16 rect, positioning sub_win_pos);
-    virtual ~window_frame_t() override;
+    ~window_frame_t();
+
     window_t *GetNextSubWin(window_t *win) const;
     window_t *GetPrevSubWin(window_t *win) const;
     window_t *GetNextEnabledSubWin(window_t *win) const;
@@ -48,6 +49,9 @@ public:
     window_t *GetNextEnabledSubWin(window_t *win, Rect16 intersection_rect) const;
     window_t *GetPrevEnabledSubWin(window_t *win, Rect16 intersection_rect) const;
     window_t *GetFirstEnabledSubWin(Rect16 intersection_rect) const;
+
+    /// \returns a child window whose touch rect contains the point (or nullptr)
+    window_t *get_child_by_touch_point(point_ui16_t point);
 
     bool IsChildFocused();
 
@@ -65,7 +69,7 @@ public:
 
 protected:
     virtual void draw() override;
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
     virtual void screenEvent(window_t *sender, GUI_event_t event, void *param) override;
     virtual void invalidate(Rect16 validation_rect = Rect16()) override;
     virtual void validate(Rect16 validation_rect = Rect16()) override;

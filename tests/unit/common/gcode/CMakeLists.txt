@@ -9,7 +9,6 @@ add_executable(
   ${CMAKE_SOURCE_DIR}/src/common/gcode/meatpack.cpp
   ${CMAKE_SOURCE_DIR}/src/common/filename_type.cpp
   ${CMAKE_SOURCE_DIR}/lib/heatshrink/heatshrink_decoder.c
-  ${CMAKE_SOURCE_DIR}/tests/stubs/fake_freertos_mutex.cpp
   gcode_reader.cpp
   missing_functions.c
   )
@@ -25,9 +24,10 @@ target_include_directories(
           ${CMAKE_SOURCE_DIR}/tests/stubs
           ${CMAKE_SOURCE_DIR}/include
           ${CMAKE_SOURCE_DIR}/include/usb_host
+          ${CMAKE_SOURCE_DIR}/lib/SG14
   )
 
-target_link_libraries(gcode_reader_test mbedTLS bgcode_core)
+target_link_libraries(gcode_reader_test mbedTLS bgcode_core freertos_tests)
 
 file(
   COPY ${CMAKE_CURRENT_SOURCE_DIR}/test_plain.gcode
@@ -35,6 +35,9 @@ file(
        ${CMAKE_CURRENT_SOURCE_DIR}/test_binary_meatpack.bgcode
        ${CMAKE_CURRENT_SOURCE_DIR}/test_binary_heatshrink.bgcode
        ${CMAKE_CURRENT_SOURCE_DIR}/test_binary_heatshrink_meatpack.bgcode
+       ${CMAKE_CURRENT_SOURCE_DIR}/test_bad_crc_first_gcode.bgcode
+       ${CMAKE_CURRENT_SOURCE_DIR}/test_bad_crc_intro.bgcode
+       ${CMAKE_CURRENT_SOURCE_DIR}/test_bad_crc_gcode.bgcode
   DESTINATION ${CMAKE_CURRENT_BINARY_DIR}
   )
 

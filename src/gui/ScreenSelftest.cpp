@@ -8,163 +8,99 @@
 #include "ScreenHandler.hpp"
 #include "img_resources.hpp"
 #include "marlin_client.hpp"
-#include <option/has_selftest_snake.h>
+#include <option/has_selftest.h>
 
-static_unique_ptr<SelftestFrame> ScreenSelftest::creator_prologue(ScreenSelftest &rThs, PhasesSelftest phase, fsm::PhaseData data) {
-    return rThs.makePtr<SelftestFrameWizardPrologue>(&rThs, phase, data);
-}
-
-static_unique_ptr<SelftestFrame> ScreenSelftest::creator_axis(ScreenSelftest &rThs, PhasesSelftest phase, fsm::PhaseData data) {
-    return rThs.makePtr<SelftestFrametAxis>(&rThs, phase, data);
-}
-
-static_unique_ptr<SelftestFrame> ScreenSelftest::creator_fans(ScreenSelftest &rThs, PhasesSelftest phase, fsm::PhaseData data) {
-    return rThs.makePtr<SelftestFrameFans>(&rThs, phase, data);
-}
-
-#if FILAMENT_SENSOR_IS_ADC()
-static_unique_ptr<SelftestFrame> ScreenSelftest::creator_fsensor(ScreenSelftest &rThs, PhasesSelftest phase, fsm::PhaseData data) {
-    return rThs.makePtr<SelftestFrameFSensor>(&rThs, phase, data);
-}
-#endif
-
-#if PRINTER_IS_PRUSA_MK4
-static_unique_ptr<SelftestFrame> ScreenSelftest::creator_gears_calib(ScreenSelftest &rThs, PhasesSelftest phase, fsm::PhaseData data) {
-    return rThs.makePtr<SelftestFrameGearsCalib>(&rThs, phase, data);
-}
-#endif
-
-#if HAS_LOADCELL()
-static_unique_ptr<SelftestFrame> ScreenSelftest::creator_loadcell(ScreenSelftest &rThs, PhasesSelftest phase, fsm::PhaseData data) {
-    return rThs.makePtr<SelftestFrameLoadcell>(&rThs, phase, data);
-}
-#endif
-static_unique_ptr<SelftestFrame> ScreenSelftest::creator_temp(ScreenSelftest &rThs, PhasesSelftest phase, fsm::PhaseData data) {
-    return rThs.makePtr<ScreenSelftestTemp>(&rThs, phase, data);
-}
-
-#if !PRINTER_IS_PRUSA_MINI
-static_unique_ptr<SelftestFrame> ScreenSelftest::creator_specify_hot_end(ScreenSelftest &rThs, PhasesSelftest phase, fsm::PhaseData data) {
-    return rThs.makePtr<SelftestFrameHotendSpecify>(&rThs, phase, data);
-}
-#endif
-
-static_unique_ptr<SelftestFrame> ScreenSelftest::creator_calib_z(ScreenSelftest &rThs, PhasesSelftest phase, fsm::PhaseData data) {
-    return rThs.makePtr<SelftestFrameCalibZ>(&rThs, phase, data);
-}
-
-static_unique_ptr<SelftestFrame> ScreenSelftest::creator_firstlayer(ScreenSelftest &rThs, PhasesSelftest phase, fsm::PhaseData data) {
-    return rThs.makePtr<SelftestFrameFirstLayer>(&rThs, phase, data);
-}
-
-static_unique_ptr<SelftestFrame> ScreenSelftest::creator_firstlayer_questions(ScreenSelftest &rThs, PhasesSelftest phase, fsm::PhaseData data) {
-    return rThs.makePtr<SelftestFrameFirstLayerQuestions>(&rThs, phase, data);
-}
-
-static_unique_ptr<SelftestFrame> ScreenSelftest::creator_result(ScreenSelftest &rThs, PhasesSelftest phase, fsm::PhaseData data) {
-    return rThs.makePtr<SelftestFrameResult>(&rThs, phase, data);
-}
-
-static_unique_ptr<SelftestFrame> ScreenSelftest::creator_epilogue(ScreenSelftest &rThs, PhasesSelftest phase, fsm::PhaseData data) {
-    return rThs.makePtr<SelftestFrameWizardEpilogue>(&rThs, phase, data);
-}
-
-#if BOARD_IS_XLBUDDY
-static_unique_ptr<SelftestFrame> ScreenSelftest::creator_dock(ScreenSelftest &rThs, PhasesSelftest phase, fsm::PhaseData data) {
-    return rThs.makePtr<SelftestFrameDock>(&rThs, phase, data);
-}
-
-static_unique_ptr<SelftestFrame> ScreenSelftest::creator_tool_offsets(ScreenSelftest &rThs, PhasesSelftest phase, fsm::PhaseData data) {
-    return rThs.makePtr<SelftestFrameToolOffsets>(&rThs, phase, data);
-}
-#endif
-static_unique_ptr<SelftestFrame> ScreenSelftest::creator_invalid(ScreenSelftest &rThs, PhasesSelftest phase, fsm::PhaseData data) {
-    return rThs.makePtr<ScreenSelftestInvalidState>(&rThs, phase, data);
-}
-
-#if PRINTER_IS_PRUSA_XL
-static_unique_ptr<SelftestFrame> ScreenSelftest::creator_nozzle_diameter(ScreenSelftest &rThs, PhasesSelftest phase, fsm::PhaseData data) {
-    return rThs.makePtr<SelftestFrameNozzleDiameter>(&rThs, phase, data);
-}
-#endif
+#include "selftest_frame_revise_printer_setup.hpp"
+#include "selftest_frame_axis.hpp"
+#include "selftest_frame_fans.hpp"
+#include "selftest_frame_fsensor.hpp"
+#include "selftest_frame_gears_calib.hpp"
+#include "selftest_frame_loadcell.hpp"
+#include "selftest_frame_calib_z.hpp"
+#include "selftest_frame_temp.hpp"
+#include "selftest_frame_firstlayer.hpp"
+#include "selftest_frame_firstlayer_questions.hpp"
+#include "selftest_frame_result.hpp"
+#include "selftest_frame_wizard_prologue.hpp"
+#include "selftest_frame_wizard_epilogue.hpp"
+#include "selftest_frame_dock.hpp"
+#include "selftest_frame_tool_offsets.hpp"
+#include "selftest_invalid_state.hpp"
 
 ScreenSelftest::fnc ScreenSelftest::Get(SelftestParts part) {
     switch (part) {
     case SelftestParts::WizardPrologue:
-        return creator_prologue;
+        return creator<SelftestFrameWizardPrologue>;
+
     case SelftestParts::Axis:
-        return creator_axis;
+        return creator<SelftestFrametAxis>;
+
     case SelftestParts::Fans:
-        return creator_fans;
+        return creator<SelftestFrameFans>;
+
 #if HAS_LOADCELL()
     case SelftestParts::Loadcell:
-        return creator_loadcell;
+        return creator<SelftestFrameLoadcell>;
 #endif
-#if PRINTER_IS_PRUSA_XL
-    case SelftestParts::NozzleDiameter:
-        return creator_nozzle_diameter;
-#endif
+
 #if FILAMENT_SENSOR_IS_ADC()
     case SelftestParts::FSensor:
-        return creator_fsensor;
+        return creator<SelftestFrameFSensor>;
 #endif
-#if PRINTER_IS_PRUSA_MK4
+
+#if PRINTER_IS_PRUSA_MK4()
     case SelftestParts::GearsCalib:
-        return creator_gears_calib;
+        return creator<SelftestFrameGearsCalib>;
 #endif
-#if BOARD_IS_XLBUDDY
+
+#if BOARD_IS_XLBUDDY()
     case SelftestParts::Dock:
-        return creator_dock;
+        return creator<SelftestFrameDock>;
+
     case SelftestParts::ToolOffsets:
-        return creator_tool_offsets;
+        return creator<SelftestFrameToolOffsets>;
 #endif
+
     case SelftestParts::Heaters:
-        return creator_temp;
-    case SelftestParts::SpecifyHotend:
-#if PRINTER_IS_PRUSA_MINI
-        break;
-#else
-        return creator_specify_hot_end;
-#endif
+        return creator<ScreenSelftestTemp>;
+
     case SelftestParts::CalibZ:
-        return creator_calib_z;
+        return creator<SelftestFrameCalibZ>;
+
     case SelftestParts::FirstLayer:
-        return creator_firstlayer;
+        return creator<SelftestFrameFirstLayer>;
+
     case SelftestParts::FirstLayerQuestions:
-        return creator_firstlayer_questions;
+        return creator<SelftestFrameFirstLayerQuestions>;
+
     case SelftestParts::Result:
-        return creator_result;
+        return creator<SelftestFrameResult>;
+
     case SelftestParts::WizardEpilogue_ok:
     case SelftestParts::WizardEpilogue_nok:
-        return creator_epilogue;
+        return creator<SelftestFrameWizardEpilogue>;
+
+    case SelftestParts::RevisePrinterSetup:
+        return creator<SelftestFrameRevisePrinterSetup>;
+
     case SelftestParts::_none:
         break;
     }
 
-    return creator_invalid;
+    return creator<ScreenSelftestInvalidState>;
 }
 
 ScreenSelftest::ScreenSelftest()
-    : AddSuperWindow<screen_t>()
+    : screen_t()
     , header(this, _(en_selftest))
     , part_current(SelftestParts::_none)
     , part_previous(SelftestParts::_none) {
     ScreenSelftest::ClrMenuTimeoutClose(); // don't close on menu timeout
     header.SetIcon(&img::selftest_16x16);
-    ths = this;
-}
-
-ScreenSelftest::~ScreenSelftest() {
-    ths = nullptr;
 }
 
 /******************************************************************************/
 // static methods and member variables
-ScreenSelftest *ScreenSelftest::ths = nullptr;
-
-ScreenSelftest *ScreenSelftest::GetInstance() {
-    return ScreenSelftest::ths;
-}
 
 void ScreenSelftest::Change(fsm::BaseData data) {
     const uint8_t phase_id = data.GetPhase();
@@ -203,20 +139,17 @@ string_view_utf8 ScreenSelftest::getCaption(SelftestParts part) {
 #if HAS_LOADCELL()
     case SelftestParts::Loadcell:
 #endif
-#if PRINTER_IS_PRUSA_XL
-    case SelftestParts::NozzleDiameter:
-#endif
 #if FILAMENT_SENSOR_IS_ADC()
     case SelftestParts::FSensor:
 #endif
-#if PRINTER_IS_PRUSA_MK4
+#if PRINTER_IS_PRUSA_MK4()
     case SelftestParts::GearsCalib:
 #endif
     case SelftestParts::Heaters:
-    case SelftestParts::SpecifyHotend:
     case SelftestParts::CalibZ:
     case SelftestParts::Result:
-#if BOARD_IS_XLBUDDY
+    case SelftestParts::RevisePrinterSetup:
+#if BOARD_IS_XLBUDDY()
     case SelftestParts::Dock:
     case SelftestParts::ToolOffsets:
 #endif
@@ -228,6 +161,7 @@ string_view_utf8 ScreenSelftest::getCaption(SelftestParts part) {
         return _(en_wizard_ok);
     case SelftestParts::WizardEpilogue_nok:
         return _(en_wizard_nok);
+
     case SelftestParts::_none:
         break;
     }
@@ -246,19 +180,16 @@ const img::Resource *ScreenSelftest::getIconId(SelftestParts part) {
 #if FILAMENT_SENSOR_IS_ADC()
     case SelftestParts::FSensor:
 #endif
-#if PRINTER_IS_PRUSA_MK4
+#if PRINTER_IS_PRUSA_MK4()
     case SelftestParts::GearsCalib:
 #endif
-#if PRINTER_IS_PRUSA_XL
-    case SelftestParts::NozzleDiameter:
-#endif
     case SelftestParts::Heaters:
-    case SelftestParts::SpecifyHotend:
     case SelftestParts::CalibZ:
     case SelftestParts::FirstLayer:
     case SelftestParts::FirstLayerQuestions:
     case SelftestParts::Result:
-#if BOARD_IS_XLBUDDY
+    case SelftestParts::RevisePrinterSetup:
+#if BOARD_IS_XLBUDDY()
     case SelftestParts::Dock:
     case SelftestParts::ToolOffsets:
 #endif
@@ -276,7 +207,7 @@ void ScreenSelftest::InitState(screen_init_variant var) {
     auto val = var.GetSelftestMask();
     if (val) {
         marlin_client::test_start(*val);
-#if !HAS_SELFTEST_SNAKE()
+#if !HAS_SELFTEST()
         // check mask if contains wizard prologue
         // it is simplified method, but should work correctly for meaningful use
         if ((*val) & stmWizardPrologue) {

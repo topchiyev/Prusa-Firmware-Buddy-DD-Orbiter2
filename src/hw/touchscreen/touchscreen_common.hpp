@@ -5,9 +5,7 @@
 #include "metric.h"
 #include "window_event.hpp"
 #include "guitypes.hpp"
-#include "display.h"
-
-extern log_component_t LOG_COMPONENT(Touch) _LOG_COMPONENT_ATTRS;
+#include <guiconfig/GuiDefaults.hpp>
 
 /// Returns metric for logging touch events
 metric_t *metric_touch_event();
@@ -18,10 +16,10 @@ public:
     static_assert(static_cast<int>(GUI_event_t::_count) < (1 << 6));
     GUI_event_t type : 6 = GUI_event_t::_count;
 
-    static_assert(display::GetW() <= (1 << 10));
+    static_assert(GuiDefaults::ScreenWidth <= (1 << 10));
     uint16_t pos_x : 10;
 
-    static_assert(display::GetH() <= (1 << 10));
+    static_assert(GuiDefaults::ScreenHeight <= (1 << 10));
     uint16_t pos_y : 10;
 
 public:
@@ -37,7 +35,13 @@ static_assert(sizeof(TouchscreenEvent) <= 4);
 class Touchscreen_Base {
 
 public:
-    virtual ~Touchscreen_Base() = default;
+    /// Guard that allows passing less precise taps as clicks (disabled by default to prevent accidental clickings)
+    class LenientClickGuard {
+
+    public:
+        LenientClickGuard();
+        ~LenientClickGuard();
+    };
 
 public:
     bool is_enabled() const;
@@ -97,6 +101,7 @@ private:
     TouchState last_touch_state_;
     std::atomic<TouchscreenEvent> last_event_;
     std::atomic<bool> is_last_event_consumed_ = true;
+    std::atomic<uint8_t> lenient_click_allowed_ = 0;
 
 private:
     enum class GestureRecognitionState {

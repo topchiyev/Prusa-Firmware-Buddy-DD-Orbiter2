@@ -29,26 +29,13 @@ public:
     virtual IWindowMenuItem *GetItemByRawIndex(int pos) const = 0;
     virtual int GetRawIndex(IWindowMenuItem &item) const = 0; // returns count if item is not member of container
 
-    virtual ~IWinMenuContainer() = default;
-
     Node FindFirstVisible() const;
     Node FindNextVisible(Node prev) const;
     IWindowMenuItem *GetItemByVisibleIndex(int pos) const;
-    std::optional<int> GetVisibleIndex(IWindowMenuItem &item) const;
+    std::optional<int> GetVisibleIndex(const IWindowMenuItem &item) const;
     int GetVisibleCount() const;
-    IWindowMenuItem *GetVisibleItemWithOffset(IWindowMenuItem &item, int offset) const;
-
-    IWindowMenuItem *GetPreviousVisibleItem(IWindowMenuItem &item) const {
-        return GetVisibleItemWithOffset(item, -1);
-    }
-
-    IWindowMenuItem *GetNextVisibleItem(IWindowMenuItem &item) const {
-        return GetVisibleItemWithOffset(item, 1);
-    }
 
     bool SetIndex(int visible_index);
     std::optional<int> GetFocusedIndex() const;
-    bool Show(IWindowMenuItem &item);
-    bool Hide(IWindowMenuItem &item);
     bool SwapVisibility(IWindowMenuItem &item0, IWindowMenuItem &item1);
 };

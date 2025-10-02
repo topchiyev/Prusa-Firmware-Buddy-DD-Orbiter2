@@ -57,6 +57,7 @@ class TLVType(Enum):
 
 
 class UndefinedSha256():
+
     def digest(self):
         return b'\xff' * 32
 
@@ -104,10 +105,13 @@ def write_version(ver, *, build_number: int):
         data += getattr(ver, it).to_bytes(1, 'little')
     data += build_number.to_bytes(2, 'little')
     data += ver.prerelease.ljust(5, '\0').encode()
+    if len(data) != 10:
+        raise ValueError('version must be 10 bytes long')
     return data
 
 
 class ExtendAction(Action):
+
     def __call__(self, parser, namespace, values, option_string=None):
         items = getattr(namespace, self.dest) or []
         items.extend(values)
@@ -154,13 +158,8 @@ def main():
         "--tlv", type=str,
         help='TLV data (TYPE:FILE format)', action='extend', nargs='*', default=[])
     parser.add_argument(
-        "--bbf-version", type=int, required=False, default=1,
-        help="Version of the BBF. 0: original first version, 1: version with TLV extension")
-    parser.add_argument(
-        "--output-file", type=str,
-        help="Optional filepath of the final generated bbf")
-    parser.add_argument('-TCI', '--TCI', action='store_true', required=False,
-        help='evoked from Travis script')
+        "--bbf-version", type=int, required=False, default=2,
+        help="Version of the BBF. 1: original first version, 2: version with TLV extension")
     # yapf: enable
 
     args = parser.parse_args()
@@ -236,16 +235,12 @@ def main():
 
     sig = bytes(64)  # zeros if not sign
     if not args.no_sign:
-        if args.TCI:
-            key_str = os.environ.get("sign_key")
-            key = SigningKey.from_pem(key_str)
-        else:
-            key = SigningKey.from_pem(open(args.key).read())
+        key = SigningKey.from_pem(open(args.key).read())
         sig = key.sign(bin_data_fw_only, hashfunc=sha256)
     print("\tsign:     ", sig.hex())
 
     # Bootloader Binary File / Firmware
-    with open(args.output_file or "%s.bbf" % fw_file, "wb") as bbf:
+    with open(f"{fw_file}.bbf", "wb") as bbf:
         bbf.write(sig)
         bbf.write(sha.digest())
         bbf.write(bin_data)

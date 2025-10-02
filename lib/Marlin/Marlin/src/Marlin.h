@@ -315,11 +315,6 @@ void manage_inactivity(const bool ignore_stepper_queue=false);
 
 #endif // !MIXING_EXTRUDER
 
-#if ENABLED(EXPERIMENTAL_I2CBUS)
-  #include "feature/twibus.h"
-  extern TWIBus i2c;
-#endif
-
 #if ENABLED(G38_PROBE_TARGET)
   extern uint8_t G38_move;          // Flag to tell the ISR that G38 is in progress, and the type
   extern bool G38_did_trigger;      // Flag from the ISR to indicate the endstop changed
@@ -334,7 +329,7 @@ void disable_e_stepper(const uint8_t e);
 void disable_e_steppers();
 void disable_all_steppers();
 
-void kill(PGM_P const lcd_error=nullptr, PGM_P const lcd_component=nullptr, const bool steppers_off=false);
+void kill(PGM_P const lcd_error, PGM_P const lcd_component=nullptr, const bool steppers_off=false);
 void minkill(const bool steppers_off=false);
 
 void quickstop_stepper();

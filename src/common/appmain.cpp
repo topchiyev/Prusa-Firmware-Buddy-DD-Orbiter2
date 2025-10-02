@@ -1,7 +1,7 @@
 #include "appmain.hpp"
 
 #include "app_metrics.h"
-#include "log.h"
+#include <logging/log.hpp>
 #include "cmsis_os.h"
 #include "config.h"
 #include "adc.hpp"
@@ -45,7 +45,7 @@
 
 #include <tusb.h>
 
-#if BOARD_IS_XLBUDDY
+#if BOARD_IS_XLBUDDY()
     #include <puppies/Dwarf.hpp>
     #include <Marlin/src/module/prusa/toolchanger.h>
     #include <filament_sensors_handler.hpp>
@@ -79,23 +79,19 @@ LOG_COMPONENT_REF(Marlin);
 #include <config_store/store_instance.hpp>
 #include <option/init_trinamic_from_marlin_only.h>
 
-LOG_COMPONENT_DEF(Buddy, LOG_SEVERITY_DEBUG);
-LOG_COMPONENT_DEF(Core, LOG_SEVERITY_INFO);
-LOG_COMPONENT_DEF(MMU2, LOG_SEVERITY_INFO);
+LOG_COMPONENT_DEF(Buddy, logging::Severity::debug);
+LOG_COMPONENT_DEF(Core, logging::Severity::info);
+LOG_COMPONENT_DEF(MMU2, logging::Severity::info);
 
 METRIC_DEF(metric_app_start, "app_start", METRIC_VALUE_EVENT, 0, METRIC_HANDLER_ENABLE_ALL);
 METRIC_DEF(metric_maintask_event, "maintask_loop", METRIC_VALUE_EVENT, 0, METRIC_HANDLER_DISABLE_ALL);
 METRIC_DEF(metric_cpu_usage, "cpu_usage", METRIC_VALUE_INTEGER, 1000, METRIC_HANDLER_ENABLE_ALL);
 
-#ifdef BUDDY_ENABLE_ETHERNET
-extern osThreadId webServerTaskHandle; // Webserver thread(used for fast boot mode)
-#endif // BUDDY_ENABLE_ETHERNET
-
 void app_marlin_serial_output_write_hook(const uint8_t *buffer, int size) {
     while (size && (buffer[size - 1] == '\n' || buffer[size - 1] == '\r')) {
         size--;
     }
-    log_severity_t severity = LOG_SEVERITY_INFO;
+    logging::Severity severity = logging::Severity::info;
     bool MMU = false;
     if (size == 2 && memcmp("ok", buffer, 2) == 0) {
         // Do not log "ok" messages
@@ -110,12 +106,12 @@ void app_marlin_serial_output_write_hook(const uint8_t *buffer, int size) {
     } else if (size >= 11 && memcmp("Error:MMU2:", buffer, 11) == 0) { //@@TODO this is ugly and suboptimal
         buffer = buffer + 11;
         size -= 11;
-        severity = LOG_SEVERITY_ERROR;
+        severity = logging::Severity::error;
         MMU = true;
     } else if (size >= 6 && memcmp("Error:", buffer, 6) == 0) {
         buffer = buffer + 6;
         size -= 6;
-        severity = LOG_SEVERITY_ERROR;
+        severity = logging::Severity::error;
     }
     if (MMU) {
         log_event(severity, MMU2, "%.*s", size, buffer);
@@ -186,8 +182,6 @@ static void app_setup(void) {
 #endif
 
     setup();
-
-    marlin_server::settings_load(); // load marlin variables from eeprom
 }
 
 void app_run(void) {
@@ -197,21 +191,10 @@ void app_run(void) {
     LangEEPROM::getInstance();
 #endif
 
+    app_setup();
     marlin_server::init();
 
-    log_info(Marlin, "Starting setup");
-
-    app_setup();
-
-    marlin_server::start_processing();
-
-#if HAS_ADVANCED_POWER()
-    advancedpower.ResetOvercurrentFault();
-#endif
-
-    log_info(Marlin, "Setup complete");
-
-    if (config_store_init_result() == config_store_ns::InitResult::cold_start && marlin_server::processing()) {
+    if (config_store_init_result() == config_store_ns::InitResult::cold_start) {
         settings.reset();
 #if ENABLED(POWER_PANIC)
         power_panic::reset();
@@ -220,27 +203,20 @@ void app_run(void) {
 
     TaskDeps::provide(TaskDeps::Dependency::default_task_ready);
 
-    // Wait for the other tasks to init marlin clients
-    // Marlin might create some FSMs right at the start and if the gui task doesn't process the message, it might not show the dialogs.
-    // We gotta loop the marlin server though, because the clients configure event masks through request messages
-    // BFW-5057
-    while (!TaskDeps::check(TaskDeps::Tasks::marlin_server)) {
-        marlin_server::barebones_loop();
-        osDelay(1);
-    }
-
     while (1) {
         metric_record_event(&metric_maintask_event);
         metric_record_integer(&metric_cpu_usage, osGetCPUUsage());
-        if (marlin_server::processing()) {
-            loop();
-        }
+        loop();
         marlin_server::loop();
     }
 }
 
 void app_error(void) {
     bsod("app_error");
+}
+
+void app_assert([[maybe_unused]] uint8_t *file, [[maybe_unused]] uint32_t line) {
+    bsod("app_assert");
 }
 
 #if HAS_ADVANCED_POWER()
@@ -258,7 +234,7 @@ void advanced_power_irq() {
 }
 #endif // #if HAS_ADVANCED_POWER()
 
-#if (BOARD_IS_XLBUDDY && FILAMENT_SENSOR_IS_ADC())
+#if (BOARD_IS_XLBUDDY() && FILAMENT_SENSOR_IS_ADC())
 // update filament sensor irq = 76Hz
 static void filament_sensor_irq() {
 
@@ -343,7 +319,7 @@ void app_tim14_tick(void) {
 
     adc_tick_1ms();
 
-#if (BOARD_IS_XLBUDDY && FILAMENT_SENSOR_IS_ADC())
+#if (BOARD_IS_XLBUDDY() && FILAMENT_SENSOR_IS_ADC())
     filament_sensor_irq();
 #endif
 }

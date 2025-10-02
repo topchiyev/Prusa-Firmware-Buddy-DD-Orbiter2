@@ -4,10 +4,12 @@
  */
 #pragma once
 
-#include <inttypes.h>
-#include <stdio.h>
-#include "selftest_part.hpp"
-#include "common/selftest/selftest_data.hpp"
+#include "selftest_data.hpp"
+#include "i_selftest_part.hpp"
+
+#if HAS_PHASE_STEPPING()
+    #include "src/feature/phase_stepping/phase_stepping.hpp"
+#endif
 
 #define SELFTEST_LOOP_PERIODE 50
 
@@ -16,7 +18,6 @@ class ISelftest {
 
 public:
     ISelftest();
-    virtual ~ISelftest() = default;
 
     virtual bool IsInProgress() const = 0;
     virtual bool IsAborted() const = 0;
@@ -35,7 +36,7 @@ protected:
 
     uint32_t m_Time;
 #if HAS_PHASE_STEPPING()
-    std::optional<phase_stepping::EnsureDisabled> ph_disabler { std::nullopt };
+    phase_stepping::StateRestorer phstep_restorer;
 #endif
 };
 

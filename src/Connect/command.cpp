@@ -3,10 +3,13 @@
 #include <search_json.h>
 #include <json_encode.h>
 
-#include <common/general_response.hpp>
+#include <general_response.hpp>
+#include <module/prusa/tool_mapper.hpp>
+#include <netif_settings.h>
 
 #include <cstdlib>
 #include <charconv>
+#include <limits>
 
 using json::Event;
 using json::Type;
@@ -37,8 +40,8 @@ namespace {
     const constexpr size_t MAX_TOKENS = 60;
 
     template <class R>
-    optional<R> convert_int(const Event &event) {
-        if (R result; from_chars(event.value->begin(), event.value->end(), result).ec == errc {}) {
+    optional<R> convert_num(std::string_view str) {
+        if (R result; from_chars(str.begin(), str.end(), result).ec == errc {}) {
             return result;
         } else {
             return nullopt;
@@ -69,12 +72,16 @@ namespace {
         ArgDialogId = 1 << 6,
         ArgResponse = 1 << 7,
         ArgSetValue = 1 << 8,
+        ArgId = 1 << 9,
+        ArgTeamId = 1 << 10,
+        ArgHash = 1 << 11,
     };
 
     constexpr uint32_t NO_ARGS = 0;
     // Encrypted download can also process a port, but that one is optional, so not listed here.
     constexpr uint32_t ARGS_ENC_DOWN = ArgPath | ArgKey | ArgIv | ArgOrigSize;
     constexpr uint32_t ARGS_DIALOG_ACTION = ArgDialogId | ArgResponse;
+    constexpr uint32_t ARGS_INLINE_DOWN = ArgPath | ArgOrigSize | ArgTeamId | ArgHash;
 } // namespace
 
 Command Command::gcode_command(CommandId id, const string_view &body, SharedBuffer::Borrow buff) {
@@ -114,11 +121,25 @@ Command Command::parse_json_command(CommandId id, char *body, size_t body_size, 
     uint32_t expected_args = 0;
     uint32_t seen_args = 0;
 
+#if ENABLED(PRUSA_TOOL_MAPPING)
+    bool in_tool_mapping = false;
+    uint32_t tool_mapping_index_outer = 0;
+    uint32_t tool_mapping_index_inner = 0;
+#endif
+
     // Error from jsmn_parse will lead to -1 -> converted to 0, refused by json::search as Broken.
     const bool success = json::search(body, tokens, std::max(parse_result, 0), [&](const Event &event) {
         auto is_arg = [&](const string_view name, Type type) -> bool {
             return event.depth == 2 && in_kwargs && event.type == type && event.key == name;
         };
+#if ENABLED(PRUSA_TOOL_MAPPING)
+        auto is_tool_mapping_index = [&]() -> std::optional<uint32_t> {
+            if (in_tool_mapping && event.type == Type::Array && event.depth == 3) {
+                return convert_num<uint32_t>(event.key.value());
+            }
+            return std::nullopt;
+        };
+#endif
         if (event.depth == 1 && event.type == Type::String && event.key == "command") {
             // Will fill in all the insides later on, if needed
 #define T(NAME, TYPE, EXP)     \
@@ -152,6 +173,17 @@ Command Command::parse_json_command(CommandId id, char *body, size_t body_size, 
             T("RESET", ResetPrinter, NO_ARGS)
             T("SEND_STATE_INFO", SendStateInfo, NO_ARGS)
             T("DIALOG_ACTION", DialogAction, ARGS_DIALOG_ACTION)
+            T("SET_VALUE", SetValue, ArgSetValue)
+            T("CANCEL_OBJECT", CancelObject, ArgId)
+            T("UNCANCEL_OBJECT", UncancelObject, ArgId)
+            T("START_INLINE_DOWNLOAD", StartInlineDownload, ARGS_INLINE_DOWN)
+            // For technical reasons, Connect wants to have only one
+            // (START_CONNECT_DOWNLOAD) command and let the printer figure if
+            // it wants to do that through the websocket or "around". We do it
+            // inline the websocket always, and for some time it's unclear
+            // which command will be coming from which Connect instance ->
+            // accept both, handle the same way.
+            T("START_CONNECT_DOWNLOAD", StartInlineDownload, ARGS_INLINE_DOWN)
             T("START_ENCRYPTED_DOWNLOAD", StartEncryptedDownload, ARGS_ENC_DOWN) { // else is part of the previous T
                 return;
             }
@@ -162,12 +194,12 @@ Command Command::parse_json_command(CommandId id, char *body, size_t body_size, 
         // pointer-to-member parameters ‒ but that would be hard to figure out
         // and arcane („If it was hard to write, it should be hard to read too“
         // kind).
-#define INT_ARG(TYPE, FIELD_TYPE, FIELD, MARK)                                \
-    if (auto *cmd = get_if<TYPE>(&data); cmd != nullptr) {                    \
-        if (auto value = convert_int<FIELD_TYPE>(event); value.has_value()) { \
-            cmd->FIELD = *value;                                              \
-            seen_args |= MARK;                                                \
-        }                                                                     \
+#define INT_ARG(TYPE, FIELD_TYPE, FIELD, MARK)                                              \
+    if (auto *cmd = get_if<TYPE>(&data); cmd != nullptr) {                                  \
+        if (auto value = convert_num<FIELD_TYPE>(event.value.value()); value.has_value()) { \
+            cmd->FIELD = *value;                                                            \
+            seen_args |= MARK;                                                              \
+        }                                                                                   \
     }
 #define PATH_ARG(TYPE)                                                            \
     if (auto *cmd = get_if<TYPE>(&data); cmd != nullptr && buffer_available) {    \
@@ -184,21 +216,35 @@ Command Command::parse_json_command(CommandId id, char *body, size_t body_size, 
         }                                                                    \
     }
 
-#if XL_ENCLOSURE_SUPPORT()
-        auto set_value_bool_arg = [&](PropertyName name) {
+        auto set_value_bool_arg = [&](PropertyName name, size_t idx = 0) {
             if (auto *cmd = get_if<SetValue>(&data); cmd != nullptr) {
                 seen_args |= ArgSetValue;
                 cmd->name = name;
+                cmd->idx = idx;
                 if (event.value->compare("true") == 0) {
-                    cmd->bool_value = true;
+                    cmd->value = true;
                 } else if (event.value->compare("false") == 0) {
-                    cmd->bool_value = false;
+                    cmd->value = false;
                 } else {
                     data = BrokenCommand { "Invalid bool value" };
                 }
             }
         };
-#endif
+
+        auto set_value_float_arg = [&](PropertyName name, size_t idx = 0) {
+            if (auto *cmd = get_if<SetValue>(&data); cmd != nullptr) {
+                seen_args |= ArgSetValue;
+                cmd->name = name;
+                cmd->idx = idx;
+                auto value = convert_num<float>(event.value.value());
+                if (value.has_value()) {
+                    cmd->value = value.value();
+                } else {
+                    data = BrokenCommand { "Invalid float value" };
+                }
+            }
+        };
+
         if (event.depth == 1 && event.type == Type::Object && event.key == "kwargs") {
             in_kwargs = true;
         } else if (event.depth == 1 && event.type == Type::Pop) {
@@ -212,6 +258,39 @@ Command Command::parse_json_command(CommandId id, char *body, size_t body_size, 
             PATH_ARG(DeleteFolder)
             PATH_ARG(CreateFolder)
             PATH_ARG(StartEncryptedDownload)
+            PATH_ARG(StartInlineDownload)
+#if ENABLED(PRUSA_TOOL_MAPPING)
+        } else if (is_arg("tool_mapping", Type::Object)) {
+            in_tool_mapping = true;
+            if (auto *cmd = get_if<StartPrint>(&data); cmd != nullptr) {
+                cmd->tool_mapping.emplace();
+                for (auto &ext : cmd->tool_mapping.value()) {
+                    for (auto &join : ext) {
+                        join = ToolMapper::NO_TOOL_MAPPED;
+                    }
+                }
+            }
+        } else if (in_tool_mapping && event.key->compare("tool_mapping") == 0 && event.type == Type::Pop && event.depth == 2) {
+            in_tool_mapping = false;
+        } else if (auto index = is_tool_mapping_index(); index.has_value()) {
+            tool_mapping_index_inner = 0;
+            // NOTE: Internally tools are numbered from 0, externally from 1.
+            tool_mapping_index_outer = index.value() - 1;
+        } else if (in_tool_mapping && event.type == Type::Primitive && event.depth == 4) {
+            if (auto *cmd = get_if<StartPrint>(&data); cmd != nullptr) {
+                if (tool_mapping_index_outer < cmd->tool_mapping.value().size()
+                    && tool_mapping_index_inner < cmd->tool_mapping.value()[tool_mapping_index_outer].size()) {
+                    auto tool = convert_num<uint32_t>(event.value.value());
+                    if (tool.has_value()) {
+                        cmd->tool_mapping.value()[tool_mapping_index_outer][tool_mapping_index_inner++] = tool.value() - 1;
+                    } else {
+                        data = BrokenCommand { "Invalid tool index" };
+                    }
+                } else {
+                    data = BrokenCommand { "Tool index out of range" };
+                }
+            }
+#endif
         } else if (is_arg("token", Type::String)) {
             if (auto *cmd = get_if<SetToken>(&data); cmd != nullptr && buffer_available) {
                 const size_t len = min(event.value->size() + 1, buff.size());
@@ -233,6 +312,19 @@ Command Command::parse_json_command(CommandId id, char *body, size_t body_size, 
                 }
             }
 
+        } else if (is_arg("hostname", Type::String)) {
+            if (auto *cmd = get_if<SetValue>(&data); cmd != nullptr && buffer_available) {
+                const size_t len = min(event.value->size() + 1, buff.size());
+                if (len - 1 <= HOSTNAME_LEN) {
+                    seen_args |= ArgSetValue;
+                    cmd->name = PropertyName::HostName;
+                    strlcpy(reinterpret_cast<char *>(buff.data()), event.value->data(), len);
+                    cmd->value = std::make_shared<SharedBuffer::Borrow>(move(buff));
+                    buffer_available = false;
+                } else {
+                    data = BrokenCommand { "Hostname too long." };
+                }
+            }
 #if XL_ENCLOSURE_SUPPORT()
         } else if (is_arg("enclosure_enabled", Type::Primitive)) {
             set_value_bool_arg(PropertyName::EnclosureEnabled);
@@ -244,23 +336,55 @@ Command Command::parse_json_command(CommandId id, char *body, size_t body_size, 
             if (auto *cmd = get_if<SetValue>(&data); cmd != nullptr) {
                 seen_args |= ArgSetValue;
                 cmd->name = PropertyName::EnclosurePostPrintFiltrationTime;
-                if (uint32_t result; from_chars(event.value.value().begin(), event.value.value().end(), result).ec == errc {}) {
-                    cmd->int_value = result;
+                auto time = convert_num<uint32_t>(event.value.value());
+                if (time.has_value()) {
+                    cmd->value = time.value();
                 } else {
                     data = BrokenCommand { "Invalid int value" };
                 }
             }
 #endif
+#define NOZZLE_PARAMS(num)                                                \
+    }                                                                     \
+    else if (is_arg("tools." #num ".high_flow", Type::Primitive)) {       \
+        set_value_bool_arg(PropertyName::NozzleHighFlow, num - 1);        \
+    }                                                                     \
+    else if (is_arg("tools." #num ".hardened", Type::Primitive)) {        \
+        set_value_bool_arg(PropertyName::NozzleHardened, num - 1);        \
+    }                                                                     \
+    else if (is_arg("tools." #num ".nozzle_diameter", Type::Primitive)) { \
+        set_value_float_arg(PropertyName::NozzleDiameter, num - 1);
+
+            NOZZLE_PARAMS(1)
+#if HAS_TOOLCHANGER() || UNITTESTS
+            NOZZLE_PARAMS(2)
+            NOZZLE_PARAMS(3)
+            NOZZLE_PARAMS(4)
+            NOZZLE_PARAMS(5)
+#endif
+#undef NOZZLE_PARAMS
         } else if (is_arg("port", Type::Primitive)) {
             INT_ARG(StartEncryptedDownload, uint16_t, port, 0)
         } else if (is_arg("orig_size", Type::Primitive)) {
-            INT_ARG(StartEncryptedDownload, uint64_t, orig_size, ArgOrigSize)
+            INT_ARG(StartEncryptedDownload, uint32_t, orig_size, ArgOrigSize)
+            INT_ARG(StartInlineDownload, uint32_t, orig_size, ArgOrigSize)
+        } else if (is_arg("team_id", Type::Primitive)) {
+            INT_ARG(StartInlineDownload, uint64_t, team_id, ArgTeamId)
+        } else if (is_arg("hash", Type::String)) {
+            if (auto *cmd = get_if<StartInlineDownload>(&data); cmd != nullptr) {
+                const size_t len = min(event.value->size() + 1, sizeof cmd->hash);
+                strlcpy(cmd->hash, event.value->data(), len);
+                seen_args |= ArgHash;
+            }
         } else if (is_arg("key", Type::String)) {
             HEX_ARG(key, ArgKey)
         } else if (is_arg("iv", Type::String)) {
             HEX_ARG(iv, ArgIv)
         } else if (is_arg("dialog_id", Type::Primitive)) {
             INT_ARG(DialogAction, uint32_t, dialog_id, ArgDialogId)
+        } else if (is_arg("id", Type::Primitive)) {
+            INT_ARG(CancelObject, uint8_t, id, ArgId)
+            INT_ARG(UncancelObject, uint8_t, id, ArgId)
         }
     });
 

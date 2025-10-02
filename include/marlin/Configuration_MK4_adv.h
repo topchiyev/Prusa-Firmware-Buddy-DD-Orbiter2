@@ -1827,11 +1827,12 @@
         #endif
 
         #if Z_DRIVER_TYPE == TMC2130
-            #define Z_STALL_SENSITIVITY 3
+            #define Z_STALL_SENSITIVITY 4
         #elif Z_DRIVER_TYPE == TMC2209
             #define Z_STALL_SENSITIVITY 100
         #endif
 
+        // #define STALL_THRESHOLD_TMC2130 400 // Instead determined by get_homing_stall_threshold
         #define STALL_THRESHOLD_TMC2209 400
 
         #define IMPROVE_HOMING_RELIABILITY
@@ -2048,7 +2049,7 @@
 
 // @section i2cbus
 
-//#define EXPERIMENTAL_I2CBUS
+#define EXPERIMENTAL_I2CBUS
 #define I2C_SLAVE_ADDRESS 0 // Set a value from 8 to 127 to act as a slave
 
 // @section extras

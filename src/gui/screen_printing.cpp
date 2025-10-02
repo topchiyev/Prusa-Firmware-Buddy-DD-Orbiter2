@@ -32,6 +32,12 @@
     #include "../Marlin/src/feature/prusa/crash_recovery.hpp"
 #endif
 
+#include <option/buddy_enable_connect.h>
+#if BUDDY_ENABLE_CONNECT()
+    #include <connect/connect.hpp>
+    #include <connect/marlin_printer.hpp>
+#endif
+
 using namespace marlin_server;
 
 void screen_printing_data_t::invalidate_print_state() {
@@ -39,6 +45,14 @@ void screen_printing_data_t::invalidate_print_state() {
 }
 printing_state_t screen_printing_data_t::GetState() const {
     return state__readonly__use_change_print_state;
+}
+
+static bool is_waiting_for_connect_set_ready() {
+#if BUDDY_ENABLE_CONNECT()
+    return connect_client::is_connect_registered() && !connect_client::MarlinPrinter::is_printer_ready();
+#else
+    return false;
+#endif
 }
 
 void screen_printing_data_t::tuneAction() {
@@ -51,6 +65,11 @@ void screen_printing_data_t::tuneAction() {
     case printing_state_t::PAUSED:
         Screens::Access()->Open(ScreenFactory::Screen<ScreenMenuTune>);
         break;
+    case printing_state_t::PRINTED:
+        if (is_waiting_for_connect_set_ready()) {
+            connect_client::MarlinPrinter::set_printer_ready(true);
+            set_tune_icon_and_label(); // Disable Set Ready button
+        }
     default:
         break;
     }
@@ -112,8 +131,6 @@ void screen_printing_data_t::stopAction() {
 /******************************************************************************/
 
 namespace {
-constexpr const char *txt_na { N_("N/A") };
-
 constexpr size_t column_left { 30 };
 
 constexpr size_t row_0 { 104 };
@@ -123,9 +140,9 @@ constexpr size_t get_row(size_t idx) {
     return row_0 + idx * row_height;
 }
 
-#if defined(USE_ST7789)
+#if HAS_MINI_DISPLAY()
 constexpr auto etime_val_font { Font::small };
-#elif defined(USE_ILI9488)
+#elif HAS_LARGE_DISPLAY()
 constexpr auto etime_val_font { Font::normal };
 
 constexpr auto arrow_left_res { &img::arrow_left_10x16 };
@@ -145,13 +162,13 @@ constexpr Rect16 end_result_body_rect { 0, row_0 - EndResultBody::extra_top_spac
 } // namespace
 
 screen_printing_data_t::screen_printing_data_t()
-    : AddSuperWindow<ScreenPrintingModel>(_(caption))
-#if (defined(USE_ILI9488))
+    : ScreenPrintingModel(_(caption))
+#if (HAS_LARGE_DISPLAY())
     , print_progress(this)
     , arrow_left(this, arrow_left_rect, arrow_left_res)
     , rotating_circles(this, rotating_circles_rect, ftrstd::to_underlying(CurrentlyShowing::_count))
 #endif
-#if defined(USE_ST7789)
+#if HAS_MINI_DISPLAY()
     , w_filename(this, Rect16(10, 33, 220, 29))
     , w_progress(this, Rect16(10, 70, GuiDefaults::RectScreen.Width() - 2 * 10, 16))
     , w_progress_txt(this, Rect16(10, 86, GuiDefaults::RectScreen.Width() - 2 * 10, 30)) // font: Normal (11x18 px)
@@ -159,7 +176,7 @@ screen_printing_data_t::screen_printing_data_t()
     , w_time_value(this, Rect16(10, 148, 101, 20), is_multiline::no)
     , w_etime_label(this, Rect16(130, 128, 101, 20), is_multiline::no)
     , w_etime_value(this, Rect16(120, 148, 111, 37), is_multiline::yes)
-#elif defined(USE_ILI9488)
+#elif HAS_LARGE_DISPLAY()
     , w_filename(this, Rect16(30, 38, 420, 24))
     , w_progress(this, Rect16(30, 65, GuiDefaults::RectScreen.Width() - 2 * 30, 16))
     , w_progress_txt(this, EndResultBody::get_progress_txt_rect(row_0)) // Left side option: 30, 115, 100, 54 | font: Large (53x30 px)
@@ -170,10 +187,10 @@ screen_printing_data_t::screen_printing_data_t()
     , stop_pressed(false)
     , waiting_for_abort(false)
     , state__readonly__use_change_print_state(printing_state_t::COUNT)
-#if defined(USE_ST7789)
+#if HAS_MINI_DISPLAY()
     , popup_rect(Rect16::Merge(std::array<Rect16, 4>({ w_time_label.GetRect(), w_time_value.GetRect(), w_etime_label.GetRect(), w_etime_value.GetRect() })))
     , time_end_format(PT_t::init)
-#elif defined(USE_ILI9488)
+#elif HAS_LARGE_DISPLAY()
     , popup_rect(Rect16(30, get_row(0), 250, 70)) // Rect for printing messages from marlin.
     , end_result_body(this, end_result_body_rect) // safe to pass even if order changes because EndScreen constructor doesn't use it (therefore guaranteed to be valid)
 #endif // USE_<display>
@@ -183,7 +200,7 @@ screen_printing_data_t::screen_printing_data_t()
 
     strlcpy(text_filament.data(), "999m", text_filament.size());
 
-#if defined(USE_ST7789)
+#if HAS_MINI_DISPLAY()
     // ST7789 specific adjustments
     Align_t align = Align_t::RightBottom();
     w_filename.SetAlignment(Align_t::LeftBottom());
@@ -203,7 +220,7 @@ screen_printing_data_t::screen_printing_data_t()
     w_time_value.set_font(Font::small);
     w_time_value.SetAlignment(align);
     w_time_value.SetPadding({ 0, 2, 0, 2 });
-#elif defined(USE_ILI9488)
+#elif HAS_LARGE_DISPLAY()
     // ILI_9488 specific adjustments
     w_filename.SetAlignment(Align_t::LeftTop());
     w_progress_txt.SetAlignment(EndResultBody::progress_alignment);
@@ -215,31 +232,25 @@ screen_printing_data_t::screen_printing_data_t()
     w_progress_txt.set_font(EndResultBody::progress_font);
 #endif // USE_<display>
 
+    strlcpy(text_filename.data(), GCodeInfo::getInstance().GetGcodeFilename(), text_filename.size());
     w_filename.set_font(Font::big);
     w_filename.SetPadding({ 0, 0, 0, 0 });
-    // this MakeRAM is safe - vars->media_LFN is statically allocated (even though it may not be obvious at the first look)
-    {
-        // Update printed filename from marlin_server, sample LFN+SFN atomically
-        auto lock = MarlinVarsLockGuard();
-        marlin_vars()->media_LFN.copy_to(gui_media_LFN, sizeof(gui_media_LFN), lock);
-        marlin_vars()->media_SFN_path.copy_to(gui_media_SFN_path, sizeof(gui_media_SFN_path), lock);
-    }
-    w_filename.SetText(string_view_utf8::MakeRAM((const uint8_t *)gui_media_LFN));
+    w_filename.SetText(string_view_utf8::MakeRAM(text_filename.data()));
 
     w_etime_label.set_font(Font::small);
 
-#if defined(USE_ILI9488)
+#if HAS_LARGE_DISPLAY()
     print_progress.init_gcode_info();
-#endif /*USE_ILI9488*/
+#endif
 
     // Execute first print time update loop
     updateTimes();
 
     w_etime_value.set_font(etime_val_font);
 
-#if defined(USE_ILI9488)
+#if HAS_LARGE_DISPLAY()
     print_progress.Pause();
-    last_e_axis_position = marlin_vars()->logical_curr_pos[MARLIN_VAR_INDEX_E];
+    last_e_axis_position = marlin_vars().logical_curr_pos[MARLIN_VAR_INDEX_E];
 
     rotating_circles.set_one_circle_mode(true);
 
@@ -248,7 +259,7 @@ screen_printing_data_t::screen_printing_data_t()
 #endif
 }
 
-void screen_printing_data_t::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void screen_printing_data_t::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     /// check stop clicked when MBL is running
     printing_state_t p_state = GetState();
     if (
@@ -267,7 +278,7 @@ void screen_printing_data_t::windowEvent(EventLock /*has private ctor*/, window_
     updateTimes();
 
     /// -- close screen when print is done / stopped and USB media is removed
-    if (!marlin_vars()->media_inserted && (p_state == printing_state_t::PRINTED || p_state == printing_state_t::STOPPED)) {
+    if (!marlin_vars().media_inserted && (p_state == printing_state_t::PRINTED || p_state == printing_state_t::STOPPED)) {
         marlin_client::print_exit();
         return;
     }
@@ -278,30 +289,30 @@ void screen_printing_data_t::windowEvent(EventLock /*has private ctor*/, window_
         set_pause_icon_and_label();
     }
     if (event == GUI_event_t::HELD_RELEASED) {
-        if (marlin_vars()->logical_curr_pos[2 /* Z Axis */] <= 1.0f && p_state == printing_state_t::PRINTING) {
+        if (marlin_vars().logical_curr_pos[2 /* Z Axis */] <= 1.0f && p_state == printing_state_t::PRINTING) {
             LiveAdjustZ::Show();
         } else if (p_state == printing_state_t::PRINTED || p_state == printing_state_t::STOPPED) {
             DialogMoveZ::Show();
         }
         return;
     }
-#if defined(USE_ILI9488)
+#if HAS_LARGE_DISPLAY()
     if (event == GUI_event_t::LOOP && p_state == printing_state_t::PRINTING) {
-        auto vars = marlin_vars();
-        const bool midprint = vars->logical_curr_pos[MARLIN_VAR_INDEX_Z] >= 1.0f;
-        const bool extruder_moved = (vars->logical_curr_pos[MARLIN_VAR_INDEX_E] - last_e_axis_position) > 0
-            && vars->logical_curr_pos[MARLIN_VAR_INDEX_E] > 0
+        const auto &vars = marlin_vars();
+        const bool midprint = vars.logical_curr_pos[MARLIN_VAR_INDEX_Z] >= 1.0f;
+        const bool extruder_moved = (vars.logical_curr_pos[MARLIN_VAR_INDEX_E] - last_e_axis_position) > 0
+            && vars.logical_curr_pos[MARLIN_VAR_INDEX_E] > 0
             && last_e_axis_position > 0; // Ignore negative movements and reset of E position (e.g. retraction)
         if (print_progress.isPaused() && midprint && extruder_moved) {
             print_progress.Resume();
         } else if (print_progress.isPaused()) {
-            last_e_axis_position = vars->logical_curr_pos[MARLIN_VAR_INDEX_E];
+            last_e_axis_position = vars.logical_curr_pos[MARLIN_VAR_INDEX_E];
         }
     }
 #endif
 
     if (p_state == printing_state_t::PRINTED || p_state == printing_state_t::STOPPED) {
-#if defined(USE_ILI9488)
+#if HAS_LARGE_DISPLAY()
         if (p_state == printing_state_t::PRINTED) {
             print_progress.Pause();
         } else {
@@ -310,7 +321,7 @@ void screen_printing_data_t::windowEvent(EventLock /*has private ctor*/, window_
 #endif
         hide_time_information();
     } else {
-#if defined(USE_ILI9488)
+#if HAS_LARGE_DISPLAY()
         print_progress.PrintingMode();
 #endif
         show_time_information();
@@ -328,10 +339,18 @@ void screen_printing_data_t::windowEvent(EventLock /*has private ctor*/, window_
             string_view_utf8 txt;
             switch (*reason) {
             case MMU2::MaintenanceReason::Failures:
+    #if HAS_LOADCELL()
                 txt = _("Printer has detected multiple consecutive filament loading errors. We recommend checking Nextruder main-plate. Visit prusa.io/mmu-care");
+    #else
+                txt = _("Printer has detected multiple consecutive filament loading errors. We recommend checking the extruder. Visit prusa.io/mmu-care");
+    #endif
                 break;
             case MMU2::MaintenanceReason::Changes:
+    #if HAS_LOADCELL()
                 txt = _("Maintenance Reminder. Filament changes have reached main-plate lifespan. Inspect the part and ensure you have a spare plate available. Visit prusa.io/mmu-care");
+    #else
+                txt = _("Maintenance Reminder. Filament changes have reached 30k. Inspect and clean the extruder. Visit prusa.io/mmu-care");
+    #endif
                 break;
             }
 
@@ -340,7 +359,7 @@ void screen_printing_data_t::windowEvent(EventLock /*has private ctor*/, window_
     }
 #endif
 
-#if defined(USE_ILI9488)
+#if HAS_LARGE_DISPLAY()
     if (shown_end_result && event == GUI_event_t::ENC_DN
         && ((buttons[0].IsEnabled() && buttons[0].IsFocused()) || (!buttons[0].IsEnabled() && buttons[1].IsFocused()))) {
         start_showing_end_result();
@@ -374,14 +393,14 @@ void screen_printing_data_t::windowEvent(EventLock /*has private ctor*/, window_
     }
 
     if (!showing_end_result) {
-        SuperWindowEvent(sender, event, param);
+        ScreenPrintingModel::windowEvent(sender, event, param);
     }
 #else
-    SuperWindowEvent(sender, event, param);
+    ScreenPrintingModel::windowEvent(sender, event, param);
 #endif
 }
 
-#if defined(USE_ILI9488)
+#if HAS_LARGE_DISPLAY()
 void screen_printing_data_t::start_showing_end_result() {
 
     // hide previous
@@ -436,7 +455,7 @@ void screen_printing_data_t::show_time_information() {
     w_etime_label.Show();
     w_etime_value.Show();
 
-#if defined(USE_ILI9488)
+#if HAS_LARGE_DISPLAY()
     rotating_circles.Show();
 #endif
     updateTimes(); // make sure the data is valid
@@ -446,13 +465,13 @@ void screen_printing_data_t::hide_time_information() {
     w_etime_label.Hide();
     w_etime_value.Hide();
 
-#if defined(USE_ILI9488)
+#if HAS_LARGE_DISPLAY()
     rotating_circles.Hide();
 #endif
 }
 
 void screen_printing_data_t::updateTimes() {
-#if defined(USE_ST7789)
+#if HAS_MINI_DISPLAY()
     PT_t time_format = print_time.update_loop(time_end_format, &w_etime_value, &w_time_value);
 
     if (time_format != time_end_format) {
@@ -469,7 +488,7 @@ void screen_printing_data_t::updateTimes() {
 
         time_end_format = time_format;
     }
-#elif defined(USE_ILI9488)
+#elif HAS_LARGE_DISPLAY()
 
     if (!w_etime_value.HasVisibleFlag() || !w_etime_label.HasVisibleFlag()) {
         return;
@@ -487,8 +506,8 @@ void screen_printing_data_t::updateTimes() {
     }
 
     bool value_available = true;
-    auto time_to_end = marlin_vars()->time_to_end.get();
-    auto time_to_change = marlin_vars()->time_to_pause.get();
+    auto time_to_end = marlin_vars().time_to_end.get();
+    auto time_to_change = marlin_vars().time_to_pause.get();
 
     if ((currently_showing == CurrentlyShowing::end_time
             || currently_showing == CurrentlyShowing::remaining_time)
@@ -510,7 +529,7 @@ void screen_printing_data_t::updateTimes() {
 
     case CurrentlyShowing::time_since_start:
         w_etime_label.SetText(_(EndResultBody::txt_printing_time));
-        PrintTime::print_formatted_duration(marlin_vars()->print_duration.get(), w_etime_value_buffer, true);
+        PrintTime::print_formatted_duration(marlin_vars().print_duration.get(), w_etime_value_buffer, true);
         break;
 
     case CurrentlyShowing::time_to_change:
@@ -528,24 +547,24 @@ void screen_printing_data_t::updateTimes() {
 
     // Add unknown marker
     // (time since start is always exact, not influenced by the print speed)
-    if (marlin_vars()->print_speed != 100 && currently_showing != CurrentlyShowing::time_since_start) {
+    if (marlin_vars().print_speed != 100 && currently_showing != CurrentlyShowing::time_since_start) {
         strlcat(w_etime_value_buffer.data(), "?", w_etime_value_buffer.size());
     }
 
     if (value_available) {
-        w_etime_value.SetText(_(w_etime_value_buffer.data()));
+        w_etime_value.SetText(string_view_utf8::MakeRAM(w_etime_value_buffer.data()));
         w_etime_value.SetTextColor(GuiDefaults::COLOR_VALUE_VALID);
     } else {
-        w_etime_value.SetText(_(txt_na));
+        w_etime_value.SetText(_("N/A"));
         w_etime_value.SetTextColor(GuiDefaults::COLOR_VALUE_INVALID);
     }
     w_etime_value.Invalidate(); // just to make sure
 
-#endif // USE_ST7789
+#endif
 }
 
 void screen_printing_data_t::screen_printing_reprint() {
-    print_begin(gui_media_SFN_path, marlin_server::PreviewSkipIfAble::preview);
+    print_begin(GCodeInfo::getInstance().GetGcodeFilepath(), marlin_server::PreviewSkipIfAble::preview);
     screen_printing_data_t::updateTimes(); // reinit, but should be already set correctly
     SetButtonIconAndLabel(BtnSocket::Middle, BtnRes::Stop, LabelRes::Stop);
     header.SetText(_(caption));
@@ -573,7 +592,7 @@ void screen_printing_data_t::set_pause_icon_and_label() {
     case printing_state_t::PAUSED:
         EnableButton(BtnSocket::Middle);
         SetButtonIconAndLabel(BtnSocket::Middle, BtnRes::Resume, LabelRes::Resume);
-        if (!marlin_vars()->media_inserted) {
+        if (!marlin_vars().media_inserted) {
             DisableButton(BtnSocket::Middle);
         }
         break;
@@ -631,6 +650,14 @@ void screen_printing_data_t::set_tune_icon_and_label() {
     case printing_state_t::ABORTING:
         DisableButton(BtnSocket::Left);
         break;
+    case printing_state_t::PRINTED:
+        if (is_waiting_for_connect_set_ready()) {
+            EnableButton(BtnSocket::Left);
+            SetButtonIconAndLabel(BtnSocket::Left, BtnRes::SetReady, LabelRes::SetReady);
+        } else {
+            DisableButton(BtnSocket::Left);
+        }
+        break;
     default:
         DisableButton(BtnSocket::Left);
         break;
@@ -666,7 +693,7 @@ void screen_printing_data_t::set_stop_icon_and_label() {
 void screen_printing_data_t::change_print_state() {
     printing_state_t st = printing_state_t::COUNT;
 
-    switch (marlin_vars()->print_state) {
+    switch (marlin_vars().print_state) {
     case State::Idle:
     case State::WaitGui:
     case State::PrintPreviewInit:
@@ -698,7 +725,7 @@ void screen_printing_data_t::change_print_state() {
         st = printing_state_t::PAUSING;
 // When print is paused, progress screen needs to reinit it's thumbnail file handler
 // because USB removal error crashes file handler access. Progress screen should not be enabled during pause -> reinit on EVERY pause
-#if defined(USE_ILI9488)
+#if HAS_LARGE_DISPLAY()
         print_progress.Pause();
 #endif
         break;
@@ -724,7 +751,7 @@ void screen_printing_data_t::change_print_state() {
     case State::PowerPanic_Resume:
         stop_pressed = false;
         st = printing_state_t::RESUMING;
-#ifdef USE_ILI9488
+#if HAS_LARGE_DISPLAY()
         print_progress.Resume();
 #endif
         break;

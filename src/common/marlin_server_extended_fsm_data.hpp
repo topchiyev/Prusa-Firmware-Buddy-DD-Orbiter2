@@ -1,19 +1,10 @@
 #pragma once
 
 #include <common/fsm_base_types.hpp>
-#include "log.h"
+#include <logging/log.hpp>
 #include "marlin_vars.hpp"
 #include <common/no_rtti_type_id.hpp>
-
-/// @brief Parent of all extended FSM data
-class FSMExtendedData {
-public:
-    FSMExtendedData() = default;
-};
-
-/// concept used to check if item is subclass of FSMExtendedData
-template <class T>
-concept FSMExtendedDataSubclass = std::is_base_of<FSMExtendedData, T>::value;
+#include "marlin_server_extended_fsm_types.hpp"
 
 LOG_COMPONENT_REF(Marlin);
 
@@ -31,7 +22,7 @@ LOG_COMPONENT_REF(Marlin);
  * Send data from server:
  *     DataType_t data
  *     data.value = 123;
- *     FSM_CHANGE_WITH_EXTENDED_DATA__LOGGING(phase, data);
+ *     marlin_server::fsm_change_extended(phase, data);
  *
  *  Receive data in client:
  *      DataType_t dt;
@@ -43,7 +34,7 @@ LOG_COMPONENT_REF(Marlin);
  */
 class FSMExtendedDataManager {
 public:
-    /// @brief Store extended data from server, use via FSM_CHANGE_WITH_EXTENDED_DATA__LOGGING
+    /// @brief Store extended data from server, use via marlin_server::fsm_change_extended
     /// @tparam T type with data
     /// @param data
     /// @return id

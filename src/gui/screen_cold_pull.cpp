@@ -3,9 +3,19 @@
 #include "screen_cold_pull.hpp"
 #include "window_progress.hpp"
 #include "fonts.hpp"
-#include <find_error.hpp>
 #include "utility_extensions.hpp"
 
+#if HAS_TOOLCHANGER()
+    #include <window_tool_action_box.hpp>
+#endif
+
+#if HAS_MMU2()
+    #include <feature/prusa/MMU2/mmu2_mk4.h>
+#endif
+
+#include <find_error.hpp>
+#include <gui/text_error_url.hpp>
+#include <gui/qr.hpp>
 #include <guiconfig/wizard_config.hpp>
 #include <common/cold_pull.hpp>
 #include <common/sound.hpp>
@@ -17,17 +27,7 @@ namespace {
 // Show message when this time is left to wait for
 constexpr const unsigned TAKING_TOO_LONG_TIMEOUT_SEC { 5 * 60 };
 
-ScreenColdPull *instance = nullptr;
-
 const char *text_header = N_("COLD PULL");
-
-constexpr Rect16 get_radio_frame() {
-    return GuiDefaults::GetButtonRect(GuiDefaults::RectScreenBody);
-}
-
-constexpr Rect16 get_inner_frame() {
-    return GuiDefaults::RectScreenBody - get_radio_frame().Height() - static_cast<Rect16::Height_t>(GuiDefaults::FramePadding);
-}
 
 constexpr const unsigned TITLE_TOP { 70 };
 constexpr const unsigned LABEL_TOP { 180 };
@@ -41,18 +41,18 @@ constexpr const unsigned PROGRESS_BAR_CORNER_RADIUS { 4 };
 
 constexpr Rect16 get_title_rect() {
     return {
-        get_inner_frame().Left(),
+        ScreenColdPull::get_inner_frame_rect().Left(),
         TITLE_TOP,
-        get_inner_frame().Width(),
+        ScreenColdPull::get_inner_frame_rect().Width(),
         GuiDefaults::ButtonHeight
     };
 }
 
 constexpr Rect16 get_info_rect() {
     return {
-        get_inner_frame().Left() + LABEL_PADDING,
+        ScreenColdPull::get_inner_frame_rect().Left() + LABEL_PADDING,
         LABEL_TOP,
-        get_inner_frame().Width() - 2 * LABEL_PADDING,
+        ScreenColdPull::get_inner_frame_rect().Width() - 2 * LABEL_PADDING,
         2 * GuiDefaults::ButtonHeight
     };
 }
@@ -81,7 +81,7 @@ constexpr Rect16 get_progress_number_rect(const Rect16 parent_rect) {
     };
 }
 
-namespace Frame {
+namespace frame {
 
     /** common base class for two text frame */
     class TextFrame {
@@ -101,8 +101,6 @@ namespace Frame {
 
         TextFrame(window_t *parent, const string_view_utf8 &txt_title)
             : TextFrame(parent, txt_title, {}) {}
-
-        virtual ~TextFrame() = default;
     };
 
     /** common base class for two text frame with progress bar */
@@ -118,66 +116,123 @@ namespace Frame {
             , progress_number(parent, get_progress_number_rect(parent->GetRect()), 0, "%.0f%%", Font::big) {
             progress_number.SetAlignment(Align_t::Center());
         }
-
-        virtual ~ProgressFrame() = default;
     };
-
-    // For future use with XL/MMU; now here just for translations
-    [[maybe_unused]] static constexpr const char *TODOtext3 = N_("Before you continue, unload the filament. Then press down the blue part on the fitting and pull the PTFE tube from the tool head.");
-    [[maybe_unused]] static constexpr const char *TODOtext4 = N_("Before you continue, make sure PLA filament is loaded directly into the extruder.");
 
     /** individual frames */
     class Introduction final {
         window_text_t text;
-        window_text_t link;
+        TextErrorUrlWindow link;
         window_icon_t icon_phone;
-        window_qr_t qr;
+        QRErrorUrlWindow qr;
 
-        char error_code_str[10 + 5 + 1]; // static text before error code has 32 chars
     public:
         explicit Introduction(window_t *parent)
             : text(parent, FrameQRLayout::text_rect(), is_multiline::yes, is_closed_on_click_t::no)
-            , link(parent, FrameQRLayout::link_rect(), is_multiline::no, is_closed_on_click_t::no)
+            , link(parent, FrameQRLayout::link_rect(), ErrCode::WARNING_COLD_PULL_INTRO)
             , icon_phone(parent, FrameQRLayout::phone_icon_rect(), &img::hand_qr_59x72)
-            , qr(parent, FrameQRLayout::qrcode_rect()) {
+            , qr(parent, FrameQRLayout::qrcode_rect(), ErrCode::WARNING_COLD_PULL_INTRO) {
 
             text.SetAlignment(Align_t::LeftCenter());
 
             const auto err_desc = find_error(ErrCode::WARNING_COLD_PULL_INTRO);
             text.SetText(_(err_desc.err_text));
+        }
+    };
 
-            const auto err_code_num = ftrstd::to_underlying(ErrCode::WARNING_COLD_PULL_INTRO);
-            qr.SetQRHeader(err_code_num);
+#if HAS_TOOLCHANGER()
+    class SelectTool final : public ToolBox::DialogToolActionBox<ToolBox::MenuSelect> {
+    public:
+        SelectTool(window_t *) {
+            Screens::Access()->gui_loop_until_dialog_closed();
+            Response r;
+            switch (get_result()) {
+            case ToolBox::DialogResult::Tool1:
+                r = Response::Tool1;
+                break;
+            case ToolBox::DialogResult::Tool2:
+                r = Response::Tool2;
+                break;
+            case ToolBox::DialogResult::Tool3:
+                r = Response::Tool3;
+                break;
+            case ToolBox::DialogResult::Tool4:
+                r = Response::Tool4;
+                break;
+            case ToolBox::DialogResult::Tool5:
+                r = Response::Tool5;
+                break;
+            case ToolBox::DialogResult::Unknown:
+            case ToolBox::DialogResult::Park:
+            case ToolBox::DialogResult::Return:
+                [[fallthrough]];
+            default:
+                r = Response::Continue;
+                break;
+            }
+            marlin_client::FSM_response(PhasesColdPull::select_tool, r);
+        }
+    };
 
-            snprintf(error_code_str, sizeof(error_code_str), text_link, err_code_num);
-            link.SetText(string_view_utf8::MakeRAM((const uint8_t *)error_code_str));
+    class PickTool final : public TextFrame {
+    public:
+        PickTool(window_t *parent)
+            : TextFrame(parent, _(text_title)) {
         }
 
-        void update(fsm::PhaseData) {}
-
-        static constexpr const char *text_link = "prusa.io/%05u";
+        static constexpr const char *text_title = N_("Please wait");
     };
+#endif
+
+#if HAS_MMU2()
+    class StopMMU final : public TextFrame {
+    public:
+        explicit StopMMU(window_t *parent)
+            : TextFrame(parent, _(text_title), _(text_info)) {}
+
+        static constexpr const char *text_title = N_("Stopping MMU");
+        static constexpr const char *text_info = "";
+    };
+
+    class Cleanup final : public TextFrame {
+    public:
+        explicit Cleanup(window_t *parent)
+            : TextFrame(parent, _(text_title), _(text_info)) {}
+
+        static constexpr const char *text_title = N_("Restarting MMU");
+        static constexpr const char *text_info = "";
+    };
+
+#else
+    using Cleanup = common_frames::Blank;
+#endif
+
+#if HAS_TOOLCHANGER() || HAS_MMU2()
+    class UnloadFilamentPtfe final : public TextFrame {
+    public:
+        explicit UnloadFilamentPtfe(window_t *parent)
+            : TextFrame(parent, _(text_title), _(text_info)) {}
+
+        static constexpr const char *text_title = N_("Unload filament");
+        static constexpr const char *text_info = N_("Before you continue, unload the filament. Then press down the blue part on the fitting and pull the PTFE tube from the tool head.");
+    };
+
+    class LoadFilamentPtfe final : public TextFrame {
+    public:
+        explicit LoadFilamentPtfe(window_t *parent)
+            : TextFrame(parent, _(text_title), _(text_info)) {}
+
+        static constexpr const char *text_title = N_("Load filament");
+        static constexpr const char *text_info = N_("Before you continue, make sure PLA filament is loaded directly into the extruder.");
+    };
+#endif
 
     class PrepareFilament final : public TextFrame {
     public:
         explicit PrepareFilament(window_t *parent)
             : TextFrame(parent, _(text_title), _(text_info)) {}
 
-        void update(fsm::PhaseData) {}
-
         static constexpr const char *text_title = N_("Filament check");
         static constexpr const char *text_info = N_("Before you continue,\nmake sure that PLA filament is loaded.");
-    };
-
-    // Blank screen is needed to avoid short flicker of the lower screen when switching from Load filament dialog
-    // to FramePreheat. There is short but noticable period where the underlaying screen is visible before
-    // switch do next happens. If it's black it looks nice.
-    // It goes from FrameLoadUnload -> FrameBlank -> Load-dialog -> FrameBlank -> FramePreheat.
-    class Blank final {
-    public:
-        explicit Blank([[maybe_unused]] window_t *parent) {}
-
-        void update(fsm::PhaseData) {}
     };
 
     class CoolDown final : public ProgressFrame {
@@ -208,6 +263,7 @@ namespace Frame {
         static constexpr const char *text2 = N_("Don't touch the extruder.");
         static constexpr const char *text3 = N_("Takes too long, will skip soon.");
     };
+    static_assert(common_frames::is_update_callable<CoolDown>);
 
     class HeatUp final : public ProgressFrame {
     public:
@@ -226,6 +282,7 @@ namespace Frame {
         static constexpr const char *text1 = N_("Heating up the nozzle");
         static constexpr const char *text2 = N_("The filament will be unloaded automatically.");
     };
+    static_assert(common_frames::is_update_callable<HeatUp>);
 
     class AutomaticPull final : public TextFrame {
     public:
@@ -233,8 +290,6 @@ namespace Frame {
             : TextFrame(parent, _(text1)) {
             Sound_Play(eSOUND_TYPE::SingleBeep);
         }
-
-        void update(fsm::PhaseData) {}
 
         static constexpr const char *text1 = N_("Unloading");
     };
@@ -244,8 +299,6 @@ namespace Frame {
         explicit ManualPull(window_t *parent)
             : TextFrame(parent, _(text1), _(text2)) {
         }
-
-        void update(fsm::PhaseData) {}
 
         static constexpr const char *text1 = N_("Remove the filament manually");
         static constexpr const char *text2 = N_("There might be a slight resistance.\nIf the filament is stuck, open the idler lever.");
@@ -257,8 +310,6 @@ namespace Frame {
             : TextFrame(parent, _(text1), _(text2)) {
         }
 
-        void update(fsm::PhaseData) {}
-
         static constexpr const char *text1 = N_("Cold Pull successfully completed");
         static constexpr const char *text2 = N_("You can continue printing. If the issue persists,\nrepeat this procedure again.");
 
@@ -266,120 +317,58 @@ namespace Frame {
         [[maybe_unused]] static constexpr const char *TODOtext10 = N_("Cold Pull successfully completed. Insert PTFE tube back in the fitting. You can continue printing. If the issue persists, repeat this procedure again.");
     };
 
-} // namespace Frame
+} // namespace frame
 
-PhasesColdPull get_cold_pull_phase(fsm::BaseData fsm_base_data) {
-    return GetEnumFromPhaseIndex<PhasesColdPull>(fsm_base_data.GetPhase());
-}
-
-template <PhasesColdPull Phase, class Frame>
-struct FrameDefinition {
-    using FrameType = Frame;
-    static constexpr PhasesColdPull phase = Phase;
-};
-
-template <class Storage, class... T>
-struct FrameDefinitionList {
-    template <class F>
-    using FrameType = typename F::FrameType;
-
-    static_assert(Storage::template has_ideal_size_for<FrameType<T>...>());
-
-    static void create_frame(Storage &storage, PhasesColdPull phase, window_t *parent) {
-        auto f = [&]<typename FD> {
-            if (phase == FD::phase) {
-                storage.template create<typename FD::FrameType>(parent);
-            }
-        };
-        (f.template operator()<T>(), ...);
-    }
-
-    static void destroy_frame(Storage &storage, PhasesColdPull phase) {
-        auto f = [&]<typename FD> {
-            if (phase == FD::phase) {
-                storage.template destroy<typename FD::FrameType>();
-            }
-        };
-        (f.template operator()<T>(), ...);
-    }
-
-    static void update_frame(Storage &storage, PhasesColdPull phase, fsm::PhaseData data) {
-        auto f = [&]<typename FD> {
-            if (phase == FD::phase) {
-                storage.template as<typename FD::FrameType>()->update(data);
-            }
-        };
-        (f.template operator()<T>(), ...);
-    }
-};
-
+// Blank screen is needed to avoid short flicker of the lower screen when switching from Load filament dialog
+// to FramePreheat. There is short but noticable period where the underlaying screen is visible before
+// switch do next happens. If it's black it looks nice.
+// It goes from FrameLoadUnload -> FrameBlank -> Load-dialog -> FrameBlank -> FramePreheat.
 using Frames = FrameDefinitionList<ScreenColdPull::FrameStorage,
-    FrameDefinition<PhasesColdPull::introduction, Frame::Introduction>,
-    FrameDefinition<PhasesColdPull::prepare_filament, Frame::PrepareFilament>,
-    FrameDefinition<PhasesColdPull::blank_load, Frame::Blank>,
-    FrameDefinition<PhasesColdPull::blank_unload, Frame::Blank>,
-    FrameDefinition<PhasesColdPull::cool_down, Frame::CoolDown>,
-    FrameDefinition<PhasesColdPull::heat_up, Frame::HeatUp>,
-    FrameDefinition<PhasesColdPull::automatic_pull, Frame::AutomaticPull>,
-    FrameDefinition<PhasesColdPull::manual_pull, Frame::ManualPull>,
-    FrameDefinition<PhasesColdPull::pull_done, Frame::PullDone>>;
+    FrameDefinition<PhasesColdPull::introduction, frame::Introduction>,
+#if HAS_TOOLCHANGER()
+    FrameDefinition<PhasesColdPull::select_tool, frame::SelectTool>,
+    FrameDefinition<PhasesColdPull::pick_tool, frame::PickTool>,
+#endif
+#if HAS_MMU2()
+    FrameDefinition<PhasesColdPull::stop_mmu, frame::StopMMU>,
+#endif
+#if HAS_TOOLCHANGER() || HAS_MMU2()
+    FrameDefinition<PhasesColdPull::unload_ptfe, frame::UnloadFilamentPtfe>,
+    FrameDefinition<PhasesColdPull::load_ptfe, frame::LoadFilamentPtfe>,
+#endif
+    FrameDefinition<PhasesColdPull::prepare_filament, frame::PrepareFilament>,
+    FrameDefinition<PhasesColdPull::blank_load, common_frames::Blank>,
+    FrameDefinition<PhasesColdPull::blank_unload, common_frames::Blank>,
+    FrameDefinition<PhasesColdPull::cool_down, frame::CoolDown>,
+    FrameDefinition<PhasesColdPull::heat_up, frame::HeatUp>,
+    FrameDefinition<PhasesColdPull::automatic_pull, frame::AutomaticPull>,
+    FrameDefinition<PhasesColdPull::manual_pull, frame::ManualPull>,
+    FrameDefinition<PhasesColdPull::cleanup, frame::Cleanup>,
+    FrameDefinition<PhasesColdPull::pull_done, frame::PullDone>>;
 
 } // namespace
 
 ScreenColdPull::ScreenColdPull()
-    : AddSuperWindow<screen_t> {}
-    , header { this, _(text_header) }
-    , footer { this, 0, footer::Item::nozzle, footer::Item::bed, footer::Item::heatbreak_temp }
-    , radio { this, get_radio_frame(), PhasesColdPull::introduction }
-    , inner_frame { this, get_inner_frame() } {
-    ClrMenuTimeoutClose();
+    : ScreenFSM(text_header, ScreenColdPull::get_inner_frame_rect())
+    , radio { this, GuiDefaults::GetButtonRect(GuiDefaults::RectScreenBody), PhasesColdPull::introduction }
+    , footer { this, 0, footer::Item::nozzle, footer::Item::bed, footer::Item::heatbreak_temp } {
     CaptureNormalWindow(radio);
     create_frame();
-    instance = this;
 }
 
 ScreenColdPull::~ScreenColdPull() {
-    instance = nullptr;
     destroy_frame();
-    ReleaseCaptureOfNormalWindow();
-}
-
-ScreenColdPull *ScreenColdPull::GetInstance() { return instance; }
-
-void ScreenColdPull::Change(fsm::BaseData data) { do_change(data); }
-
-void ScreenColdPull::InitState(screen_init_variant var) {
-    if (auto fsm_base_data = var.GetFsmBaseData()) {
-        do_change(*fsm_base_data);
-    }
-}
-
-screen_init_variant ScreenColdPull::GetCurrentState() const {
-    screen_init_variant var;
-    var.SetFsmBaseData(fsm_base_data);
-    return var;
-}
-
-void ScreenColdPull::do_change(fsm::BaseData new_fsm_base_data) {
-    if (new_fsm_base_data.GetPhase() != fsm_base_data.GetPhase()) {
-        destroy_frame();
-        fsm_base_data = new_fsm_base_data;
-        create_frame();
-        radio.Change(get_cold_pull_phase(fsm_base_data));
-    } else {
-        fsm_base_data = new_fsm_base_data;
-    }
-    update_frame();
 }
 
 void ScreenColdPull::create_frame() {
-    Frames::create_frame(frame_storage, get_cold_pull_phase(fsm_base_data), &inner_frame);
+    Frames::create_frame(frame_storage, get_phase(), &inner_frame);
+    radio.Change(get_phase());
 }
 
 void ScreenColdPull::destroy_frame() {
-    Frames::destroy_frame(frame_storage, get_cold_pull_phase(fsm_base_data));
+    Frames::destroy_frame(frame_storage, get_phase());
 }
 
 void ScreenColdPull::update_frame() {
-    Frames::update_frame(frame_storage, get_cold_pull_phase(fsm_base_data), fsm_base_data.GetData());
+    Frames::update_frame(frame_storage, get_phase(), fsm_base_data.GetData());
 }

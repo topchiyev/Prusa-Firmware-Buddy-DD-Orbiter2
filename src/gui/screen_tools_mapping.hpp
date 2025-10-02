@@ -17,9 +17,9 @@
     #include <module/prusa/spool_join.hpp>
     #include <module/prusa/tool_mapper.hpp>
 #endif
-#include <screen_menu_filament_changeall.hpp>
+#include <multi_filament_change.hpp>
 
-class ToolsMappingBody : public AddSuperWindow<window_t> {
+class ToolsMappingBody : public window_t {
 public:
     ToolsMappingBody(window_t *parent, GCodeInfo &gcode_info);
 
@@ -50,7 +50,7 @@ public:
     static constexpr size_t max_item_rows { 5 };
     static constexpr size_t max_item_text_width { 15 }; // #. FILAM 1.23 // = max 13 chars
 
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 
 private:
     /// Used for when srolling up or down, expecting values +- 1 (+1 means go down/right, -1 means go up/left)
@@ -149,11 +149,8 @@ private:
     // refreshes lables within window texts to match current state of loaded filaments
     void refresh_physical_tool_filament_labels();
 
-    // builds default selection array for change all dialog so that physical tools try to load based on what the gcodes want to print with (that they're mapped to)
-    std::array<size_t, I_MI_FilamentSelect::max_I_MI_FilamentSelect_idx + 1> build_preselect_array();
-
-    // builds colour array for change all dialog so the colours shows up during load/change dialog
-    std::array<std::optional<filament::Colour>, I_MI_FilamentSelect::max_I_MI_FilamentSelect_idx + 1> build_color_array();
+    // builds default selection config for change all dialog so that physical tools try to load based on what the gcodes want to print with (that they're mapped to)
+    MultiFilamentChangeConfig build_changeall_config();
 
     SpoolJoin joiner;
     ToolMapper mapper;

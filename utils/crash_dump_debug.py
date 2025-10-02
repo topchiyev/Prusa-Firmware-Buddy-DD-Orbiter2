@@ -12,7 +12,7 @@ script_dir = Path(os.path.dirname(__file__))
 project_root_dir = script_dir / ".."
 project_root_dir = project_root_dir.resolve()
 
-crash_debug_version = "ab03f8b6fb6e3445c62fe3fa5f3263d2945d74ff"
+crash_debug_version = "22acef8c6e248db2f04f65eebf4c2b470f4010c2"
 
 if platform.system() == "Windows":
     crash_debug_path = f'{project_root_dir}/.dependencies/CrashDebug-{crash_debug_version}/bins/win32/CrashDebug'
@@ -56,7 +56,7 @@ if not os.path.isfile(args.gdb) and which(args.gdb) is None:
     exit(1)
 
 # setup command and launch debugger
-cmd = f'{args.gdb} {args.elf} -ex "set target-charset ASCII" -ex "target remote | {crash_debug_path} --elf {args.elf} --dump {args.dump}"'
+cmd = f'{args.gdb} {args.elf} -ex "set target-charset ASCII" -ex "target remote | \\"{crash_debug_path}\\" --elf \\"{args.elf}\\" --dump \\"{args.dump}\\""'
 cmd += f' -ex "source {project_root_dir}/utils/freertos-gdb-plugin/freertos-gdb-plugin.py"'
 print("Launching GDB with arguments:")
 print(cmd)

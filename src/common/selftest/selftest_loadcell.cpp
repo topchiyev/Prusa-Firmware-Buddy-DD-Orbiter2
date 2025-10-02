@@ -5,7 +5,6 @@
  */
 
 #include "selftest_loadcell.h"
-#include <guiconfig/wizard_config.hpp>
 #include "config_features.h" //EXTRUDER_AUTO_loadcell_TEMPERATURE
 #include "marlin_server.hpp"
 #include "selftest_log.hpp"
@@ -212,7 +211,7 @@ LoopResult CSelftestPart_Loadcell::stateAskAbort() {
 
 LoopResult CSelftestPart_Loadcell::stateTapCheckCountDownInit() {
     // Enable high precision and take a reference tare
-    loadcell.EnableHighPrecision();
+    loadcell_high_precision_enabler.emplace(loadcell);
     safe_delay(Z_FIRST_PROBE_DELAY);
     loadcell.WaitBarrier();
     loadcell.Tare(Loadcell::TareMode::Static);
@@ -260,14 +259,12 @@ LoopResult CSelftestPart_Loadcell::stateTapCheckInit() {
 LoopResult CSelftestPart_Loadcell::stateTapCheck() {
     if ((SelftestInstance().GetTime() - time_start_tap) >= rConfig.tap_timeout_ms) {
         log_info(Selftest, "%s user did not tap", rConfig.partname);
-        loadcell.DisableHighPrecision();
         return LoopResult::GoToMark0; // timeout, retry entire touch sequence
     }
 
     int32_t load = -1 * loadcell.get_tared_z_load(); // Positive when pushing the nozzle up
     bool pass = IsInClosedRange(load, rConfig.tap_min_load_ok, rConfig.tap_max_load_ok);
     if (pass) {
-        loadcell.DisableHighPrecision();
         log_info(Selftest, "%s tap check, load %dg successful in range <%d, %d>",
             rConfig.partname, static_cast<int>(load), static_cast<int>(rConfig.tap_min_load_ok),
             static_cast<int>(rConfig.tap_max_load_ok));
@@ -283,6 +280,8 @@ LoopResult CSelftestPart_Loadcell::stateTapCheck() {
 }
 
 LoopResult CSelftestPart_Loadcell::stateTapOk() {
+    loadcell_high_precision_enabler.reset();
+
     log_info(Selftest, "%s finished", rConfig.partname);
     IPartHandler::SetFsmPhase(PhasesSelftest::Loadcell_user_tap_ok);
     return LoopResult::RunNext;

@@ -15,14 +15,13 @@
 // Max Tau ~= 20*10^-12 * 50*10^3 = 1*10^-6 s ... about 1us
 
 #include "filament_sensor_photoelectric.hpp"
-#include "rtos_api.hpp"
 
 #include <device/board.h>
 
 void FSensorPhotoElectric::cycle() {
     // There are two printers that are using the FINDA - MK3.5 & MINI
     // MK3.5's sensor apparently has the logic inverted compared to MINI
-    const bool pin_readout = buddy::hw::fSensor.read() == (BOARD_IS_XBUDDY ? buddy::hw::Pin::State::low : buddy::hw::Pin::State::high);
+    const bool pin_readout = buddy::hw::fSensor.read() == (BOARD_IS_XBUDDY() ? buddy::hw::Pin::State::low : buddy::hw::Pin::State::high);
 
     switch (measure_phase) {
 

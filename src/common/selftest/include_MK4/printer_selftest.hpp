@@ -6,11 +6,6 @@
  */
 #pragma once
 
-#include "i_selftest.hpp"
-#include "selftest_part.hpp"
-#include "selftest_result_type.hpp"
-#include "config_features.h"
-
 typedef enum {
     stsIdle,
     stsStart,
@@ -21,16 +16,25 @@ typedef enum {
     stsWait_loadcell,
     stsZcalib,
     stsXAxis,
-    stsXAxisWithMotorDetection,
     stsYAxis,
     stsZAxis, // could not be first, printer can't home at front edges without steelsheet on
     stsMoveZup,
     stsWait_axes,
+
+    /// Mk3.9 has 200step XY motors, Mk4/S has 400step ones.
+    /// If the axis test fails, it might be because the user set the wrong printer type.
+    /// Let the user revise the printer setup
+    stsReviseSetupAfterAxes,
+
     stsHeaters_noz_ena,
     stsHeaters_bed_ena,
     stsHeaters,
     stsWait_heaters,
-    stsHotendSpecify,
+
+    /// If the heating test fails, it might be because the user set the wrong nozzle/hotend type
+    /// Let the user revise the printer setup
+    stsReviseSetupAfterHeaters,
+
     stsGears,
     stsFSensor_calibration,
     stsFSensor_flip_mmu_at_the_end,
@@ -53,16 +57,15 @@ enum SelftestMask_t : uint32_t {
     stmLoadcell = to_one_hot(stsLoadcell),
     stmWait_loadcell = to_one_hot(stsWait_loadcell),
     stmZcalib = to_one_hot(stsZcalib),
-    stmXAxis = to_one_hot(stsXAxis),
-    stmYAxis = to_one_hot(stsYAxis),
+    stmXAxis = to_one_hot(stsXAxis) | to_one_hot(stsReviseSetupAfterAxes),
+    stmYAxis = to_one_hot(stsYAxis) | to_one_hot(stsReviseSetupAfterAxes),
     stmZAxis = to_one_hot(stsZAxis),
     stmMoveZup = to_one_hot(stsMoveZup),
     stmXYAxis = stmXAxis | stmYAxis,
-    stmXYAxisWithMotorDetection = to_one_hot(stsXAxisWithMotorDetection) | stmYAxis,
     stmXYZAxis = stmXAxis | stmYAxis | stmZAxis,
     stmWait_axes = to_one_hot(stsWait_axes),
-    stmHeaters_noz = to_one_hot(stsHeaters) | to_one_hot(stsHeaters_noz_ena) | to_one_hot(stsHotendSpecify),
-    stmHeaters_bed = to_one_hot(stsHeaters) | to_one_hot(stsHeaters_bed_ena),
+    stmHeaters_noz = to_one_hot(stsHeaters) | to_one_hot(stsHeaters_noz_ena) | to_one_hot(stsReviseSetupAfterHeaters),
+    stmHeaters_bed = to_one_hot(stsHeaters) | to_one_hot(stsHeaters_bed_ena) | to_one_hot(stsReviseSetupAfterHeaters),
     stmHeaters = stmHeaters_bed | stmHeaters_noz,
     stmWait_heaters = to_one_hot(stsWait_heaters),
     stmFSensor = to_one_hot(stsFSensor_calibration),
@@ -70,41 +73,5 @@ enum SelftestMask_t : uint32_t {
     stmGears = to_one_hot(stsGears),
     stmSelftestStart = to_one_hot(stsSelftestStart),
     stmSelftestStop = to_one_hot(stsSelftestStop),
-    stmNet_status = to_one_hot(stsNet_status)
-};
-
-// class representing whole self-test
-class CSelftest : public ISelftest {
-public:
-    CSelftest();
-
-public:
-    virtual bool IsInProgress() const override;
-    virtual bool IsAborted() const override;
-    virtual bool Start(const uint64_t test_mask, const selftest::TestData test_data) override; // parent has no clue about SelftestMask_t
-    virtual void Loop() override;
-    virtual bool Abort() override;
-
-protected:
-    void phaseSelftestStart();
-    void restoreAfterSelftest();
-    virtual void next() override;
-    void phaseShowResult();
-    void phaseDidSelftestPass();
-
-protected:
-    SelftestState_t m_State;
-    SelftestMask_t m_Mask;
-    std::array<selftest::IPartHandler *, HOTENDS> pFans;
-    selftest::IPartHandler *pXAxis;
-    selftest::IPartHandler *pYAxis;
-    selftest::IPartHandler *pZAxis;
-    std::array<selftest::IPartHandler *, HOTENDS> pNozzles;
-    selftest::IPartHandler *pBed;
-    selftest::IPartHandler *pHotendSpecify;
-    std::array<selftest::IPartHandler *, HOTENDS> m_pLoadcell;
-    std::array<selftest::IPartHandler *, HOTENDS> pFSensor;
-    selftest::IPartHandler *pGearsCalib;
-
-    SelftestResult m_result;
+    stmNet_status = to_one_hot(stsNet_status),
 };

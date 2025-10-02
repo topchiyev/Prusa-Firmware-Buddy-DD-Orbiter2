@@ -6,12 +6,15 @@ def replace_characters(file_path):
     # Define the mapping of characters to be replaced
     replacements = {
         '’': "'",  # RIGHT SINGLE QUOTATION MARK
+        '“': "'",  # quotation mark
+        '”': "'",  # quotation mark
         '…': '...',  # HORIZONTAL ELLIPSIS
         '\u00A0': ' ',  # NO BREAK SPACE
         'µ': 'u',  # MICRO SIGN
         'μ': 'u',  # Another micro sign
         '　': ' ',  # Japanese " "
         '！': '!',  # Japanese !
+        '％': '%',  # Japanese %
         '＆': '&',  # Japanese &
         '（': '(',  # Japanese (
         '）': ')',  # Japanese )
@@ -65,13 +68,14 @@ def process_files_in_directory(directory):
 def main(folder_path):
     # Check if the provided folder path exists
     if not os.path.exists(folder_path):
-        print("Folder does not exist.")
+        print("ERROR: replace_unsupported_chars.py:", folder_path,
+              "folder does not exist.")
         return
 
     # Process files in the specified directory and its subdirectories
     process_files_in_directory(folder_path)
 
-    print("Character replacements completed successfully.")
+    print("Character replacements completed successfully...")
 
 
 if __name__ == "__main__":

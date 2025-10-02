@@ -6,12 +6,102 @@
 #include <option/has_mmu2.h>
 #include <option/has_toolchanger.h>
 #include <option/has_config_store_wo_backend.h>
+#include <option/has_touch.h>
+#include <sys.h>
 
 namespace config_store_ns {
 #if not HAS_CONFIG_STORE_WO_BACKEND()
-static_assert((sizeof(CurrentStore) + (aggregate_arity<CurrentStore>::size() - 1) * sizeof(journal::Backend::ItemHeader)) < (BANK_SIZE / 100) * 75, "EEPROM bank is almost full");
+static_assert((sizeof(CurrentStore) + aggregate_arity<CurrentStore>() * sizeof(journal::Backend::ItemHeader)) < (BANK_SIZE / 100) * 75, "EEPROM bank is almost full");
 static_assert(journal::has_unique_items<config_store_ns::CurrentStore>(), "Just added items are causing collisions with reserved backend IDs");
 #endif
+
+void CurrentStore::perform_config_check() {
+    /// Whether this is the first run of the printer after assembly/factory reset
+    [[maybe_unused]] const bool is_first_run = (config_store_init_result() == InitResult::cold_start);
+
+    // Do not show pritner setup screen if the user has run any selftests
+    // This is for backwards compatibility - we don't want to show the screen after the firmware update introducing it for already configured printers
+    if (selftest_result.get() != selftest_result.default_val) {
+        printer_setup_done.set(true);
+    }
+
+    // We cannot change a default value of config store items for backwards compatibility reasons.
+    // So this is a place to instead set them to something for new installations
+    if (is_first_run) {
+#if HAS_TOUCH()
+        touch_enabled.set(true);
+#endif
+
+#if PRINTER_IS_PRUSA_MK4()
+        static_assert(extended_printer_type_model[1] == PrinterModel::mk4s);
+        extended_printer_type.set(1);
+        hotend_type.set(HotendType::stock_with_sock);
+        nozzle_is_high_flow.set(1 << 0); // Bitset -> first and only nozzle
+
+#elif PRINTER_IS_PRUSA_XL()
+        // New XL printers have .4mm nozzles: BFW-5638
+        for (int i = 0; i < HOTENDS; i++) {
+            set_nozzle_diameter(i, 0.4f);
+        }
+
+#elif PRINTER_IS_PRUSA_MK3_5()
+        static_assert(extended_printer_type_model[1] == PrinterModel::mk3_5s);
+        extended_printer_type.set(1);
+
+#endif
+    }
+
+    // BFW-5486
+    // Auto-update is now enablablable only in develeoper mode
+    // There were some issues with people leaving this option on, then upgrading and having problems turning it off
+    if constexpr (!option::development_items) {
+        sys_fw_update_disable();
+    }
+
+    // First run -> the config store is empty -> we don't need to do any migrations from older versions
+    if (!is_first_run && config_version.get() != newest_config_version) {
+        perform_config_migrations();
+    }
+
+    config_version.set(newest_config_version);
+}
+
+namespace {
+    template <size_t new_version>
+    bool should_migrate() {
+        static_assert(CurrentStore::newest_config_version >= new_version);
+        return config_store().config_version.get() < new_version;
+    }
+} // namespace
+
+void CurrentStore::perform_config_migrations() {
+    // See the comment on the bottom of this function
+
+#if PRINTER_IS_PRUSA_MK4()
+    if (should_migrate<1>()) {
+        // We've introduced nozzle_is_high_flow in 6.2.0
+        // If the user upgrades from previous FW versions, we need to guess the HF nozleness based on whether he has MK4S or not
+        // MK4S+MMU is shipped and recommended without the HF nozzle, so exclude those
+
+        const auto model = PrinterModelInfo::current().model;
+        if ((model == PrinterModel::mk4s || model == PrinterModel::mk3_9s) && !is_mmu_rework.get()) {
+            // Bitset -> first and only nozzle
+            nozzle_is_high_flow.set(1 << 0);
+        }
+    }
+#endif
+
+    // To add a migration:
+    // - increment newest_config_version
+    // - add if(should_migrate<X>) { your migration code } at the END of this function
+    //    - the migrations have to be in an increasing order
+    //    - the X shall be the new incremented newest_config_version value
+    // - keep this comment on the BOTTOM of this function, so that it's visible when reviewing every new migration
+    //
+    // Don't confuse this with the config_store migrations.
+    // - config_store migrations are migrations on store item level (when the item structure changes and so on). They do not have access to the whole config_store/printer state.
+    // - migrations here are for the higher abstraction level
+}
 
 footer::Item CurrentStore::get_footer_setting([[maybe_unused]] uint8_t index) {
     switch (index) {
@@ -472,60 +562,12 @@ void CurrentStore::set_tool_offset(uint8_t index, ToolOffset value) {
 }
 #endif
 
-filament::Type CurrentStore::get_filament_type([[maybe_unused]] uint8_t index) {
-#if EXTRUDERS <= 1
-    assert(index == 0);
-    return filament_type_0.get();
-#else
-    switch (index) {
-    case 0:
-        return filament_type_0.get();
-    case 1:
-        return filament_type_1.get();
-    case 2:
-        return filament_type_2.get();
-    case 3:
-        return filament_type_3.get();
-    case 4:
-        return filament_type_4.get();
-    case 5:
-        return filament_type_5.get();
-    default:
-        assert(false && "invalid index");
-        return {};
-    }
-#endif
+FilamentType CurrentStore::get_filament_type([[maybe_unused]] uint8_t index) {
+    return loaded_filament_type.get(index);
 }
 
-void CurrentStore::set_filament_type([[maybe_unused]] uint8_t index, filament::Type value) {
-#if EXTRUDERS <= 1
-    assert(index == 0);
-    filament_type_0.set(value);
-#else
-    switch (index) {
-    case 0:
-        filament_type_0.set(value);
-        break;
-    case 1:
-        filament_type_1.set(value);
-        break;
-    case 2:
-        filament_type_2.set(value);
-        break;
-    case 3:
-        filament_type_3.set(value);
-        break;
-    case 4:
-        filament_type_4.set(value);
-        break;
-    case 5:
-        filament_type_5.set(value);
-        break;
-    default:
-        assert(false && "invalid index");
-        return;
-    }
-#endif
+void CurrentStore::set_filament_type(uint8_t index, FilamentType value) {
+    loaded_filament_type.set(index, value);
 }
 
 float CurrentStore::get_nozzle_diameter([[maybe_unused]] uint8_t index) {
@@ -741,6 +783,7 @@ void CurrentStore::set_selftest_result_tool(uint8_t index, SelftestTool value) {
 }
 #endif
 
+#if HAS_SHEET_PROFILES()
 Sheet CurrentStore::get_sheet(uint8_t index) {
     assert(index < config_store_ns::sheets_num);
     switch (index) {
@@ -798,6 +841,7 @@ void CurrentStore::set_sheet(uint8_t index, Sheet value) {
         return;
     }
 }
+#endif
 
 input_shaper::Config CurrentStore::get_input_shaper_config() {
     input_shaper::Config config;

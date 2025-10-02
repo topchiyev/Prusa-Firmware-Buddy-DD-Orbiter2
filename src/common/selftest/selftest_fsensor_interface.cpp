@@ -9,7 +9,7 @@
 #include "marlin_server.hpp"
 #include "selftest_part.hpp"
 #include "selftest_tool_helper.hpp"
-#if BOARD_IS_XLBUDDY
+#if BOARD_IS_XLBUDDY()
     #include "src/module/prusa/toolchanger.h"
 #endif
 #include <config_store/store_instance.hpp>
@@ -72,7 +72,7 @@ TestReturn phaseFSensor(const ToolMask tool_mask, std::array<IPartHandler *, HOT
             continue; // Test successful for this tool continue to next tool
         }
     }
-    FSM_CHANGE_WITH_DATA__LOGGING(IPartHandler::GetFsmPhase(), staticResult.Serialize());
+    marlin_server::fsm_change(IPartHandler::GetFsmPhase(), staticResult.Serialize());
 
     if (in_progress) {
         return true;

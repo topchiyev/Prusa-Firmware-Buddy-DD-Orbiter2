@@ -5,10 +5,13 @@
 
 #pragma once
 
-#include "marlin_server_shared.h"
-#include "client_fsm_types.h"
 #include <optional>
 #include <array>
+#include <general_response.hpp>
+
+#include "marlin_server_shared.h"
+#include "client_fsm_types.h"
+#include <general_response.hpp>
 
 /*
  *  Timers    - description                                - measuring time during
@@ -35,14 +38,7 @@ public:
     static constexpr const int INVALID_TEMPERATURE = std::numeric_limits<int>::min();
     static constexpr int64_t expiration_deadline_sec = 600 * 3600;
     static constexpr int64_t expiration_warning_sec = 500 * 3600;
-    static constexpr std::array<filament::Type, 6> filaments_requiring_filtration = {
-        filament::Type::ABS,
-        filament::Type::ASA,
-        filament::Type::PC,
-        filament::Type::FLEX,
-        filament::Type::HIPS,
-        filament::Type::PP
-    };
+    static constexpr const int MIN_FAN_PWM = 50;
 
     Enclosure();
     int getEnclosureTemperature();
@@ -87,6 +83,11 @@ public:
      *  Reset filter expiration timer and both flags for warning and expiration dialogs
      */
     void resetFilterTimer();
+
+    /**
+     *  Checks filter expiration timer. On 500th & 600th hour of printing notification to GUI is sent
+     */
+    void checkFilterExpiration();
 
     // FLAG GETTER FUNCTION
     inline bool isEnabled() const { return persistent_flags & PERSISTENT::ENABLED; }
@@ -174,11 +175,6 @@ private:
      *  @return True if there is at least one filament used, which is aligable for post print filtration
      */
     bool isPostPrintFiltrationNeeded();
-
-    /**
-     *  Update and check filter expiration timer. On 500. & 600. hour of printing notification to GUI is sent
-     */
-    std::optional<WarningType> updateFilterExpirationTimer(uint32_t delta_sec);
 
     /**
      *  Timing validation period of recorded temperature: 5 minutes

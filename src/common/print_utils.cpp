@@ -5,16 +5,17 @@
 #include "../Marlin/src/gcode/lcd/M73_PE.h"
 #include "../lib/Marlin/Marlin/src/module/temperature.h"
 #include "marlin_client.hpp"
-#include "media.hpp"
 #include "marlin_server.hpp"
 #include "unique_file_ptr.hpp"
 #include "timing.h"
 #include "unistd.h"
 #include "str_utils.hpp"
 #include "tasks.hpp"
+#include <usb_host.h>
 #include <state/printer_state.hpp>
 #include <transfers/transfer.hpp>
 #include <feature/prusa/restore_z.h>
+#include <gcode/gcode_reader_restore_info.hpp>
 
 #include <option/bootloader.h>
 #include <option/has_mmu2.h>
@@ -31,6 +32,8 @@
 #endif
 
 #if ENABLED(POWER_PANIC)
+    #include "transfers/transfer.hpp"
+
 static bool file_exists(const char *filename) {
     if (unique_file_ptr(fopen(filename, "r"))) {
         return true;
@@ -94,23 +97,11 @@ void run_once_after_boot() {
             reset_pp = false;
         }
     #endif
-        if (!reset_pp) {
+        if (!reset_pp && file_exists(power_panic::stored_media_path()) && usb_host::is_media_inserted_since_startup()) {
             // load the panic data and setup print progress early
-            bool auto_recover = power_panic::setup_auto_recover_check();
-            const char *path = power_panic::stored_media_path();
-            bool resume = false;
-            bool path_exists = file_exists(path);
-            if (path_exists) {
-                resume = true;
-            } else if (!path_exists) {
-                // TODO: ask about wrong stick. do not clear the state yet!
-                reset_pp = false;
-            }
-            if (resume) {
-                // resume and bypass g-code autostart
-                power_panic::resume_print(auto_recover);
-                return;
-            }
+            // resume and bypass g-code autostart
+            power_panic::resume_print();
+            return;
         }
         if (reset_pp) {
             power_panic::reset();
@@ -122,7 +113,7 @@ void run_once_after_boot() {
     static constexpr const char *autostart_filename = "/usb/AUTO.GCO";
     if (access(autostart_filename, F_OK) == 0) {
         // call directly marlin server start print. This function is not safe
-        marlin_server::print_start(autostart_filename, marlin_server::PreviewSkipIfAble::all);
+        marlin_server::print_start(autostart_filename, GCodeReaderPosition(), marlin_server::PreviewSkipIfAble::all);
         oProgressData.mInit();
     }
 }
@@ -133,14 +124,14 @@ void print_utils_loop() {
 
     static uint32_t current_time = ticks_ms();
 
-    if (!TaskDeps::check(TaskDeps::Dependency::usb_and_temp_ready) && ticks_ms() >= current_time + rescan_delay) {
+    if (!TaskDeps::check(TaskDeps::Dependency::usb_temp_gui_ready) && ticks_ms() >= current_time + rescan_delay) {
         current_time += rescan_delay;
-        if (media_get_state() == media_state_INSERTED && thermalManager.temperatures_ready()) {
+        if (usb_host::is_media_inserted() && thermalManager.temperatures_ready() && TaskDeps::check(TaskDeps::Dependency::gui_ready)) {
             run_once_after_boot();
-            TaskDeps::provide(TaskDeps::Dependency::usb_and_temp_ready);
+            TaskDeps::provide(TaskDeps::Dependency::usb_temp_gui_ready);
         } else if (current_time > max_rescan_time || !marlin_server::printer_idle()) {
             // no longer attempt to run the autostart sequence
-            TaskDeps::provide(TaskDeps::Dependency::usb_and_temp_ready);
+            TaskDeps::provide(TaskDeps::Dependency::usb_temp_gui_ready);
         }
     }
 }
@@ -153,7 +144,7 @@ void print_begin(const char *filename, marlin_server::PreviewSkipIfAble skip_pre
 }
 
 DeleteResult remove_file(const char *path) {
-    if (marlin_vars()->media_SFN_path.equals(path)) {
+    if (marlin_vars().media_SFN_path.equals(path)) {
         switch (printer_state::get_state()) {
         case printer_state::DeviceState::Finished:
         case printer_state::DeviceState::Stopped:
@@ -196,5 +187,19 @@ uint8_t get_num_of_enabled_tools() {
     return MMU2::mmu2.Enabled() ? EXTRUDERS : 1; // MMU has all slots available
 #else
     return EXTRUDERS;
+#endif
+}
+
+bool is_tool_enabled(uint8_t tool) {
+    if (tool >= EXTRUDERS) {
+        return false;
+    }
+
+#if HAS_TOOLCHANGER()
+    return prusa_toolchanger.getTool(tool).is_enabled();
+#elif HAS_MMU2()
+    return tool == 0 || MMU2::mmu2.Enabled();
+#else
+    return true;
 #endif
 }

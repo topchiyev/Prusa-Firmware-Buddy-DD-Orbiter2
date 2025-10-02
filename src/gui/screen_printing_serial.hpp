@@ -7,7 +7,7 @@
 #include "window_text.hpp"
 #include <array>
 
-class screen_printing_serial_data_t : public AddSuperWindow<ScreenPrintingModel> {
+class screen_printing_serial_data_t : public ScreenPrintingModel {
     static constexpr const char *caption = N_("SERIAL PRINTING");
 
     window_icon_t octo_icon;
@@ -26,7 +26,7 @@ public:
     screen_printing_serial_data_t();
 
 protected:
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 
 private:
     virtual void stopAction() override;

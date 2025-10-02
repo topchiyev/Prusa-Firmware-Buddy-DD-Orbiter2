@@ -3,7 +3,6 @@ include(ExternalProject)
 include(cmake/Utilities.cmake)
 include(cmake/GetGitRevisionDescription.cmake)
 include(cmake/ProjectVersion.cmake)
-include(cmake/CheckRemotes.cmake)
 include(cmake/Littlefs.cmake)
 include(cmake/Options.cmake)
 
@@ -47,13 +46,16 @@ endif()
 # eclipse sets those variables, so lets just use them so we don't get a warning about unused
 # variables
 set(unused "${CMAKE_VERBOSE_MAKEFILE} ${CMAKE_RULE_MESSAGES}")
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 
 # enable all warnings (well, not all, but some)
 add_compile_options(-Wall -Wsign-compare)
 
 # make all paths stored inside firmware relative
 add_compile_options(-ffile-prefix-map=${CMAKE_SOURCE_DIR}=.)
+
+# make the builds reproducible
+add_compile_options(-frandom-seed=BuddyFW)
 
 add_compile_options(
   $<$<COMPILE_LANGUAGE:CXX>:-Wno-register> $<$<COMPILE_LANGUAGE:CXX>:-Wno-volatile>
@@ -64,10 +66,6 @@ add_compile_options(
 if(CUSTOM_COMPILE_OPTIONS)
   string(REPLACE " " ";" CUSTOM_COMPILE_OPTIONS "${CUSTOM_COMPILE_OPTIONS}")
   add_compile_options(${CUSTOM_COMPILE_OPTIONS})
-endif()
-if(PRESET_COMPILE_OPTIONS)
-  string(REPLACE " " ";" PRESET_COMPILE_OPTIONS "${PRESET_COMPILE_OPTIONS}")
-  add_compile_options(${PRESET_COMPILE_OPTIONS})
 endif()
 
 # find bootloader.bin location
@@ -193,7 +191,6 @@ target_compile_definitions(
             MARLIN_DISABLE_INFINITE_LOOP
             PROCESS_CUSTOM_GCODE
             HAS_MARLIN=$<BOOL:${HAS_MARLIN}>
-            _EXTUI
   )
 
 if(MCU MATCHES "STM32")
@@ -205,10 +202,6 @@ if(MCU MATCHES "STM32F4")
 elseif(MCU MATCHES "STM32G0")
   target_compile_definitions(BuddyHeaders INTERFACE STM32G0 STM32G0xx)
 endif()
-
-add_library(BuddyLogging INTERFACE)
-target_include_directories(BuddyLogging INTERFACE src/logging)
-target_link_libraries(BuddyHeaders INTERFACE BuddyLogging)
 
 #
 # Configure Arduino Core
@@ -271,14 +264,14 @@ target_link_libraries(FreeRTOS_Config INTERFACE Segger BuddyHeaders)
 #
 
 add_library(LwIP_Config INTERFACE)
-target_link_libraries(LwIP_Config INTERFACE BuddyHeaders BuddyLogging)
+target_link_libraries(LwIP_Config INTERFACE BuddyHeaders logging)
 
 #
 # Configure FatFs
 #
 
 add_library(FatFs_Config INTERFACE)
-target_link_libraries(FatFs_Config INTERFACE BuddyHeaders BuddyLogging STM32::USBHost)
+target_link_libraries(FatFs_Config INTERFACE BuddyHeaders logging STM32::USBHost)
 
 #
 # Configure Marlin
@@ -337,7 +330,7 @@ if(CMAKE_CROSSCOMPILING)
   add_link_options(${MCU_FLAGS})
 
   # better FreeRTOS support
-  add_link_options(-Wl,--undefined=uxTopUsedPriority,--undefined=init_task)
+  add_link_options(-Wl,--undefined=init_task)
 
   # split and gc sections
   add_compile_options(-ffunction-sections -fdata-sections)
@@ -408,11 +401,6 @@ if(BOARD MATCHES ".*BUDDY" AND HAS_PUPPIES_BOOTLOADER)
   string(TOLOWER "${CMAKE_BUILD_TYPE}" CMAKE_BUILD_TYPE_lower)
   string(TOLOWER "${PRINTER}" PRINTER_lower)
 
-  if(PRINTER STREQUAL "XL" AND BOARD_VERSION VERSION_EQUAL "0.4.0")
-    set(dwarf_version_suffix "-04")
-    set(modular_bed_version_suffix "-06")
-  endif()
-
   if(NOT DWARF_BINARY_PATH AND HAS_DWARF)
     get_filename_component(
       DWARF_BINARY_DIR "${DWARF_BINARY_DIR}" REALPATH BASE_DIR "${CMAKE_SOURCE_DIR}"
@@ -422,8 +410,7 @@ if(BOARD MATCHES ".*BUDDY" AND HAS_PUPPIES_BOOTLOADER)
       dwarf
       SOURCE_DIR "${DWARF_SOURCE_DIR}"
       BINARY_DIR "${DWARF_BINARY_DIR}"
-      CMAKE_ARGS --preset xl-dwarf${dwarf_version_suffix}_${CMAKE_BUILD_TYPE_lower}_boot -B
-                 "${DWARF_BINARY_DIR}"
+      CMAKE_ARGS --preset xl-dwarf_${CMAKE_BUILD_TYPE_lower}_boot -B "${DWARF_BINARY_DIR}"
       INSTALL_COMMAND ${CMAKE_COMMAND} -E echo "Skipping install step"
       BUILD_BYPRODUCTS "${DWARF_BINARY_PATH}" "${DWARF_BINARY_DIR}/firmware"
       STEP_TARGETS build
@@ -444,10 +431,8 @@ if(BOARD MATCHES ".*BUDDY" AND HAS_PUPPIES_BOOTLOADER)
       modularbed
       SOURCE_DIR "${MODULARBED_SOURCE_DIR}"
       BINARY_DIR "${MODULARBED_BINARY_DIR}"
-      CMAKE_ARGS
-        --preset
-        ${PRINTER_lower}-modularbed${modular_bed_version_suffix}_${CMAKE_BUILD_TYPE_lower}_boot -B
-        "${MODULARBED_BINARY_DIR}"
+      CMAKE_ARGS --preset ${PRINTER_lower}-modularbed_${CMAKE_BUILD_TYPE_lower}_boot -B
+                 "${MODULARBED_BINARY_DIR}"
       INSTALL_COMMAND ${CMAKE_COMMAND} -E echo "Skipping install step"
       BUILD_BYPRODUCTS "${MODULARBED_BINARY_PATH}" "${MODULARBED_BINARY_DIR}/firmware"
       STEP_TARGETS build
@@ -488,7 +473,8 @@ target_compile_options(
   PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-Wextra>
           $<$<COMPILE_LANGUAGE:CXX>:-Wno-expansion-to-defined>
           $<$<COMPILE_LANGUAGE:CXX>:-Wno-format-zero-length>
-          $<$<COMPILE_LANGUAGE:CXX>:-Wnon-virtual-dtor>
+          $<$<COMPILE_LANGUAGE:CXX>:-Wno-non-virtual-dtor>
+          $<$<COMPILE_LANGUAGE:CXX>:-Werror=delete-non-virtual-dtor>
           $<$<COMPILE_LANGUAGE:CXX>:-Wduplicated-cond>
           $<$<COMPILE_LANGUAGE:CXX>:-Wlogical-op>
           $<$<COMPILE_LANGUAGE:CXX>:-Wnull-dereference>
@@ -539,7 +525,7 @@ report_size(firmware)
 
 add_link_dependency(firmware "${LINKER_SCRIPT}")
 
-# generate .bbf version if requested
+# generate bbf if needed
 if(GENERATE_BBF)
   message(STATUS "Configured to generate .bbf version of the firmware.")
   message(STATUS "Signing Key: ${SIGNING_KEY}")
@@ -580,35 +566,11 @@ if(GENERATE_BBF)
     "${PRINTER_SUBVERSION}"
     SIGNING_KEY
     "${SIGNING_KEY}"
-    BBF_VERSION
-    "2"
     RESOURCE_IMAGES
     ${resource_images}
     RESOURCE_IMAGE_NAMES
     ${resource_image_names}
     )
-
-  if(PRINTER STREQUAL "MINI")
-    pack_firmware(
-      firmware
-      FW_VERSION
-      "${PROJECT_VERSION_FULL}"
-      BUILD_NUMBER
-      "${BUILD_NUMBER}"
-      PRINTER_TYPE
-      "${PRINTER_TYPE}"
-      PRINTER_VERSION
-      "${PRINTER_VERSION}"
-      PRINTER_SUBVERSION
-      "${PRINTER_SUBVERSION}"
-      SIGNING_KEY
-      "${SIGNING_KEY}"
-      BBF_VERSION
-      "1"
-      OUTPUT_PATH
-      "firmware_update_pre_4.4.bbf"
-      )
-  endif()
 
 elseif(SIGNING_KEY)
   message(WARNING "SIGNING_KEY specified but BBF generation is not enabled.")
@@ -639,17 +601,12 @@ if(GENERATE_DFU)
 endif()
 
 target_include_directories(
-  firmware
-  PRIVATE src/lang
-          src/hw
-          src/segger
-          src/logging
-          src/syslog
-          src/mmu2
-          include/mbedtls
+  firmware PRIVATE src/lang src/hw src/segger src/syslog src/mmu2 include/mbedtls
   )
 
-target_link_libraries(firmware PRIVATE BuddyHeaders Segger printf::printf CrashCatcher)
+target_link_libraries(
+  firmware PRIVATE BuddyHeaders Segger printf::printf CrashCatcher marlin_server_types SG14
+  )
 
 if(BOARD MATCHES "BUDDY")
   target_link_libraries(
@@ -660,7 +617,6 @@ if(BOARD MATCHES "BUDDY")
             Arduino::TMCStepper
             LwIP
             FatFs
-            flasher
             littlefs
             STM32::USBHost
             inih::inih

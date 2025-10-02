@@ -1,19 +1,21 @@
 #pragma once
 
-#include <common/freertos_mutex.hpp>
+#include <freertos/mutex.hpp>
 #include <atomic>
+#include <limits>
+#include <printers.h>
 
 #ifndef UNITTESTS
     #include "usbh_core.h"
     #include "usbh_msc.h"
 #endif
 
-#if !PRINTER_IS_PRUSA_MINI /* MINI doesn't have enough RAM, sorry MINI */
+#if !PRINTER_IS_PRUSA_MINI() /* MINI doesn't have enough RAM, sorry MINI */
     #define USBH_MSC_READAHEAD
     // #ifdef _DEBUG
     #define USBH_MSC_READAHEAD_STATISTICS
 // #endif
-#endif /* !PRINTER_IS_PRUSA_MINI */
+#endif /* !PRINTER_IS_PRUSA_MINI() */
 
 // Task handle of the process for executing the r/w MSC operations
 extern osThreadId USBH_MSC_WorkerTaskHandle;
@@ -47,7 +49,8 @@ struct UsbhMscRequest {
 
 USBH_StatusTypeDef usbh_msc_submit_request(UsbhMscRequest *);
 
-#define USBH_MSC_RW_MAX_DELAY (10000 / portTICK_PERIOD_MS)
+#define USBH_MSC_RW_MAX_DELAY_MS (10000)
+#define USBH_MSC_RW_MAX_DELAY    (USBH_MSC_RW_MAX_DELAY_MS / portTICK_PERIOD_MS)
 
 #ifdef USBH_MSC_READAHEAD
 struct UsbhMscReadahead {

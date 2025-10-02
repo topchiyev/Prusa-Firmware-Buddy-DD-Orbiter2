@@ -2,11 +2,12 @@
 #include <unistd.h>
 
 #include "screen_print_preview.hpp"
-#include "log.h"
+#include <logging/log.hpp>
 #include "marlin_client.hpp"
 #include "filament_sensors_handler.hpp"
 #include <stdarg.h>
 #include "sound.hpp"
+#include "img_resources.hpp"
 #include "ScreenHandler.hpp"
 #include "screen_printing.hpp"
 #include "print_utils.hpp"
@@ -27,23 +28,13 @@ ScreenPrintPreview::ScreenPrintPreview()
     , gcode_description(this)
     , thumbnail(this, GuiDefaults::PreviewThumbnailRect) {
 
-    super::ClrMenuTimeoutClose();
+    ClrMenuTimeoutClose();
 
     //  this MakeRAM is safe - gcode_file_name is set to vars->media_LFN, which is statically allocated in RAM
     title_text.SetText(string_view_utf8::MakeRAM((const uint8_t *)gcode.GetGcodeFilename()));
 
     CaptureNormalWindow(radio);
-    ths = this;
 }
-
-ScreenPrintPreview::~ScreenPrintPreview() {
-    ths = nullptr;
-}
-
-// static variables and member functions
-ScreenPrintPreview *ScreenPrintPreview::ths = nullptr;
-
-ScreenPrintPreview *ScreenPrintPreview::GetInstance() { return ths; }
 
 void ScreenPrintPreview::Change(fsm::BaseData data) {
     auto old_phase = phase;
@@ -61,16 +52,16 @@ void ScreenPrintPreview::Change(fsm::BaseData data) {
     }
 #if HAS_TOOLCHANGER() || HAS_MMU2()
     if (phase != PhasesPrintPreview::tools_mapping) {
-        spool_join.reset();
+        tools_mapping.reset();
         header.set_show_bed_info(false);
     }
 #endif
 
-    const auto makeMsgBox = [this](string_view_utf8 caption, string_view_utf8 text, const img::Resource &icon = img::warning_16x16) {
-        return make_static_unique_ptr<MsgBoxTitled>(&msgBoxMemSpace, GuiDefaults::RectScreenNoHeader, Responses_NONE, 0, nullptr, text, is_multiline::yes, caption, &icon, is_closed_on_click_t::no);
+    const auto makeMsgBox = [this](const string_view_utf8 &caption, string_view_utf8 text, const img::Resource &icon = img::warning_16x16) {
+        return make_msgbox<MsgBoxTitled>(GuiDefaults::RectScreenNoHeader, Responses_NONE, 0, nullptr, text, is_multiline::yes, caption, &icon, is_closed_on_click_t::no);
     };
-    const auto makeMsgBoxWait = [this](string_view_utf8 text) {
-        return make_static_unique_ptr<MsgBoxIconnedWait>(&msgBoxMemSpace, GuiDefaults::RectScreenNoHeader, Responses_NONE, 0, nullptr, text, is_multiline::yes);
+    const auto makeMsgBoxWait = [this](const string_view_utf8 &text) {
+        return make_msgbox<MsgBoxIconnedWait>(GuiDefaults::RectScreenNoHeader, Responses_NONE, 0, nullptr, text, is_multiline::yes);
     };
 
     switch (phase) {
@@ -101,7 +92,7 @@ void ScreenPrintPreview::Change(fsm::BaseData data) {
 
     case PhasesPrintPreview::wrong_printer:
     case PhasesPrintPreview::wrong_printer_abort:
-        pMsgbox = make_static_unique_ptr<MsgBoxInvalidPrinter>(&msgBoxMemSpace, GuiDefaults::RectScreenNoHeader, _(label_wrong_printer), &img::warning_16x16);
+        pMsgbox = make_msgbox<MsgBoxInvalidPrinter>(GuiDefaults::RectScreenNoHeader, _(label_wrong_printer), &img::warning_16x16);
         break;
 
     case PhasesPrintPreview::filament_not_inserted:
@@ -154,7 +145,7 @@ void ScreenPrintPreview::show_main_dialog() {
     radio.Show();
     title_text.Show();
     CaptureNormalWindow(radio);
-#if BOARD_IS_XBUDDY or BOARD_IS_XLBUDDY
+#if BOARD_IS_XBUDDY() or BOARD_IS_XLBUDDY()
     header.SetText(_("PRINT"));
 #endif
 }
@@ -167,12 +158,12 @@ void ScreenPrintPreview::show_tools_mapping() {
     }
     #endif
 
-    tools_mapping = make_static_unique_ptr<ToolsMappingBody>(&msgBoxMemSpace, this, gcode);
+    tools_mapping = make_msgbox<ToolsMappingBody>(this, gcode);
     CaptureNormalWindow(*tools_mapping);
     tools_mapping->Show();
     tools_mapping->Invalidate();
 
-    #if BOARD_IS_XBUDDY or BOARD_IS_XLBUDDY
+    #if BOARD_IS_XBUDDY() or BOARD_IS_XLBUDDY()
         #if not HAS_MMU2()
     header.SetText(_("TOOLS MAPPING"));
         #else
@@ -184,7 +175,7 @@ void ScreenPrintPreview::show_tools_mapping() {
 #endif
 }
 
-void ScreenPrintPreview::windowEvent(EventLock /*has private ctor*/, [[maybe_unused]] window_t *sender, [[maybe_unused]] GUI_event_t event, [[maybe_unused]] void *param) {
+void ScreenPrintPreview::windowEvent([[maybe_unused]] window_t *sender, [[maybe_unused]] GUI_event_t event, [[maybe_unused]] void *param) {
     switch (event) {
 
         // Catch event when USB is removed

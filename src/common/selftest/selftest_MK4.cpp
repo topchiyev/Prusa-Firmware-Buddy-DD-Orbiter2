@@ -29,6 +29,7 @@
 #include "selftest_fsensor_config.hpp"
 #include "selftest_gears_config.hpp"
 #include "selftest_gears.hpp"
+#include "selftest_revise_printer_setup.hpp"
 #include "calibration_z.hpp"
 #include "fanctl.hpp"
 #include "timing.h"
@@ -37,6 +38,8 @@
 
 #include <filament_sensors_handler.hpp>
 #include <config_store/store_instance.hpp>
+#include "i_selftest.hpp"
+#include <option/has_switched_fan_test.h>
 
 using namespace selftest;
 
@@ -67,39 +70,43 @@ static constexpr SelftestFansConfig fans_configs[] = {
             ///@note Datasheet says 5900 +-10%, but that is without any fan shroud.
             ///  Blocked fan increases its RPMs over 7000.
             ///  With MK4 shroud the values can be 6400 or so.
-            .rpm_min = 5300,
+            .rpm_min = 5130,
             .rpm_max = 6799,
         },
+        .print_fan_40pct = benevolent_fan_config,
         .heatbreak_fan = {
             .rpm_min = 6800,
             .rpm_max = 8700,
         },
     },
 };
+
+#if HAS_SWITCHED_FAN_TEST()
 static_assert(fans_configs[0].print_fan.rpm_max < fans_configs[0].heatbreak_fan.rpm_min, "These cannot overlap for switched fan detection.");
+#endif /* HAS_SWITCHED_FAN_TEST() */
 
 // reads data from eeprom, cannot be constexpr
 const AxisConfig_t selftest::Config_XAxis = {
     .partname = "X-Axis",
-    .length = X_MAX_POS,
+    .length = X_MAX_LENGTH,
     .fr_table_fw = XYfr_table,
     .fr_table_bw = XYfr_table,
-    .length_min = X_MAX_POS,
-    .length_max = X_MAX_POS + X_END_GAP,
+    .length_min = X_MAX_LENGTH,
+    .length_max = X_MAX_LENGTH + X_END_GAP,
     .axis = X_AXIS,
     .steps = xy_fr_table_size,
     .movement_dir = 1,
-    .park = false,
-    .park_pos = 0,
+    .park = true,
+    .park_pos = 125, // park in the middle to not hit stuff in enclosure (BFW-5966)
 }; // MINI has movement_dir -1
 
 const AxisConfig_t selftest::Config_YAxis = {
     .partname = "Y-Axis",
-    .length = Y_MAX_POS,
+    .length = Y_MAX_LENGTH,
     .fr_table_fw = XYfr_table,
     .fr_table_bw = XYfr_table,
-    .length_min = Y_MAX_POS,
-    .length_max = Y_MAX_POS + Y_END_GAP,
+    .length_min = Y_MAX_LENGTH,
+    .length_max = Y_MAX_LENGTH + Y_END_GAP,
     .axis = Y_AXIS,
     .steps = xy_fr_table_size,
     .movement_dir = 1,
@@ -150,11 +157,6 @@ static constexpr HeaterConfig_t Config_HeaterNozzle[] = {
             { HotendType::stock_with_sock, -20 },
             { HotendType::e3d_revo, -127 }, // Not supported on this printer
         },
-#if NOZZLE_TYPE_SUPPORT()
-        .nozzle_type_temp_offsets = EnumArray<NozzleType, int8_t, NozzleType::_cnt> {
-            { NozzleType::Normal, 0 },
-        },
-#endif
     }
 };
 
@@ -210,7 +212,41 @@ static constexpr std::array<const FSensorConfig_t, HOTENDS> Config_FSensorMMU = 
 
 static constexpr SelftestGearsConfig gears_config = { .feedrate = 8 };
 
-static constexpr HotendSpecifyConfig hotend_config = { .partname = "Hotend" };
+// class representing whole self-test
+class CSelftest : public ISelftest {
+public:
+    CSelftest();
+
+public:
+    virtual bool IsInProgress() const override;
+    virtual bool IsAborted() const override;
+    virtual bool Start(const uint64_t test_mask, const selftest::TestData test_data) override; // parent has no clue about SelftestMask_t
+    virtual void Loop() override;
+    virtual bool Abort() override;
+
+protected:
+    void phaseSelftestStart();
+    void restoreAfterSelftest();
+    virtual void next() override;
+    void phaseShowResult();
+    void phaseDidSelftestPass();
+
+protected:
+    SelftestState_t m_State;
+    SelftestMask_t m_Mask;
+    std::array<selftest::IPartHandler *, HOTENDS> pFans;
+    selftest::IPartHandler *pXAxis;
+    selftest::IPartHandler *pYAxis;
+    selftest::IPartHandler *pZAxis;
+    std::array<selftest::IPartHandler *, HOTENDS> pNozzles;
+    selftest::IPartHandler *pBed;
+    selftest::IPartHandler *pHotendSpecify;
+    std::array<selftest::IPartHandler *, HOTENDS> m_pLoadcell;
+    std::array<selftest::IPartHandler *, HOTENDS> pFSensor;
+    selftest::IPartHandler *pGearsCalib;
+
+    SelftestResult m_result;
+};
 
 CSelftest::CSelftest()
     : m_State(stsIdle)
@@ -218,8 +254,7 @@ CSelftest::CSelftest()
     , pXAxis(nullptr)
     , pYAxis(nullptr)
     , pZAxis(nullptr)
-    , pBed(nullptr)
-    , pHotendSpecify(nullptr) {
+    , pBed(nullptr) {
 }
 
 bool CSelftest::IsInProgress() const {
@@ -252,12 +287,7 @@ bool CSelftest::Start(const uint64_t test_mask, [[maybe_unused]] const TestData 
 
     uint32_t full_test_check_mask = stmFans | stmXYZAxis | stmHeaters | stmLoadcell | stmFSensor;
     if ((full_test_check_mask & test_mask) == full_test_check_mask) {
-        m_Mask = (SelftestMask_t)(m_Mask | to_one_hot(stsXAxisWithMotorDetection));
-    }
-
-    // cannot have both stsXAxisWithMotorDetection and stsXAxis
-    if (m_Mask & to_one_hot(stsXAxisWithMotorDetection)) {
-        m_Mask = (SelftestMask_t)(m_Mask & ~to_one_hot(stsXAxis));
+        m_Mask = (SelftestMask_t)(m_Mask | to_one_hot(stsXAxis));
     }
 
     m_State = stsStart;
@@ -318,12 +348,6 @@ void CSelftest::Loop() {
         }
         break;
     }
-    case stsXAxisWithMotorDetection: {
-        if (selftest::phaseAxis(pXAxis, Config_XAxis, Separate::no, Detect200StepMotors::yes)) {
-            return;
-        }
-        break;
-    }
     case stsYAxis: {
         if (selftest::phaseAxis(pYAxis, Config_YAxis, Separate::no)) {
             return;
@@ -346,6 +370,30 @@ void CSelftest::Loop() {
             return;
         }
         break;
+
+    case stsReviseSetupAfterAxes:
+        m_result = config_store().selftest_result.get();
+        if (m_result.xaxis == TestResult_Failed || m_result.yaxis == TestResult_Failed) {
+            switch (phase_revise_printer_setup()) {
+
+            case RevisePrinterSetupResult::running:
+                return;
+
+            case RevisePrinterSetupResult::do_not_retry:
+                break;
+
+            case RevisePrinterSetupResult::retry:
+                m_result.xaxis = TestResult_Unknown;
+                m_result.yaxis = TestResult_Unknown;
+                m_result.zaxis = TestResult_Unknown;
+                config_store().selftest_result.set(m_result);
+
+                m_State = stsXAxis;
+                return;
+            }
+        }
+        break;
+
     case stsHeaters_noz_ena:
         selftest::phaseHeaters_noz_ena(pNozzles, Config_HeaterNozzle);
         break;
@@ -358,22 +406,48 @@ void CSelftest::Loop() {
             return;
         }
         break;
+
     case stsWait_heaters:
         if (phaseWait()) {
             return;
         }
         break;
-    case stsHotendSpecify:
-        if (m_result.tools[0].nozzle == TestResult_Failed) {
-            if (phase_hotend_specify(pHotendSpecify, hotend_config)) {
+
+    case stsReviseSetupAfterHeaters:
+        m_result = config_store().selftest_result.get();
+
+        if (m_result.bed == TestResult_Failed) {
+            marlin_server::fsm_change(PhasesSelftest::Heaters_AskBedSheetAfterFail, {});
+            switch (marlin_server::get_response_from_phase(PhasesSelftest::Heaters_AskBedSheetAfterFail)) {
+
+            case Response::Retry:
+                m_State = stsHeaters_noz_ena;
+                return;
+
+            case Response::Ok:
+                break;
+
+            default:
                 return;
             }
-            if (get_retry_heater()) {
+        }
+
+        if (m_result.tools[0].nozzle == TestResult_Failed) {
+            switch (phase_revise_printer_setup()) {
+
+            case RevisePrinterSetupResult::running:
+                return;
+
+            case RevisePrinterSetupResult::do_not_retry:
+                break;
+
+            case RevisePrinterSetupResult::retry:
                 m_State = stsHeaters_noz_ena;
                 return;
             }
         }
         break;
+
     case stsFSensor_calibration:
         if (selftest::phaseFSensor(ToolMask::AllTools, pFSensor, Config_FSensor)) {
             return;
@@ -417,7 +491,7 @@ void CSelftest::Loop() {
 
 void CSelftest::phaseShowResult() {
     m_result = config_store().selftest_result.get();
-    FSM_CHANGE_WITH_DATA__LOGGING(PhasesSelftest::Result, FsmSelftestResult().Serialize());
+    marlin_server::fsm_change(PhasesSelftest::Result, FsmSelftestResult().Serialize());
 }
 
 void CSelftest::phaseDidSelftestPass() {
@@ -426,9 +500,9 @@ void CSelftest::phaseDidSelftestPass() {
 
     // dont run wizard again
     if (SelftestResult_Passed_All(m_result)) {
-        config_store().run_selftest.set(false); // clear selftest flag
-        config_store().run_xyz_calib.set(false); // clear XYZ calib flag
-        config_store().run_first_layer.set(false); // clear first layer flag
+        auto &store = config_store();
+        auto transaction = store.get_backend().transaction_guard();
+        store.run_selftest.set(false); // clear selftest flag
     }
 }
 
@@ -446,7 +520,6 @@ bool CSelftest::Abort() {
         abort_part(&pNozzle);
     }
     abort_part(&pBed);
-    abort_part(&pHotendSpecify);
     for (auto &loadcell : m_pLoadcell) {
         abort_part(&loadcell);
     }
@@ -472,9 +545,7 @@ void CSelftest::phaseSelftestStart() {
 
     m_result = config_store().selftest_result.get(); // read previous result
     if (m_Mask & stmFans) {
-        m_result.tools[0].printFan = TestResult_Unknown;
-        m_result.tools[0].heatBreakFan = TestResult_Unknown;
-        m_result.tools[0].fansSwitched = TestResult_Unknown;
+        m_result.tools[0].reset_fan_tests();
     }
     if (m_Mask & stmXAxis) {
         m_result.xaxis = TestResult_Unknown;

@@ -7,14 +7,14 @@
 #include "DialogTimed.hpp"
 
 DialogTimed::DialogTimed(window_t *parent, Rect16 rect, uint32_t open_period)
-    : AddSuperWindow<IDialog>(parent, rect)
+    : IDialog(parent, rect)
     , open_period(open_period)
     , time_of_last_action(gui::GetTick())
     , state(DialogState::running) {
     Hide(); // default behavior of this dialog is hidden
 }
 
-void DialogTimed::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void DialogTimed::windowEvent(window_t *sender, GUI_event_t event, void *param) {
 
     // must have parrent, could crash without it
     if (!GetParent()) {

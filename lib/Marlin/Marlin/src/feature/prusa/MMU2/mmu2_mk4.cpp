@@ -17,6 +17,7 @@
 #include "mmu2_progress_converter.h"
 #include "mmu2_reporting.h"
 #include "../e-stall_detector.h"
+#include <printers.h>
 #ifndef UNITTEST
     // because it brings in whole Marlin and the unit tests commit suicide ...
     #include "../../../module/prusa/spool_join.hpp"
@@ -24,9 +25,8 @@
 #else
     #include "stubs/spool_join_stub.h"
 #endif
-#include "strlen_cx.h"
 
-#include "../../../../src/mmu2/mmu2_bootloader.hpp"
+#include "../../../../../../../src/mmu2/mmu2_bootloader.hpp"
 
 #ifdef __AVR__
 // As of FW 3.12 we only support building the FW with only one extruder, all the multi-extruder infrastructure will be removed.
@@ -1387,7 +1387,7 @@ void MMU2::ReportError(ErrorCode ec, ErrorSource res) {
             && mmu2Magic[2] == 'U'
             && mmu2Magic[3] == '2'
             && mmu2Magic[4] == ':'
-            && strlen_constexpr(mmu2Magic) == 5,
+            && mmu2Magic[5] == '\0',
         "MMU2 logging prefix mismatch, must be updated at various spots");
 }
 
@@ -1481,7 +1481,7 @@ void MMU2::OnMMUProgressMsgSame(ProgressCode pc) {
                 loadFilamentStarted = false;
                 planner_abort_queued_moves();
                 {
-#if PRINTER_IS_PRUSA_MK3_5
+#if PRINTER_IS_PRUSA_MK3_5()
                     // on the MK3.5 due to fsensor filtering delay (compared to MK3S),
                     // we are getting 0.175mm of extra loaded filament per 1mm/s speed increase of slow loading speed.
                     // i.e. for 20mm/s we get roughly 4mm of extra loaded filament

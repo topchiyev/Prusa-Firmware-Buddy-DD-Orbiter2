@@ -6,14 +6,14 @@
 #include "i_window_text.hpp"
 #include "gui.hpp"
 
-color_t IWindowText::GetTextColor() const {
+Color IWindowText::GetTextColor() const {
     if (flags.color_scheme_foreground && pTextColorScheme) {
         return pTextColorScheme->Get(IsFocused(), IsShadowed());
     }
     return color_text;
 }
 
-void IWindowText::SetTextColor(color_t clr) {
+void IWindowText::SetTextColor(Color clr) {
     if (flags.color_scheme_foreground || color_text != clr) {
         color_text = clr;
         flags.color_scheme_foreground = false;
@@ -48,7 +48,7 @@ void IWindowText::SetPadding(padding_ui8_t padd) {
 }
 
 IWindowText::IWindowText(window_t *parent, Rect16 rect, is_closed_on_click_t close)
-    : AddSuperWindow<window_aligned_t>(parent, rect, win_type_t::normal, close)
+    : window_aligned_t(parent, rect, win_type_t::normal, close)
     , color_text(GuiDefaults::ColorText)
     , font(GuiDefaults::DefaultFont)
     , padding(GuiDefaults::Padding) {

@@ -1,5 +1,7 @@
 #include "window_header.hpp"
+
 #include "config.h"
+#include "display.hpp"
 #include "i18n.h"
 #include "gui_media_events.hpp"
 #include "time_tools.hpp"
@@ -11,6 +13,10 @@
 #include <guiconfig/guiconfig.h>
 #include <marlin_vars.hpp>
 #include "timing.h"
+#if BUDDY_ENABLE_CONNECT()
+    #include <connect/connect.hpp>
+    #include <connect/marlin_printer.hpp>
+#endif
 
 namespace {
 constexpr uint16_t inter_item_padding { 4 };
@@ -31,44 +37,29 @@ constexpr uint32_t transfer_hide_timeout { 1'000'000u };
 
 constexpr Rect16 first_rect_doesnt_matter { 0, 0, 0, 0 }; // first rect will be replaced by first recalculation anyway
 
-#if defined(USE_ST7789)
+#if HAS_MINI_DISPLAY()
 constexpr Rect16::Width_t label_w { 90 };
-#endif // USE_ILI9488
-#if defined(USE_ILI9488)
+#endif
+#if HAS_LARGE_DISPLAY()
 constexpr Rect16::Width_t label_w { 240 };
-#endif // USE_ILI9488
+#endif
 } // namespace
 
-void window_header_t::updateNetwork(uint32_t netdev_id) {
-    uint32_t netdev_status = netdev_get_status(netdev_id);
+void window_header_t::updateNetwork() {
+    const auto active_interface = netdev_get_active_id();
+    const auto interface_status = netdev_get_status(active_interface);
 
-    if (force_network || (netdev_id != active_netdev_id)) {
-        icon_network.SetRes(window_header_t::networkIcon(netdev_id));
-        active_netdev_id = netdev_id;
-    }
+    icon_network.SetRes((active_interface == NETDEV_ESP_ID) ? &img::wifi_16x16 : &img::lan_16x16);
 
-    if (active_netdev_id == NETDEV_NODEV_ID) {
-        if (icon_network.IsVisible()) {
-            icon_network.Hide();
-            Invalidate();
-        }
-    } else {
-        if (force_network || (netdev_status != NETDEV_UNLINKED && !icon_network.IsVisible())) {
-            icon_network.Show();
-        }
-        if (force_network || (active_netdev_status != netdev_status)) {
-            if (netdev_status == NETDEV_NETIF_UP) {
-                icon_network.Unshadow();
-            } else if (netdev_status == NETDEV_UNLINKED) {
-                icon_network.Hide();
-                Invalidate();
-            } else {
-                icon_network.Shadow();
-            }
-            active_netdev_status = netdev_status;
-        }
-    }
-    force_network = false;
+    // Not connected at all -> hide icon
+    icon_network.set_visible(interface_status != NETDEV_UNLINKED);
+
+    // Not fully connected -> make the icon gray
+    icon_network.set_shadow(interface_status != NETDEV_NETIF_UP);
+
+#if BUDDY_ENABLE_CONNECT()
+    icon_connect.set_shadow(interface_status != NETDEV_NETIF_UP || get<0>(connect_client::last_status()) != connect_client::ConnectionStatus::Ok);
+#endif // BUDDY_ENABLE_CONNECT()
 }
 
 void window_header_t::updateTransfer() {
@@ -110,7 +101,7 @@ void window_header_t::SetIcon(const img::Resource *res) {
     Invalidate();
 }
 
-void window_header_t::SetText(string_view_utf8 txt) {
+void window_header_t::SetText(const string_view_utf8 &txt) {
     label.SetText(txt);
     Invalidate();
 }
@@ -123,11 +114,11 @@ void window_header_t::set_show_bed_info(bool set) {
 }
 
 void window_header_t::updateTime() {
-#if !defined(USE_ST7789) // Time is not shown on ST7789
+#if !HAS_MINI_DISPLAY() // Time is not shown on ST7789
     if (time_tools::update_time()) {
         Invalidate(); // Invalidate whole header to avoid icon leftovers in between icons
     }
-#endif /* !defined(USE_ST7789) */
+#endif /* !HAS_MINI_DISPLAY() */
 }
 
 void window_header_t::update_bed_info() {
@@ -146,7 +137,7 @@ void window_header_t::update_bed_info() {
         bed_last_change_ms = now;
     }
 
-    snprintf(bed_str, sizeof(bed_str), "%d\xC2\xB0\x43", static_cast<int>(marlin_vars()->temp_bed.get()));
+    snprintf(bed_str, sizeof(bed_str), "%d\xC2\xB0\x43", static_cast<int>(marlin_vars().temp_bed.get()));
     bed_text.SetText(string_view_utf8::MakeRAM((const uint8_t *)bed_str));
     bed_text.Invalidate();
 }
@@ -173,18 +164,24 @@ void window_header_t::updateAllRects() {
     };
 
     // note: call order also means order from the right
-#if !defined(USE_ST7789) // Time is not shown on ST7789
+#if !HAS_MINI_DISPLAY() // Time is not shown on ST7789
     maybe_update(time_val, time_tools::get_time_format() == time_tools::TimeFormat::_24h ? time_24h_w : time_12h_w);
-#endif /* !defined(USE_ST7789) */
+#endif
     maybe_update(icon_usb, icon_usb.resource()->w);
     maybe_update(icon_network, icon_network.resource()->w);
     maybe_update(icon_stealth, icon_stealth.resource()->w);
+#if !HAS_MINI_DISPLAY()
+    maybe_update(icon_metrics, icon_metrics.resource()->w);
+#endif
     if (transfer_val_on) {
         maybe_update(transfer_val, transfer_val_w);
     }
     maybe_update(icon_transfer, icon_transfer.resource()->w);
     maybe_update(bed_text, bed_text_width);
     maybe_update(bed_icon, bed_icon.resource()->w);
+#if BUDDY_ENABLE_CONNECT()
+    maybe_update(icon_connect, icon_connect.resource()->w);
+#endif // BUDDY_ENABLE_CONNECT()
 
     auto label_width = current_offset - GuiDefaults::HeaderPadding.left;
 
@@ -202,34 +199,44 @@ void window_header_t::updateAllRects() {
 }
 
 void window_header_t::updateIcons() {
-    updateNetwork(netdev_get_active_id());
+    updateNetwork();
     updateTransfer();
     updateTime();
     update_bed_info();
 
-    icon_stealth.set_visible(marlin_vars()->stealth_mode.get());
+#if BUDDY_ENABLE_CONNECT()
+    icon_connect.SetRes(connect_client::MarlinPrinter::is_printer_ready() ? &img::set_ready_16x16 : &img::connect_16x16);
+    icon_connect.set_visible(connect_client::is_connect_registered());
+#endif // BUDDY_ENABLE_CONNECT()
+
+#if !HAS_MINI_DISPLAY()
+    icon_metrics.set_visible(config_store().enable_metrics.get());
+#endif
+
+    icon_stealth.set_visible(marlin_vars().stealth_mode.get());
 
     updateAllRects();
 }
 
-window_header_t::window_header_t(window_t *parent, string_view_utf8 txt)
-    : AddSuperWindow<window_frame_t>(parent, GuiDefaults::RectHeader)
+window_header_t::window_header_t(window_t *parent, const string_view_utf8 &txt)
+    : window_frame_t(parent, GuiDefaults::RectHeader)
     , icon_base(this, Rect16(GuiDefaults::HeaderPadding.left, GuiDefaults::HeaderPadding.top, base_w, GuiDefaults::HeaderItemHeight), nullptr)
     , label(this, first_rect_doesnt_matter, txt)
-#if !defined(USE_ST7789) // Time is not shown on ST7789
+#if !HAS_MINI_DISPLAY() // Time is not shown on ST7789
     , time_val(this, first_rect_doesnt_matter, is_multiline::no)
-#endif /* !defined(USE_ST7789) */
+    , icon_metrics(this, first_rect_doesnt_matter, &img::metrics_16x16)
+#endif /* !HAS_MINI_DISPLAY() */
     , icon_usb(this, first_rect_doesnt_matter, &img::usb_20x16)
-    , icon_network(this, first_rect_doesnt_matter, window_header_t::networkIcon(netdev_get_active_id()))
+    , icon_network(this, first_rect_doesnt_matter, nullptr)
     , transfer_val(this, first_rect_doesnt_matter, is_multiline::no)
     , icon_transfer(this, first_rect_doesnt_matter, &img::transfer_icon_16x16)
     , icon_stealth(this, first_rect_doesnt_matter, &img::stealth_20x16)
+#if BUDDY_ENABLE_CONNECT()
+    , icon_connect(this, first_rect_doesnt_matter, &img::connect_16x16)
+#endif // BUDDY_ENABLE_CONNECT()
     , bed_text(this, first_rect_doesnt_matter, is_multiline::no)
     , bed_icon(this, first_rect_doesnt_matter, &img::heatbed_16x16)
-    , active_netdev_id(netdev_get_active_id())
-    , active_netdev_status(netdev_get_status(active_netdev_id))
-    , force_network(true)
-#if defined(USE_ST7789)
+#if HAS_MINI_DISPLAY()
     , transfer_val_on(false)
 #else
     , transfer_val_on(true)
@@ -252,12 +259,14 @@ window_header_t::window_header_t(window_t *parent, string_view_utf8 txt)
     transfer_val.Hide();
     icon_transfer.Hide();
 
-#if !defined(USE_ST7789) // Time is not shown on ST7789
+#if !HAS_MINI_DISPLAY() // Time is not shown on ST7789
     time_val.set_font(GuiDefaults::HeaderTextFont);
     time_val.SetAlignment(Align_t::RightCenter());
     time_tools::update_time();
     time_val.SetText(string_view_utf8::MakeRAM((const uint8_t *)time_tools::get_time()));
-#endif /* !defined(USE_ST7789) */
+
+    icon_metrics.SetAlignment(Align_t::LeftCenter());
+#endif /* !HAS_MINI_DISPLAY() */
 
     set_show_bed_info(false);
     updateMedia(GuiMediaEventsHandler::Get());
@@ -266,7 +275,7 @@ window_header_t::window_header_t(window_t *parent, string_view_utf8 txt)
     Disable();
 }
 
-void window_header_t::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void window_header_t::windowEvent(window_t *sender, GUI_event_t event, void *param) {
 
     switch (event) {
     case GUI_event_t::MEDIA:
@@ -298,10 +307,10 @@ void window_header_t::windowEvent(EventLock /*has private ctor*/, window_t *send
         uint16_t cpu = osGetCPUUsage();
         if (!cpu_warning_on && cpu >= 80) {
             cpu_warning_on = true;
-            display::FillRect(Rect16(5, 5, 5, 5), COLOR_RED_ALERT);
+            display::fill_rect(Rect16(5, 5, 5, 5), COLOR_RED_ALERT);
         } else if (cpu_warning_on && cpu < 80) {
             cpu_warning_on = false;
-            display::FillRect(Rect16(5, 5, 5, 5), GetBackColor());
+            display::fill_rect(Rect16(5, 5, 5, 5), GetBackColor());
         }
     }
 #endif // DEBUG
@@ -310,27 +319,10 @@ void window_header_t::windowEvent(EventLock /*has private ctor*/, window_t *send
     }
 
     updateIcons();
-    SuperWindowEvent(sender, event, param);
+    window_frame_t::windowEvent(sender, event, param);
 }
 
 void window_header_t::updateMedia(MediaState_t state) {
     icon_usb.set_visible(state != MediaState_t::removed);
     icon_usb.set_shadow(state != MediaState_t::inserted);
 };
-
-const img::Resource *window_header_t::networkIcon(uint32_t netdev_id) {
-    const img::Resource *res = nullptr;
-
-    switch (netdev_id) {
-    case NETDEV_ETH_ID:
-        res = &img::lan_16x16;
-        break;
-    case NETDEV_ESP_ID:
-        res = &img::wifi_16x16;
-        break;
-    default:
-        break;
-    }
-
-    return res;
-}

@@ -7,14 +7,35 @@
 #include "gui_invalidate.hpp"
 #include "img_resources.hpp"
 
-static IWindowMenuItem *focused_menu_item = nullptr;
-static bool focused_menu_item_edited = false;
+#include <gui/event/focus_event.hpp>
+#include <gui/event/touch_event.hpp>
 
-IWindowMenuItem::IWindowMenuItem(string_view_utf8 label, const img::Resource *id_icon, is_enabled_t enabled, is_hidden_t hidden, expands_t expands)
+namespace window_menu_item_private {
+
+IWindowMenuItem *focused_menu_item = nullptr;
+bool focused_menu_item_edited = false;
+txtroll_t focused_menu_item_roll;
+
+} // namespace window_menu_item_private
+
+using namespace window_menu_item_private;
+
+constexpr IWindowMenuItem::ColorScheme IWindowMenuItem::color_scheme_title = {
+    .text = {
+        .focused = COLOR_WHITE,
+        .unfocused = COLOR_WHITE,
+    },
+    .back = {
+        .focused = Color::from_raw(0x00AAAAAA),
+        .unfocused = Color::from_raw(0x00333333),
+    },
+};
+
+IWindowMenuItem::IWindowMenuItem(const string_view_utf8 &label, const img::Resource *id_icon, is_enabled_t enabled, is_hidden_t hidden, expands_t expands)
     : IWindowMenuItem(label, expands == expands_t::yes ? expand_icon_width : Rect16::Width_t(0), id_icon, enabled, hidden) {
 }
 
-IWindowMenuItem::IWindowMenuItem(string_view_utf8 label, Rect16::Width_t extension_width_, const img::Resource *id_icon, is_enabled_t enabled, is_hidden_t hidden)
+IWindowMenuItem::IWindowMenuItem(const string_view_utf8 &label, Rect16::Width_t extension_width_, const img::Resource *id_icon, is_enabled_t enabled, is_hidden_t hidden)
     : label(label)
     , hidden((uint8_t)hidden)
     , enabled(enabled)
@@ -32,11 +53,6 @@ IWindowMenuItem::~IWindowMenuItem() {
 
 void IWindowMenuItem::set_is_enabled(bool set) {
     if (IsEnabled() == set) {
-        return;
-    }
-
-    // Cannot disable focused element
-    if (!set && is_focused()) {
         return;
     }
 
@@ -108,21 +124,34 @@ bool IWindowMenuItem::move_focus(IWindowMenuItem *target) {
         return false;
     }
 
+    IWindowMenuItem *previous_focused_item = focused_menu_item;
+
     // Redraw previously focused menu item
-    if (auto *i = focused_menu_item) {
-        i->roll.Stop();
-        i->Invalidate();
+    if (previous_focused_item) {
+        previous_focused_item->Invalidate();
     }
 
+    focused_menu_item_roll.Deinit();
     focused_menu_item = target;
 
-    if (auto *i = focused_menu_item) {
-        if (i->IsHidden()) {
-            i->show();
+    if (target) {
+        if (target->IsHidden()) {
+            target->show();
         }
 
-        i->Invalidate();
-        i->roll.Deinit();
+        target->Invalidate();
+    }
+
+    if (previous_focused_item) {
+        // We don't know the menu, so we cannot provide it
+        WindowMenuItemEventContext ctx(gui_event::FocusOutEvent {}, nullptr);
+        previous_focused_item->event(ctx);
+    }
+
+    if (target) {
+        // We don't know the menu, so we cannot provide it
+        WindowMenuItemEventContext ctx(gui_event::FocusInEvent {}, nullptr);
+        target->event(ctx);
     }
 
     return true;
@@ -192,8 +221,8 @@ void IWindowMenuItem::Print(Rect16 rect) {
         raster_op.swap_bw = IsFocused() ? has_swapped_bw::yes : has_swapped_bw::no;
     }
 
-    color_t mi_color_back = GetBackColor();
-    color_t mi_color_text = GetTextColor();
+    Color mi_color_back = GetBackColor();
+    Color mi_color_text = GetTextColor();
 
     if (IsIconInvalid() && IsLabelInvalid() && IsExtensionInvalid()) {
         render_rounded_rect(rect, GuiDefaults::MenuColorBack, mi_color_back, GuiDefaults::MenuItemCornerRadius, MIC_ALL_CORNERS);
@@ -209,8 +238,21 @@ void IWindowMenuItem::Print(Rect16 rect) {
         printIcon(getIconRect(rect), raster_op, mi_color_back);
     }
 
+    const auto label_rect = getLabelRect(rect);
+
+    if (is_focused() && focused_menu_item_roll.NeedInit()) {
+        focused_menu_item_roll.Init(label_rect, label, label_font, GuiDefaults::MenuPaddingItems, GuiDefaults::MenuAlignment());
+    }
+
     if (IsLabelInvalid()) {
-        roll.RenderTextAlign(getLabelRect(rect), GetLabel(), getLabelFont(), mi_color_back, mi_color_text, GuiDefaults::MenuPaddingItems, GuiDefaults::MenuAlignment());
+        if (is_focused()) {
+            // Is focused -> use shared roll instance
+            focused_menu_item_roll.render_text(label_rect, label, label_font, mi_color_back, mi_color_text, GuiDefaults::MenuPaddingItems, GuiDefaults::MenuAlignment());
+
+        } else {
+            // Not focused -> render without roll
+            render_text_align(label_rect, label, label_font, mi_color_back, mi_color_text, GuiDefaults::MenuPaddingItems, GuiDefaults::MenuAlignment(), true);
+        }
     }
 
     if (IsExtensionInvalid() && extension_width && icon_position != IconPosition::replaces_extends && (IsEnabled() || DoesShowDisabledExtension())) {
@@ -228,12 +270,12 @@ void IWindowMenuItem::Print(Rect16 rect) {
  *   MenuColorText                | 100
  *   MenuColorDisabled            | 000
  */
-color_t IWindowMenuItem::GetTextColor() const {
+Color IWindowMenuItem::GetTextColor() const {
     if (clr_scheme) {
         return IsFocused() ? clr_scheme->text.focused : clr_scheme->text.unfocused;
     }
 
-    color_t ret;
+    Color ret;
     if (IsEnabled() && hidden == (uint8_t)is_hidden_t::dev) {
         ret = GuiDefaults::MenuColorDevelopment;
     } else if (hidden == (uint8_t)is_hidden_t::dev) {
@@ -253,57 +295,46 @@ color_t IWindowMenuItem::GetTextColor() const {
  *   MenuColorFocusedBack         | 11
  *   MenuColorDisabled            | 01
  */
-color_t IWindowMenuItem::GetBackColor() const {
+Color IWindowMenuItem::GetBackColor() const {
     if (clr_scheme) {
         return IsFocused() ? clr_scheme->back.focused : clr_scheme->back.unfocused;
     }
 
-    color_t ret = GuiDefaults::MenuColorBack;
+    Color ret = GuiDefaults::MenuColorBack;
     if (IsFocused()) {
         ret = IsEnabled() ? GuiDefaults::MenuColorFocusedBack : GuiDefaults::MenuColorDisabled;
     }
     return ret;
 }
 
-void IWindowMenuItem::printIcon(Rect16 icon_rect, ropfn raster_op, color_t color_back) const {
+void IWindowMenuItem::printIcon(Rect16 icon_rect, ropfn raster_op, Color color_back) const {
     if (id_icon) {
         render_icon_align(icon_rect, id_icon, color_back, icon_flags(Align_t::Center(), raster_op));
     }
 }
 
-void IWindowMenuItem::printExtension(Rect16 extension_rect, [[maybe_unused]] color_t color_text, color_t color_back, ropfn raster_op) const {
+void IWindowMenuItem::printExtension(Rect16 extension_rect, [[maybe_unused]] Color color_text, Color color_back, ropfn raster_op) const {
     render_icon_align(extension_rect, &img::arrow_right_10x16, color_back, icon_flags(Align_t::Center(), raster_op));
 }
 
 void IWindowMenuItem::Click(IWindowMenu &window_menu) {
     if (IsEnabled()) {
-        roll.Deinit();
+        focused_menu_item_roll.Deinit();
         InValidateExtension();
         click(window_menu);
     }
 }
 
-void IWindowMenuItem::Touch(IWindowMenu &window_menu, point_ui16_t relative_touch_point) {
+void IWindowMenuItem::Touch([[maybe_unused]] IWindowMenu &window_menu, [[maybe_unused]] point_ui16_t relative_touch_point) {
+#if HAS_TOUCH()
     if (IsEnabled()) {
-        roll.Deinit();
+        focused_menu_item_roll.Deinit();
         InValidateExtension();
-        touch(window_menu, relative_touch_point);
+
+        WindowMenuItemEventContext ctx(gui_event::TouchEvent { relative_touch_point }, &window_menu);
+        event(ctx);
     }
-}
-
-void IWindowMenuItem::touch(IWindowMenu &window_menu, [[maybe_unused]] point_ui16_t relative_touch_point) {
-    click(window_menu);
-}
-
-// Reinits text rolling in case of focus/defocus/click
-void IWindowMenuItem::reInitRoll(Rect16 rect) {
-    if (roll.NeedInit()) {
-        roll.Init(rect, GetLabel(), label_font, GuiDefaults::MenuPaddingItems, GuiDefaults::MenuAlignment());
-    }
-}
-
-void IWindowMenuItem::deInitRoll() {
-    roll.Deinit();
+#endif
 }
 
 bool IWindowMenuItem::IsHidden() const {
@@ -314,7 +345,16 @@ bool IWindowMenuItem::IsDevOnly() const {
     return hidden == (uint8_t)is_hidden_t::dev && GuiDefaults::ShowDevelopmentTools;
 }
 
-void IWindowMenuItem::SetLabel(string_view_utf8 text) {
+void IWindowMenuItem::SetIconId(const img::Resource *id) {
+    if (id_icon == id) {
+        return;
+    }
+
+    id_icon = id;
+    InValidateIcon();
+}
+
+void IWindowMenuItem::SetLabel(const string_view_utf8 &text) {
     if (!label.is_same_ref(text)) {
         label = text;
         InValidateLabel();
@@ -368,11 +408,16 @@ void IWindowMenuItem::InValidateExtension() {
 }
 
 void IWindowMenuItem::set_color_scheme(const ColorScheme *scheme) {
+    if (clr_scheme == scheme) {
+        return;
+    }
+
     clr_scheme = scheme;
+    Invalidate();
 }
 
 void IWindowMenuItem::reset_color_scheme() {
-    clr_scheme = nullptr;
+    set_color_scheme(nullptr);
 }
 
 void IWindowMenuItem::set_icon_position(const IconPosition position) {
@@ -383,10 +428,14 @@ auto IWindowMenuItem::get_icon_position() const -> IconPosition {
     return icon_position;
 }
 
-void IWindowMenuItem::Roll() {
-    if (roll.Tick() == invalidate_t::yes) {
-        InValidateLabel();
+void IWindowMenuItem::handle_roll() {
+    if (focused_menu_item && focused_menu_item_roll.Tick() == invalidate_t::yes) {
+        focused_menu_item->InValidateLabel();
     }
+}
+
+void IWindowMenuItem::reset_roll() {
+    focused_menu_item_roll.Deinit();
 }
 
 bool IWindowMenuItem::Change(int dif) {
@@ -395,4 +444,23 @@ bool IWindowMenuItem::Change(int dif) {
         InValidateExtension();
     }
     return changed;
+}
+
+void IWindowMenuItem::event(WindowMenuItemEventContext &ctx) {
+    // The event has been processed & accepted -> do nothing
+    if (ctx.is_accepted()) {
+        return;
+    }
+
+#if HAS_TOUCH()
+    if (const auto *e = ctx.event.value_maybe<gui_event::TouchEvent>()) {
+        assert(ctx.menu);
+        if (!touch_extension_only_ || is_touch_in_extension_rect(*ctx.menu, e->relative_touch_point)) {
+            click(*ctx.menu);
+        }
+
+        // Accept touch in every case - we don't want the event to keep propagating
+        ctx.accept();
+    }
+#endif
 }

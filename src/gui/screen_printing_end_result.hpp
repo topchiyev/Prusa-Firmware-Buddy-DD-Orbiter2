@@ -13,7 +13,7 @@
  * @brief Just the body, not the actual screen. However, this is the file where the screen should eventually be.
  *
  */
-class EndResultBody : public AddSuperWindow<window_frame_t> {
+class EndResultBody : public window_frame_t {
 public:
     static constexpr size_t extra_buffer_size { 4 }; // to give some leeway for error
 
@@ -30,9 +30,9 @@ public:
     static constexpr const char *txt_printing_time { N_("Printing time") };
 
     static constexpr auto progress_font {
-#if defined(USE_ILI9488)
+#if HAS_LARGE_DISPLAY()
         Font::large
-#elif defined(USE_ST7789)
+#elif HAS_MINI_DISPLAY()
         Font::normal
 #endif
     };
@@ -42,7 +42,7 @@ public:
     static Rect16 get_progress_txt_rect(int16_t row_0);
 
 protected:
-    void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 
 private:
     /**
@@ -75,7 +75,7 @@ private:
     std::array<std::array<char, sizeof("T1 HIFIPETG 10.000g") + extra_buffer_size>, EXTRUDERS> consumed_material_values_buffers;
 
     window_text_t consumed_wipe_tower_value;
-    std::array<char, sizeof("Wipe Tower 10.000g") + extra_buffer_size> consumed_wipe_tower_value_buffer;
+    StringViewUtf8Parameters<7> wipe_tower_params;
 
     window_icon_t arrow_right;
     WindowNumbPrintProgress progress_txt;

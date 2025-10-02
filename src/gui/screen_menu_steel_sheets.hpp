@@ -1,7 +1,3 @@
-/**
- * @file screen_menu_steel_sheets.hpp
- */
-
 #pragma once
 
 #include "screen_menu.hpp"
@@ -22,7 +18,7 @@ class MI_SHEET_OFFSET : public WI_LAMBDA_LABEL_t {
     float offset = 0;
     bool calib = false;
     static constexpr char const *const notCalibrated = N_("Not Calib");
-    void printExtension(Rect16 extension_rect, color_t color_text, color_t color_back, ropfn raster_op) const override;
+    void printExtension(Rect16 extension_rect, Color color_text, Color color_back, ropfn raster_op) const override;
 
 public:
     MI_SHEET_OFFSET();
@@ -72,29 +68,24 @@ protected:
 };
 
 using SheetProfileMenuScreen__ = ScreenMenu<EFooter::On, MI_RETURN, MI_SHEET_SELECT, MI_SHEET_CALIBRATE,
-#if _DEBUG // todo remove #if _DEBUG after rename is finished
     MI_SHEET_RENAME,
-#endif // _DEBUG
     MI_SHEET_RESET, MI_SHEET_OFFSET>;
 
 // TODO there is no way to tell which sheet I am currently calibrating
-class ISheetProfileMenuScreen : public SheetProfileMenuScreen__ {
+class SheetProfileMenuScreen : public SheetProfileMenuScreen__ {
     uint32_t value;
 
 public:
-    constexpr static const char *label = N_("Sheet Profile");
-    ISheetProfileMenuScreen(uint32_t value);
+    SheetProfileMenuScreen(uint32_t value);
 
 protected:
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t ev, void *param) override;
-};
+    void update_title();
 
-template <uint8_t sheet_index>
-class SheetProfileMenuScreenT : public ISheetProfileMenuScreen {
-public:
-    SheetProfileMenuScreenT()
-        : ISheetProfileMenuScreen(sheet_index) {
-    }
+    virtual void windowEvent(window_t *sender, GUI_event_t ev, void *param) override;
+
+private:
+    /// Holds string "Sheet: (NAME)"
+    std::array<char, 32> label_buffer;
 };
 
 class I_MI_SHEET_PROFILE : public IWindowMenuItem {
@@ -104,7 +95,7 @@ protected:
     void click(IWindowMenu &window_menu) override;
 
 private:
-    std::array<char, MAX_SHEET_NAME_LENGTH + 1> label_str;
+    std::array<char, SHEET_NAME_BUFFER_SIZE> label_str;
 
     uint8_t sheet_index;
 };

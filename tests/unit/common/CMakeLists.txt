@@ -4,6 +4,7 @@ add_subdirectory(Leds)
 add_subdirectory(gcode)
 add_subdirectory(http)
 add_subdirectory(utils)
+add_subdirectory(ring_allocator)
 add_subdirectory(filament_sensor)
 add_subdirectory(freertos)
 
@@ -16,20 +17,12 @@ target_include_directories(support_utils_tests PUBLIC ${CMAKE_SOURCE_DIR}/src/co
 add_executable(
   str_utils_tests
   ${CMAKE_CURRENT_SOURCE_DIR}/str_utils_test.cpp ${CMAKE_SOURCE_DIR}/src/common/str_utils.cpp
-  ${CMAKE_SOURCE_DIR}/src/common/str_utils.hpp
+  ${CMAKE_SOURCE_DIR}/src/common/str_utils.hpp ${CMAKE_SOURCE_DIR}/src/lang/string_view_utf8.cpp
   )
 target_include_directories(
-  str_utils_tests PUBLIC # ${CMAKE_SOURCE_DIR}/src/common
-                         ${CMAKE_SOURCE_DIR}/src
+  str_utils_tests PUBLIC ${CMAKE_SOURCE_DIR}/src/common ${CMAKE_SOURCE_DIR}/src
+                         ${CMAKE_SOURCE_DIR}/src/lang
   )
-
-add_executable(
-  gcode_filter_tests
-  ${CMAKE_CURRENT_SOURCE_DIR}/gcode_filter_test.cpp
-  ${CMAKE_SOURCE_DIR}/src/common/gcode/gcode_filter.cpp
-  ${CMAKE_SOURCE_DIR}/src/common/gcode/gcode_filter.hpp
-  )
-target_include_directories(gcode_filter_tests PUBLIC ${CMAKE_SOURCE_DIR}/src)
 
 add_executable(timing_tests timing_tests.cpp)
 target_compile_definitions(timing_tests PRIVATE MCU=STM32F407VG)
@@ -107,13 +100,13 @@ add_executable(
   )
 
 target_include_directories(
-  selftest_test_data_serialization_tests PUBLIC ${CMAKE_SOURCE_DIR}/src
-                                                ${CMAKE_SOURCE_DIR}/src/common/selftest/include_XL
+  selftest_test_data_serialization_tests
+  PUBLIC ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/src/common/selftest/include_XL
+         ${CMAKE_SOURCE_DIR}/src/common/marlin_server_types ${CMAKE_SOURCE_DIR}/tests/stubs
   )
 
 add_catch_test(support_utils_tests)
 add_catch_test(str_utils_tests)
-add_catch_test(gcode_filter_tests)
 add_catch_test(timing_tests)
 add_catch_test(circle_buffer_tests)
 add_catch_test(circular_buffer_tests)

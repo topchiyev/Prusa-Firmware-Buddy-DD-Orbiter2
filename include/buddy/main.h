@@ -2,7 +2,6 @@
 #include <device/cmsis.h>
 #include <device/peripherals.h>
 #include "printers.h"
-#include "../src/common/uartrxbuff.h"
 #include <stdint.h>
 #include <device/board.h>
 #include "MarlinPin.h"
@@ -21,8 +20,6 @@ extern int HAL_GPIO_Initialized;
 extern int HAL_ADC_Initialized;
 extern int HAL_PWM_Initialized;
 extern void init_error_screen();
-
-extern uartrxbuff_t uart1rxbuff;
 
 void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 void Error_Handler(void);

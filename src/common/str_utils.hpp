@@ -1,5 +1,6 @@
 #pragma once
 
+#include <charconv>
 #include <string>
 #include <string.h>
 #include <array>
@@ -28,9 +29,36 @@ int strshiftUnicode(uint32_t *str, size_t max_size, const size_t n = 1, const ui
 int strinsUnicode(uint32_t *str, size_t max_size, const uint32_t *const ins, size_t times = 1);
 int str2multilineUnicode(uint32_t *str, size_t max_size, const size_t line_width);
 
-constexpr size_t strlen_constexpr(const char *str) {
-    return *str ? 1 + strlen_constexpr(str + 1) : 0;
-}
+/// A const char* that is guaranteed to have unlimited lifetime (thanks to the consteval constructor)
+struct ConstexprString {
+    consteval ConstexprString() = default;
+    consteval ConstexprString(const ConstexprString &) = default;
+    consteval ConstexprString(const char *str)
+        : str_(str) {}
+
+    constexpr operator const char *() const {
+        return str_;
+    }
+
+private:
+    const char *str_ = nullptr;
+};
+
+/// String that can be passed as a template parameter (use "XX"_tstr)
+template <char... chars>
+struct TemplateString {
+    static constexpr inline const char str[] = { chars..., '\0' };
+
+    consteval inline operator const char *() const {
+        return str;
+    }
+    consteval inline operator ConstexprString() const {
+        return ConstexprString(str);
+    }
+};
+
+template <typename T, T... chars>
+constexpr TemplateString<chars...> operator""_tstr() { return {}; }
 
 ////////////////////////////////////////////////////////////////////////////////
 ///
@@ -337,15 +365,8 @@ class StringBuilder {
 public:
     StringBuilder() = default;
 
-    template <size_t n>
-    StringBuilder(std::array<char, n> &arr) {
-        init(arr.data(), n);
-    }
-
-    template <size_t n>
-    StringBuilder(char (&arr)[n], size_t start = 0) {
-        assert(start < n);
-        init(arr + start, n - start);
+    StringBuilder(std::span<char> span) {
+        init(span.data(), span.size());
     }
 
     /// See StringBuilder::init
@@ -381,18 +402,44 @@ public:
     }
 
 public:
-    void append_char(char ch);
+    const char *str() const;
 
-    void append_string(const char *str);
+    inline const char *str_nocheck() const {
+        return buffer_start_;
+    }
 
-    void append_string_view(string_view_utf8 str);
+    inline const uint8_t *str_bytes() const {
+        assert(is_ok());
+        return reinterpret_cast<const uint8_t *>(buffer_start_);
+    }
+
+public:
+    StringBuilder &append_char(char ch);
+
+    StringBuilder &append_string(const char *str);
+
+    StringBuilder &append_string_view(const string_view_utf8 &str);
 
     /// Appends text to the builder, using vsnprintf under the hood.
-    void __attribute__((format(__printf__, 2, 3)))
+    StringBuilder &__attribute__((format(__printf__, 2, 3)))
     append_printf(const char *fmt, ...);
 
     /// Appends text to the builder, using vsnprintf under the hood.
-    void append_vprintf(const char *fmt, va_list args);
+    StringBuilder &append_vprintf(const char *fmt, va_list args);
+
+    struct AppendFloatConfig {
+        /// Maximum decimal places to print
+        uint8_t max_decimal_places = 3;
+
+        /// Always use all max_decimal_places
+        bool all_decimal_places : 1 = false;
+
+        /// 0.xxx -> .xxx
+        bool skip_zero_before_dot : 1 = false;
+    };
+
+    /// Appends a float value
+    StringBuilder &append_float(double val, const AppendFloatConfig &config);
 
 public:
     /// Allocates $cnt chars at the end of the string and returns the pointer to them.
@@ -425,20 +472,6 @@ class ArrayStringBuilder : public StringBuilder {
 public:
     inline ArrayStringBuilder()
         : StringBuilder(array) {}
-
-public:
-    inline const char *str() const {
-        assert(is_ok());
-        return array.data();
-    }
-    inline const char *str_nocheck() const {
-        return array.data();
-    }
-
-    inline const uint8_t *str_bytes() const {
-        assert(is_ok());
-        return reinterpret_cast<const uint8_t *>(array.data());
-    }
 
 private:
     std::array<char, array_size_> array;

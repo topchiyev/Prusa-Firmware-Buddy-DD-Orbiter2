@@ -11,7 +11,7 @@ namespace {
 constexpr const char *txt_print_started { N_("Print started") };
 constexpr const char *txt_print_ended { N_("Print ended") };
 constexpr const char *txt_consumed_material { N_("Consumed material") };
-#if PRINTER_IS_PRUSA_XL
+#if PRINTER_IS_PRUSA_XL()
 constexpr const char *txt_wipe_tower_pretranslated { N_("Prime tower %dg") };
 #else
 constexpr const char *txt_wipe_tower_pretranslated { N_("Wipe tower %dg") };
@@ -75,7 +75,7 @@ void handle_timestamp_text_item(MarlinVariableLocked<time_t> &time_holder, EndRe
 } // namespace
 
 EndResultBody::EndResultBody(window_t *parent, Rect16 rect)
-    : AddSuperWindow<window_frame_t>(parent, rect)
+    : window_frame_t(parent, rect)
     , printing_time_label(this, get_printing_time_label_rect(get_row_0()), is_multiline::no, is_closed_on_click_t::no, _(txt_printing_time))
     , printing_time_value(this, get_printing_time_value_rect(get_row_0()), is_multiline::no)
 
@@ -130,7 +130,7 @@ void EndResultBody::Show() {
 
     auto &gcode { GCodeInfo::getInstance() };
 
-    PrintTime::print_formatted_duration(marlin_vars()->print_duration.get(), { printing_time_value_buffer }, true);
+    PrintTime::print_formatted_duration(marlin_vars().print_duration.get(), { printing_time_value_buffer }, true);
 
     printing_time_label.Show();
     printing_time_value.Show();
@@ -139,8 +139,8 @@ void EndResultBody::Show() {
     print_started_label.Show();
     print_ended_label.Show();
 
-    handle_timestamp_text_item(marlin_vars()->print_start_time, print_started_value_buffer, print_started_value);
-    handle_timestamp_text_item(marlin_vars()->print_end_time, print_ended_value_buffer, print_ended_value);
+    handle_timestamp_text_item(marlin_vars().print_start_time, print_started_value_buffer, print_started_value);
+    handle_timestamp_text_item(marlin_vars().print_end_time, print_ended_value_buffer, print_ended_value);
 
     handle_consumed_material_showing(gcode);
 
@@ -184,15 +184,9 @@ void EndResultBody::handle_wipe_tower_showing([[maybe_unused]] const GCodeInfo &
 #if EXTRUDERS > 1
     // wipe tower
     if (has_valid_wipe_tower_grams) {
-
-        auto &buff { consumed_wipe_tower_value_buffer };
         const auto used_g = static_cast<int>(std::lround(gcode.get_filament_wipe_tower_g().value()));
-
-        char translated_fmt[std::tuple_size_v<decltype(consumed_wipe_tower_value_buffer)>];
-        _(txt_wipe_tower_pretranslated).copyToRAM(translated_fmt, sizeof(translated_fmt));
-        snprintf(buff.data(), buff.size(), translated_fmt, used_g);
-
-        consumed_wipe_tower_value.SetText(_(buff.data()));
+        const string_view_utf8 str = _(txt_wipe_tower_pretranslated).formatted(wipe_tower_params, used_g);
+        consumed_wipe_tower_value.SetText(str);
         consumed_wipe_tower_value.Show();
     }
 #endif
@@ -324,7 +318,7 @@ void EndResultBody::Hide() {
     window_t::Hide();
 }
 
-void EndResultBody::windowEvent(EventLock /*has private ctor*/, window_t *, GUI_event_t event, void *param) {
+void EndResultBody::windowEvent(window_t *, GUI_event_t event, void *param) {
     if (event == GUI_event_t::ENC_UP || event == GUI_event_t::CLICK || event == GUI_event_t::TOUCH_CLICK) {
         if (GetParent()) {
             GetParent()->WindowEvent(this, GUI_event_t::CHILD_CHANGED, param);

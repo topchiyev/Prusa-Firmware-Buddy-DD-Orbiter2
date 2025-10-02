@@ -1,5 +1,5 @@
 #include "screen_tools_mapping.hpp"
-#include <log.h>
+#include <logging/log.hpp>
 #include <marlin_client.hpp>
 #include <string.h>
 #include <window_msgbox.hpp>
@@ -13,6 +13,7 @@
 #include "mmu2_toolchanger_common.hpp"
 #include <tools_mapping.hpp>
 #include <print_utils.hpp>
+#include <filament_sensors_handler.hpp>
 
 namespace {
 
@@ -116,8 +117,8 @@ void set_idle(window_text_t &item, window_colored_rect *color) {
 }
 
 void set_selected(window_text_t &item, window_colored_rect *color) {
-    item.SetTextColor(COLOR_ORANGE);
-    item.SetBackColor(COLOR_BLACK);
+    item.SetTextColor(COLOR_WHITE);
+    item.SetBackColor(COLOR_ORANGE);
     if (color) {
         color->set_parent_color(COLOR_BLACK);
     }
@@ -145,43 +146,21 @@ float get_nozzle_diameter([[maybe_unused]] size_t idx) {
 void print_right_tool_into_buffer(size_t idx, std::array<std::array<char, ToolsMappingBody::max_item_text_width>, ToolsMappingBody::max_item_rows> &text_buffers, bool drawing_nozzles) {
     // IDX here means REAL
 
-    const auto loaded_filament_type = config_store().get_filament_type(idx);
-    const char *loaded_filament_name = filament::get_name(loaded_filament_type);
+    const FilamentType loaded_filament_type = config_store().get_filament_type(idx);
+    std::array<char, filament_name_buffer_size> loaded_filament_name = std::to_array(loaded_filament_type.parameters().name);
 
 #if HAS_MMU2()
-    // upon request from the Content team - if we get "---", translate it into FILAM - a crude and awful hack :(
-    static constexpr const char unknownFilName[] = "---";
-    if (!strcmp(loaded_filament_name, unknownFilName)) {
-        // Note: this part is a subject to changes soon, there is no need to make this piece of code "nice"
-        // Hopefully, it will disappear completely in future releases
-        static const char unknownFilamentName1[] = "FIL1";
-        static const char unknownFilamentName2[] = "FIL2";
-        static const char unknownFilamentName3[] = "FIL3";
-        static const char unknownFilamentName4[] = "FIL4";
-        static const char unknownFilamentName5[] = "FIL5";
-        switch (idx) {
-        case 0:
-            loaded_filament_name = unknownFilamentName1;
-            break;
-        case 1:
-            loaded_filament_name = unknownFilamentName2;
-            break;
-        case 2:
-            loaded_filament_name = unknownFilamentName3;
-            break;
-        case 3:
-            loaded_filament_name = unknownFilamentName4;
-            break;
-        case 4:
-            loaded_filament_name = unknownFilamentName5;
-            break;
-        default:
-            break; // keep "---" by default
-        }
+    static constexpr std::array unknown_filament_names = {
+        "FIL1", "FIL2", "FIL3", "FIL4", "FIL5"
+    };
+
+    // Upon request from the Content team - if we get "---", translate it into FILAM - a crude and awful hack :(
+    if (loaded_filament_type == FilamentType::none && idx < unknown_filament_names.size()) {
+        strlcpy(loaded_filament_name.data(), unknown_filament_names[idx], filament_name_buffer_size);
     }
 #endif
 
-    snprintf(text_buffers[idx].data(), ToolsMappingBody::max_item_text_width, "%hhu. %-5.5s", static_cast<uint8_t>(idx + 1), loaded_filament_name);
+    snprintf(text_buffers[idx].data(), ToolsMappingBody::max_item_text_width, "%hhu. %-5.5s", static_cast<uint8_t>(idx + 1), loaded_filament_name.data());
 
     if (drawing_nozzles) {
         const auto cur_strlen = strlen(text_buffers[idx].data());
@@ -194,7 +173,7 @@ window_text_t make_right_phys_text(size_t idx, window_t *parent,
     std::array<std::array<char, ToolsMappingBody::max_item_text_width>, ToolsMappingBody::max_item_rows> &text_buffers, bool drawing_nozzles) {
 
     print_right_tool_into_buffer(idx, text_buffers, drawing_nozzles);
-    window_text_t wtxt { parent, get_right_phys_rect(idx), is_multiline::no, is_closed_on_click_t::no, _(text_buffers[idx].data()) };
+    window_text_t wtxt { parent, get_right_phys_rect(idx), is_multiline::no, is_closed_on_click_t::no, string_view_utf8::MakeRAM(text_buffers[idx].data()) };
     if (!is_tool_enabled(idx)) {
         wtxt.Hide();
     }
@@ -223,7 +202,7 @@ window_text_t make_left_gcode_text(size_t idx, window_t *parent,
         }
     }
 
-    window_text_t wtxt { parent, get_left_gcode_rect(idx), is_multiline::no, is_closed_on_click_t::no, _(text_buffers[idx].data()) };
+    window_text_t wtxt { parent, get_left_gcode_rect(idx), is_multiline::no, is_closed_on_click_t::no, string_view_utf8::MakeRAM(text_buffers[idx].data()) };
     if (!gcode.get_extruder_info(idx).used()) {
         wtxt.Hide();
     }
@@ -241,7 +220,7 @@ window_colored_rect make_left_gcode_color(size_t idx, window_t *parent, GCodeInf
     window_colored_rect colored { parent, get_left_gcode_color_rect(idx) };
     if (auto extruder_info = gcode.get_extruder_info(idx);
         extruder_info.used() && extruder_info.extruder_colour.has_value()) {
-        colored.SetBackColor(to_color_t(extruder_info.extruder_colour->red, extruder_info.extruder_colour->green, extruder_info.extruder_colour->blue));
+        colored.SetBackColor(*extruder_info.extruder_colour);
     } else {
         colored.Hide();
     }
@@ -276,7 +255,7 @@ std::array<window_icon_t, sizeof...(Is)> make_right_phys_icon(std::index_sequenc
     return { (make_right_phys_icon(Is, parent))... };
 }
 
-Response tools_mapping_box(bool &querying_user, string_view_utf8 msg, PhaseResponses responses, size_t default_button = 0) {
+Response tools_mapping_box(bool &querying_user, const string_view_utf8 &msg, PhaseResponses responses, size_t default_button = 0) {
     AutoRestore ar(querying_user, true);
     const PhaseTexts labels = { get_response_text(responses[0]), get_response_text(responses[1]), get_response_text(responses[2]), get_response_text(responses[3]) };
     MsgBoxBase msgbox(GuiDefaults::DialogFrameRect, responses, default_button, &labels, msg, is_multiline::yes);
@@ -332,7 +311,7 @@ bool all_nozzles_same(GCodeInfo &gcode_info) {
 } // namespace
 
 ToolsMappingBody::ToolsMappingBody(window_t *parent, GCodeInfo &gcode_info)
-    : AddSuperWindow<window_t>(parent, GuiDefaults::RectScreenNoHeader)
+    : window_t(parent, GuiDefaults::RectScreenNoHeader)
     , drawing_nozzles(!all_nozzles_same(gcode_info))
     , left_header(parent, left_header_rect, is_multiline::no, is_closed_on_click_t::no, _("G-Code filaments"))
     , right_header(parent, right_header_rect, is_multiline::no, is_closed_on_click_t::no,
@@ -350,12 +329,12 @@ ToolsMappingBody::ToolsMappingBody(window_t *parent, GCodeInfo &gcode_info)
     , left_gcode_colors(make_left_gcode_color(std::make_index_sequence<max_item_rows>(), parent, gcode_info))
     , left_gcode_icons(make_left_gcode_icon(std::make_index_sequence<max_item_rows>(), parent))
     , right_phys_icons(make_right_phys_icon(std::make_index_sequence<max_item_rows>(), parent))
-    , bottom_guide(parent, bottom_guide_rect, is_multiline::no, is_closed_on_click_t::no, _(""))
+    , bottom_guide(parent, bottom_guide_rect, is_multiline::no, is_closed_on_click_t::no, {})
     , bottom_icon(parent, bottom_icon_rect, nullptr)
     , bottom_radio(parent, bottom_radio_rect, responses_with_print)
     , gcode(gcode_info) {
 
-    bottom_guide.SetTextColor(0x00CCCCCC);
+    bottom_guide.SetTextColor(Color::from_raw(0x00CCCCCC));
 
     for (auto &txt : left_gcode_texts) {
         txt.SetRoundCorners();
@@ -417,16 +396,22 @@ ToolsMappingBody::ToolsMappingBody(window_t *parent, GCodeInfo &gcode_info)
     std::iota(std::begin(left_gcode_pos_to_real), std::end(left_gcode_pos_to_real), 0); // default order with spaces
     std::iota(std::begin(right_phys_pos_to_real), std::end(right_phys_pos_to_real), 0); // default order with spaces
 
-    // setup mapper to be 1-1, 2-2, but only for each gcode we're trying to assign (unassign the rest)
-    mapper.reset(); // default assignment is 1-1, 2-2
-    for (size_t i = gcode.UsedExtrudersCount(); i < std::size(left_gcode_idx_to_real); ++i) {
-        mapper.set_unassigned(left_gcode_idx_to_real[i]);
+    if (tool_mapper.is_enabled()) {
+        // Marlin contains valid tool mapping - probably preset by Connect. Take that one as our initial input.
+        mapper = tool_mapper;
+        joiner = spool_join;
+    } else {
+        // setup mapper to be 1-1, 2-2, but only for each gcode we're trying to assign (unassign the rest)
+        mapper.reset(); // default assignment is 1-1, 2-2
+        for (size_t i = gcode.UsedExtrudersCount(); i < std::size(left_gcode_idx_to_real); ++i) {
+            mapper.set_unassigned(left_gcode_idx_to_real[i]);
+        }
+        // also unassign when the right side is not available
+        for (size_t i = get_num_of_enabled_tools(); i < std::size(right_phys_idx_to_real); ++i) {
+            mapper.set_unassigned(right_phys_idx_to_real[i]);
+        }
+        mapper.set_enable(true);
     }
-    // also unassign when the right side is not available
-    for (size_t i = get_num_of_enabled_tools(); i < std::size(right_phys_idx_to_real); ++i) {
-        mapper.set_unassigned(right_phys_idx_to_real[i]);
-    }
-    mapper.set_enable(true);
 
     bottom_guide.SetAlignment(Align_t::Center());
 
@@ -586,7 +571,7 @@ void ToolsMappingBody::go_left() {
     }
 
     update_bottom_guide();
-#if PRINTER_IS_PRUSA_XL
+#if PRINTER_IS_PRUSA_XL()
     update_dwarf_lights();
 #endif
     Invalidate();
@@ -619,7 +604,7 @@ void ToolsMappingBody::go_right() {
 
     state = State::right;
     update_bottom_guide();
-#if PRINTER_IS_PRUSA_XL
+#if PRINTER_IS_PRUSA_XL()
     update_dwarf_lights();
 #endif
     Invalidate();
@@ -640,48 +625,45 @@ bool ToolsMappingBody::are_all_gcode_tools_mapped() const {
     return true;
 }
 
-std::array<size_t, I_MI_FilamentSelect::max_I_MI_FilamentSelect_idx + 1> ToolsMappingBody::build_preselect_array() {
-    std::array<size_t, I_MI_FilamentSelect::max_I_MI_FilamentSelect_idx + 1> ret;
-    ret.fill(ftrstd::to_underlying(filament::Type::NONE)); // Don't change
+MultiFilamentChangeConfig ToolsMappingBody::build_changeall_config() {
+    MultiFilamentChangeConfig result;
 
     for (size_t idx = 0; idx < get_num_of_enabled_tools(); ++idx) {
         const auto real_phys = right_phys_idx_to_real[idx];
-        if (auto real_mapped_gcode = tools_mapping::to_gcode_tool_custom(mapper, joiner, real_phys); real_mapped_gcode == tools_mapping::no_tool) { // not assigned
-            continue; // leave preselection as Don't change
-        } else if (const auto &opt_name = gcode.get_extruder_info(real_mapped_gcode).filament_name; opt_name.has_value()) {
-            assert(gcode.get_extruder_info(real_mapped_gcode).used()); // otherwise bug in mapping
-            if (auto desired_filament = filament::get_type(opt_name.value().data(), strlen(opt_name.value().data()));
-                config_store().get_filament_type(real_phys) != desired_filament) {
-                // only preselect if we don't have it already
-                ret[real_phys] = ftrstd::to_underlying(filament::get_type(opt_name.value().data(), strlen(opt_name.value().data())));
-            }
+        const auto real_mapped_gcode = tools_mapping::to_gcode_tool_custom(mapper, joiner, real_phys);
+
+        // Not assigned -> keep as 'don't change'
+        if (real_mapped_gcode == tools_mapping::no_tool) {
+            continue;
         }
+
+        auto &config = result[real_phys];
+        assert(gcode.get_extruder_info(real_mapped_gcode).used()); // otherwise bug in mapping
+        config.color = gcode.get_extruder_info(real_mapped_gcode).extruder_colour;
+
+        const auto &opt_name = gcode.get_extruder_info(real_mapped_gcode).filament_name;
+        if (!opt_name.has_value()) {
+            continue;
+        }
+
+        // only preselect if we don't have it already
+        if (config_store().get_filament_type(real_phys).matches(opt_name.value().data())) {
+            continue;
+        }
+
+        config.action = multi_filament_change::Action::change;
+
+        // We're loading a new filament, do not fallback into ad-hoc one -> extruder_index = std::nullopt
+        config.new_filament = FilamentType::from_name(opt_name.value().data());
     }
 
-    return ret;
-}
-
-std::array<std::optional<filament::Colour>, I_MI_FilamentSelect::max_I_MI_FilamentSelect_idx + 1> ToolsMappingBody::build_color_array() {
-    std::array<std::optional<filament::Colour>, I_MI_FilamentSelect::max_I_MI_FilamentSelect_idx + 1> ret;
-    ret.fill(std::nullopt); // No color given
-
-    for (size_t idx = 0; idx < get_num_of_enabled_tools(); ++idx) {
-        const auto real_phys = right_phys_idx_to_real[idx];
-        if (auto real_mapped_gcode = tools_mapping::to_gcode_tool_custom(mapper, joiner, real_phys); real_mapped_gcode == tools_mapping::no_tool) { // not assigned
-            continue; // leave preselection as Don't change
-        } else if (const auto &opt_color = gcode.get_extruder_info(real_mapped_gcode).extruder_colour; opt_color.has_value()) {
-            assert(gcode.get_extruder_info(real_mapped_gcode).used()); // otherwise bug in mapping
-            ret[real_phys] = { .red = opt_color.value().red, .green = opt_color.value().green, .blue = opt_color.value().blue };
-        }
-    }
-
-    return ret;
+    return result;
 }
 
 void ToolsMappingBody::refresh_physical_tool_filament_labels() {
     for (const auto &real : right_phys_pos_to_real) {
         print_right_tool_into_buffer(real, right_phys_label_buffers, drawing_nozzles);
-        right_phys_texts[real].SetText(_(right_phys_label_buffers[real].data()));
+        right_phys_texts[real].SetText(string_view_utf8::MakeRAM(right_phys_label_buffers[real].data()));
     }
 }
 
@@ -703,7 +685,7 @@ void ToolsMappingBody::update_bottom_guide() {
     auto print_alert_part_of_guide = [&](const char *state_text, const img::Resource *img) {
         strview = _(state_text);
         bottom_icon.SetRes(img);
-        size_t cur_strlen = strview.computeNumUtf8CharsAndRewind();
+        size_t cur_strlen = strview.computeNumUtf8Chars();
         int16_t left_pos = (GuiDefaults::ScreenWidth - (width(Font::normal) + 1) * (cur_strlen + 1) - alert_icon_size) / 2; // make the pos to be on the left of the text (+ one added space to the left of the text)
         Rect16 new_icon_rect = bottom_icon_rect + Rect16::X_t { static_cast<int16_t>(left_pos) };
         bottom_icon.SetRect(static_cast<Rect16>(new_icon_rect));
@@ -787,13 +769,13 @@ void ToolsMappingBody::update_shown_state_after_scroll(uint8_t previous_idx) {
         }
     }
 
-#if PRINTER_IS_PRUSA_XL
+#if PRINTER_IS_PRUSA_XL()
     update_dwarf_lights();
 #endif
 }
 
 void ToolsMappingBody::update_dwarf_lights() {
-#if PRINTER_IS_PRUSA_XL
+#if PRINTER_IS_PRUSA_XL()
     HOTEND_LOOP() {
         prusa_toolchanger.getTool(e).set_cheese_led(0, 0); // disable all
     }
@@ -818,7 +800,7 @@ void ToolsMappingBody::update_dwarf_lights() {
             });
         } // else unassigned and do nothing
     }
-#endif // PRINTER_IS_PRUSA_XL
+#endif // PRINTER_IS_PRUSA_XL()
 }
 
 void ToolsMappingBody::update_shown_state() {
@@ -1150,7 +1132,7 @@ void ToolsMappingBody::handle_item_click() {
     }
 }
 
-void ToolsMappingBody::windowEvent(EventLock /*has private ctor*/, [[maybe_unused]] window_t *sender, GUI_event_t event, [[maybe_unused]] void *param) {
+void ToolsMappingBody::windowEvent([[maybe_unused]] window_t *sender, GUI_event_t event, [[maybe_unused]] void *param) {
     if (querying_user) {
         return;
     }
@@ -1211,7 +1193,7 @@ void ToolsMappingBody::windowEvent(EventLock /*has private ctor*/, [[maybe_unuse
             tool_mapper = mapper;
             spool_join = joiner;
         } else if (response == Response::Filament) {
-            if (ChangeAllFilamentsBox(build_preselect_array(), true, build_color_array())) {
+            if (DialogChangeAllFilaments::exec(build_changeall_config(), true)) {
                 // This was closed while changing filament by print_abort()
                 Screens::Access()->Get()->Validate(); // Do not redraw this
                 return;

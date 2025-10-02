@@ -19,15 +19,15 @@
  * but it is just simpler to make many texts witch cost rectangles
  * but it will consume lot of RAM
  */
-class SelftestFrameLoadcell : public AddSuperWindow<SelftestFrameNamedWithRadio> {
+class SelftestFrameLoadcell : public SelftestFrameNamedWithRadio {
     FooterLine footer;
     window_wizard_progress_t progress;
 
     window_icon_t icon_hand;
     window_text_t text_phase;
 
-    window_text_t text_prebig;
     WindowBlinkingText text_big; // BIG, possibly blinking number
+    char txt_big_buffer[8] = {};
 
     window_text_t text_result; // in middle of screen
 

@@ -627,13 +627,15 @@ TEST_CASE("multi-line UTF-8", "[str2multiline][text_wrap]") {
 
         const std::uint8_t utf8str[] = "příliš žluťoučký kůň úpěl ďábelské ódy : PŘÍLIŠ ŽLUŤOUČKÝ KŮŇ ÚPĚL ĎÁBELSKÉ ÓDY";
         string_view_utf8 sf = string_view_utf8::MakeCPUFLASH(utf8str);
+        StringReaderUtf8 reader(sf);
+
         monospace font;
         text_wrapper<test_buffer, const monospace *> w(240, &font);
         unichar c;
         std::vector<unichar> str(n255), expected(n255);
         size_t index = 0;
         to_unichar("příliš žluťoučký kůň\núpěl ďábelské ódy :\nPŘÍLIŠ ŽLUŤOUČKÝ KŮŇ\nÚPĚL ĎÁBELSKÉ ÓDY", &expected);
-        while ((c = w.character(sf)) != '\0') {
+        while ((c = w.character(reader)) != '\0') {
             str[index++] = c;
         }
         str[index] = '\0';
@@ -718,8 +720,6 @@ TEST_CASE("StringBuilder", "[strbuilder]") {
                 }
 
                 CHECK(b.is_problem());
-                CHECK_THAT(b.str_nocheck(), Equals("abc"));
-                CHECK(b.char_count() == 3);
             }
 
             {
@@ -728,5 +728,42 @@ TEST_CASE("StringBuilder", "[strbuilder]") {
             }
 
         } while (std::next_permutation(overfill_order.begin(), overfill_order.end()));
+    }
+
+    SECTION("printf cropping") {
+        ArrayStringBuilder<8> b;
+        b.append_printf("123456%i", 56);
+        CHECK(b.is_problem());
+        CHECK_THAT(b.str_nocheck(), Equals("1234565"));
+    }
+
+    SECTION("append_float") {
+        const auto afl_check = [](double val, const char *expected, const StringBuilder::AppendFloatConfig &cfg = {}) {
+            ArrayStringBuilder<16> b;
+            b.append_float(val, cfg);
+            CHECK_THAT(b.str_nocheck(), Equals(expected));
+        };
+
+        afl_check(0, "0");
+        afl_check(0.3, "0.3");
+        afl_check(0.29, "0.29");
+        afl_check(-15.01, "-15.01");
+
+        afl_check(0, "0", { .skip_zero_before_dot = true });
+        afl_check(0.91, ".91", { .skip_zero_before_dot = true });
+        afl_check(-0.313, "-0.313", { .skip_zero_before_dot = true });
+        afl_check(3.13, "3.13", { .skip_zero_before_dot = true });
+
+        afl_check(-0.1, "-0.100", { .max_decimal_places = 3, .all_decimal_places = true });
+        afl_check(-0.1, "-0.10", { .max_decimal_places = 2, .all_decimal_places = true });
+        afl_check(-0.001, "-0.001", { .max_decimal_places = 3, .all_decimal_places = true });
+
+        afl_check(-0.001, "-0.001", { .max_decimal_places = 3 });
+        afl_check(0.00099, "0.001", { .max_decimal_places = 3 });
+        afl_check(-0.00099, "-0.001", { .max_decimal_places = 3 });
+        afl_check(0.0005, "0.001", { .max_decimal_places = 3 });
+        afl_check(0.00049, "0", { .max_decimal_places = 3 });
+        afl_check(-0.0005, "-0.001", { .max_decimal_places = 3 });
+        afl_check(-0.00049, "0", { .max_decimal_places = 3 });
     }
 }

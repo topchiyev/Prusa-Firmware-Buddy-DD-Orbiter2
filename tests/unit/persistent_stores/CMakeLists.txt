@@ -7,7 +7,6 @@ add_executable(
   ${CMAKE_SOURCE_DIR}/src/persistent_stores/storage_drivers/eeprom_storage.cpp
   ../mock/bsod.cpp
   ../mock/timing_dummy.cpp
-  ${CMAKE_SOURCE_DIR}/tests/stubs/fake_freertos_mutex.cpp
   ../mock/crc32_sw.cpp
   )
 
@@ -29,6 +28,8 @@ target_include_directories(
          ${CMAKE_SOURCE_DIR}/src/common/utils
          ${CMAKE_SOURCE_DIR}/lib/Marlin/Marlin/src/
   )
+
+target_link_libraries(eeprom_unit_tests SG14 freertos_tests)
 
 add_catch_test(eeprom_unit_tests)
 

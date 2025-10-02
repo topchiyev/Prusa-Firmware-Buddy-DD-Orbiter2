@@ -9,7 +9,6 @@ add_executable(
   ${CMAKE_SOURCE_DIR}/src/transfers/changed_path.cpp
   ${CMAKE_SOURCE_DIR}/src/transfers/transfer_recovery.cpp
   ${CMAKE_SOURCE_DIR}/tests/stubs/strlcpy.c
-  ${CMAKE_SOURCE_DIR}/tests/stubs/fake_freertos_mutex.cpp
   ${CMAKE_SOURCE_DIR}/tests/unit/mock/bsod.cpp
   decrypt.cpp
   monitor.cpp
@@ -33,5 +32,7 @@ target_include_directories(
 add_definitions(-DDATA_PATH="${CMAKE_CURRENT_SOURCE_DIR}")
 
 file(GLOB AUTOMATA_GENERATORS ${PROJECT_ROOT_DIR}/utils/gen-automata/*.py)
+
+target_link_libraries(transfers_tests SG14 freertos_tests)
 
 add_catch_test(transfers_tests)

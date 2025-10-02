@@ -57,8 +57,7 @@ private:
     const buddy::hw::OutputPin &chip_select_pin;
 
 public:
-    explicit LIS2DHCore(const buddy::hw::OutputPin &chip_select_pin);
-    ~LIS2DHCore() = default;
+    explicit LIS2DHCore(const buddy::hw::OutputPin &chip_sel_pin);
 
 protected:
     status_t beginCore(void);
@@ -72,7 +71,7 @@ protected:
     status_t readRegisterInt16(int16_t *, uint8_t offset);
 
     // Writes an 8-bit byte;
-    void writeRegister(uint8_t, uint8_t);
+    status_t writeRegister(uint8_t, uint8_t);
 
 private:
     // Communication stuff
@@ -118,7 +117,7 @@ public:
 
     // Constructor generates default SensorSettings.
     //(over-ride after construction if desired)
-    explicit LIS2DH(const buddy::hw::OutputPin &chip_select_pin);
+    explicit LIS2DH(const buddy::hw::OutputPin &chip_sel_pin);
     //~LIS3DH() = default;
 
     // Call to apply SensorSettings
@@ -138,12 +137,14 @@ public:
 
     // FIFO stuff
     void fifoBegin(void);
-    void fifoClear(void);
-    uint8_t fifoGetStatus(void);
+    status_t fifoClear();
+    status_t fifoGetStatus(uint8_t *);
 
     float calcAccel(int16_t);
 
-    bool isSetupDone();
+    bool isSetupDone() const {
+        return m_isInicialized;
+    }
 
 private:
     static constexpr bool m_high_resolution = false;
@@ -159,8 +160,11 @@ public:
         : m_accelerometer(accelerometer)
         , m_num_records(0)
         , m_record_index_to_get(0)
-        , m_state(State::draining) {}
-    int get(Acceleration &acceleration);
+        , m_state(State::draining)
+        , m_sampling_start_time(0)
+        , m_samples_taken(0) {}
+    int get(Acceleration &acceleration, bool &overrun);
+    float get_sampling_rate();
 
 private:
     struct Record {
@@ -179,4 +183,7 @@ private:
     int8_t m_num_records;
     int8_t m_record_index_to_get;
     State m_state;
+
+    uint32_t m_sampling_start_time;
+    uint32_t m_samples_taken;
 };

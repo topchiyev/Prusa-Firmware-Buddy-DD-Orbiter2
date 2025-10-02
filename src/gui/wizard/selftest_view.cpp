@@ -5,9 +5,10 @@
  */
 
 #include "selftest_view.hpp"
+#include "display.hpp"
 
 SelfTestView::SelfTestView(window_t *parrent, Rect16 rc)
-    : AddSuperWindow<window_t>(parrent, rc)
+    : window_t(parrent, rc)
     , first_failed(nullptr)
     , first_passed(nullptr)
     , count(0)
@@ -126,7 +127,7 @@ void SelfTestView::unconditionalDraw() {
         // clear background
         Rect16 item_rc = rc;
         item_rc = h;
-        display::FillRect(item_rc, GetBackColor());
+        display::fill_rect(item_rc, GetBackColor());
 
         // cut off used part of rect
         rc -= h;
@@ -139,7 +140,7 @@ void SelfTestView::unconditionalDraw() {
 
     // fill rest
     if (rc.Height()) {
-        display::FillRect(rc, GetBackColor());
+        display::fill_rect(rc, GetBackColor());
     }
 }
 

@@ -9,7 +9,7 @@
 #include "status_footer.hpp"
 #include <utility_extensions.hpp>
 
-class ScreenPrintingModel : public AddSuperWindow<IScreenPrinting> {
+class ScreenPrintingModel : public IScreenPrinting {
 protected:
     enum class BtnSocket {
         Left = 0,
@@ -28,6 +28,7 @@ protected:
         Home,
         Reprint,
         Disconnect,
+        SetReady,
         _count,
         _last = _count - 1,
     };
@@ -44,6 +45,7 @@ protected:
         Home,
         Skip,
         Disconnect,
+        SetReady,
         _count,
         _last = _count - 1,
     };
@@ -60,5 +62,5 @@ protected:
     void EnableButton(BtnSocket btn);
 
 public:
-    ScreenPrintingModel(string_view_utf8 caption);
+    ScreenPrintingModel(const string_view_utf8 &caption);
 };

@@ -20,11 +20,11 @@
 
 using ScreenMenuUserInterface__ = ScreenMenu<GuiDefaults::MenuFooter, MI_RETURN,
     MI_FOOTER_SETTINGS, MI_SORT_FILES,
-#if not PRINTER_IS_PRUSA_MINI
+#if not PRINTER_IS_PRUSA_MINI()
     MI_PRINT_PROGRESS_TIME,
 #endif
     MI_TIMEOUT, MI_SOUND_MODE, MI_HEATUP_BED
-#if (!PRINTER_IS_PRUSA_XL && !PRINTER_IS_PRUSA_MK4 && !PRINTER_IS_PRUSA_MK3_5)
+#if (!PRINTER_IS_PRUSA_XL() && !PRINTER_IS_PRUSA_MK4() && !PRINTER_IS_PRUSA_MK3_5())
     ,
     MI_SOUND_VOLUME
 #endif
@@ -48,7 +48,7 @@ using ScreenMenuUserInterface__ = ScreenMenu<GuiDefaults::MenuFooter, MI_RETURN,
     >;
 
 class ScreenMenuUserInterface : public ScreenMenuUserInterface__ {
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
     int last_touch_error_count = 0;
 
 public:

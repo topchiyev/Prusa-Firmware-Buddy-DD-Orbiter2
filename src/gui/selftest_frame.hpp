@@ -17,7 +17,7 @@
  * @brief parents of all tests
  * even supports "wizard questions"
  */
-class SelftestFrame : public AddSuperWindow<window_frame_t> {
+class SelftestFrame : public window_frame_t {
 protected:
     PhasesSelftest phase_current;
     PhasesSelftest phase_previous;
@@ -35,7 +35,7 @@ public:
 /**
  * @brief parent of non-tests frame with buttons
  */
-class SelftestFrameWithRadio : public AddSuperWindow<SelftestFrame> {
+class SelftestFrameWithRadio : public SelftestFrame {
 protected:
     RadioButtonFsm<PhasesSelftest> radio;
     virtual void pre_change() override; // update radio button
@@ -46,21 +46,21 @@ public:
 /**
  * @brief parent of normal tests without buttons
  */
-class SelftestFrameNamed : public AddSuperWindow<SelftestFrame> {
+class SelftestFrameNamed : public SelftestFrame {
     window_text_t test_name;
 
 public:
-    SelftestFrameNamed(window_t *parent, PhasesSelftest ph, fsm::PhaseData data, string_view_utf8 name);
-    void SetName(string_view_utf8 txt);
+    SelftestFrameNamed(window_t *parent, PhasesSelftest ph, fsm::PhaseData data, const string_view_utf8 &name);
+    void SetName(const string_view_utf8 &txt);
 };
 
 /**
  * @brief parent of tests with buttons
  */
-class SelftestFrameNamedWithRadio : public AddSuperWindow<SelftestFrameNamed> {
+class SelftestFrameNamedWithRadio : public SelftestFrameNamed {
 protected:
     RadioButtonFsm<PhasesSelftest> radio;
     virtual void pre_change() override; // update radio button
 public:
-    SelftestFrameNamedWithRadio(window_t *parent, PhasesSelftest ph, fsm::PhaseData data, string_view_utf8 name, size_t lines_of_footer = 0);
+    SelftestFrameNamedWithRadio(window_t *parent, PhasesSelftest ph, fsm::PhaseData data, const string_view_utf8 &name, size_t lines_of_footer = 0);
 };

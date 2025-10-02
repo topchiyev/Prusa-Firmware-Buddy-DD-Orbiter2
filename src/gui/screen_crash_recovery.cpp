@@ -12,6 +12,7 @@
 #include <guiconfig/guiconfig.h>
 #include <option/has_side_leds.h>
 #include <find_error.hpp>
+
 #if HAS_SIDE_LEDS()
     #include <leds/side_strip_control.hpp>
 #endif
@@ -33,7 +34,7 @@
 
 using namespace crash_recovery;
 
-    #ifdef USE_ST7789
+    #if HAS_MINI_DISPLAY()
 static constexpr size_t row_1 = 109; // icon
 static constexpr size_t row_3 = 205; // line
 static constexpr size_t col_0 = 10;
@@ -41,7 +42,7 @@ static constexpr Rect16 icon_nozzle_rc { 97, row_1 - 5, 48, 48 };
 static constexpr Rect16 icon_nozzle_crash_rc { 97 - 26, row_1, 48, 48 };
 static constexpr size_t row_nok_shift = -31;
     #endif
-    #ifdef USE_ILI9488
+    #if HAS_LARGE_DISPLAY()
 static constexpr size_t row_1 = 120; // icon
 static constexpr size_t row_3 = 226; // line
 static constexpr size_t col_0 = 130;
@@ -112,6 +113,22 @@ static constexpr const char *en_text_long_homefail = find_error(ErrCode::CONNECT
 static constexpr const char *en_text_homefail_info = N_("Try checking belt tension\nor debris on the axes.");
 static constexpr const char *en_text_tool_careful = N_("!! Careful, tools are hot !!");
 
+RepeatedBeep::RepeatedBeep() {
+    Sound_Play(eSOUND_TYPE::WaitingBeep);
+}
+
+RepeatedBeep::~RepeatedBeep() {
+    Sound_Stop();
+}
+
+SingleBeep::SingleBeep() {
+    Sound_Play(eSOUND_TYPE::SingleBeep);
+}
+
+SingleBeep::~SingleBeep() {
+    // No need to even stop the sound
+}
+
 WinsCheckAxis::WinsCheckAxis(ScreenCrashRecovery &screen)
     : text_long(&screen, text_long_rc, is_multiline::yes, is_closed_on_click_t::no, _(en_text_long_check))
     , icon_nozzle_crash(&screen, icon_nozzle_crash_rc, &img::nozzle_crash_101x64)
@@ -126,7 +143,6 @@ WinsCheckAxis::WinsCheckAxis(ScreenCrashRecovery &screen)
     line.SetBackColor(COLOR_ORANGE);
     text_long.SetAlignment(Align_t::Center());
     icon_x_axis.SetState(SelftestSubtestState_t::running);
-    Sound_Play(eSOUND_TYPE::SingleBeep);
     #if HAS_SIDE_LEDS()
     leds::side_strip_control.PresentColor(leds::Color(255, 0, 0), 400, 100);
     #endif
@@ -143,7 +159,6 @@ WinsHome::WinsHome(ScreenCrashRecovery &screen)
     line.SetBackColor(COLOR_ORANGE);
     text_long.SetAlignment(Align_t::Center());
     icon_home_axes.SetState(SelftestSubtestState_t::running);
-    Sound_Play(eSOUND_TYPE::SingleBeep);
     #if HAS_SIDE_LEDS()
     leds::side_strip_control.PresentColor(leds::Color(255, 0, 0), 400, 100);
     #endif
@@ -160,7 +175,6 @@ WinsAxisNok::WinsAxisNok(ScreenCrashRecovery &screen)
 
     line.SetBackColor(COLOR_ORANGE);
     text_long.SetAlignment(Align_t::Center());
-    Sound_Play(eSOUND_TYPE::WaitingBeep);
     #if HAS_SIDE_LEDS()
     leds::side_strip_control.PresentColor(leds::Color(255, 0, 0), 400, 100);
     #endif
@@ -182,7 +196,6 @@ WinsRepeatedCrash::WinsRepeatedCrash(ScreenCrashRecovery &screen)
     text_long.SetAlignment(Align_t::Center());
     text_info.SetAlignment(Align_t::Center());
     text_info.set_font(Font::small);
-    Sound_Play(eSOUND_TYPE::WaitingBeep);
     #if HAS_SIDE_LEDS()
     leds::side_strip_control.PresentColor(leds::Color(255, 0, 0), 400, 100);
     #endif
@@ -198,7 +211,6 @@ WinsHomeFail::WinsHomeFail(ScreenCrashRecovery &screen)
     text_long.SetAlignment(Align_t::Center());
     text_info.SetAlignment(Align_t::Center());
     text_info.set_font(Font::small);
-    Sound_Play(eSOUND_TYPE::WaitingBeep);
     #if HAS_SIDE_LEDS()
     leds::side_strip_control.PresentColor(leds::Color(255, 0, 0), 400, 100);
     #endif
@@ -238,254 +250,161 @@ WinsToolRecovery::WinsToolRecovery(ScreenCrashRecovery &screen)
 
     static_assert(EXTRUDERS == 6, "This screen is made for EXTRUDERS=6");
 
-    Sound_Play(eSOUND_TYPE::WaitingBeep);
-
         #if HAS_SIDE_LEDS()
     leds::side_strip_control.PresentColor(leds::Color(255, 0, 0), 400, 100);
         #endif
 }
     #endif /*HAS_TOOLCHANGER()*/
 
-WinUnion::WinUnion(ScreenCrashRecovery &screen)
-    : parent_screen(screen) {
-    New(PhasesCrashRecovery::check_X);
-}
-
-WinUnion::screen_type WinUnion::ScreenType(PhasesCrashRecovery ph) {
-    switch (ph) {
-    case PhasesCrashRecovery::home:
-        return WinUnion::Home;
-    case PhasesCrashRecovery::axis_NOK:
-    case PhasesCrashRecovery::axis_short:
-    case PhasesCrashRecovery::axis_long:
-        return WinUnion::AxisNok;
-    case PhasesCrashRecovery::repeated_crash:
-        return WinUnion::RepeatedCrash;
-    case PhasesCrashRecovery::home_fail:
-        return WinUnion::HomeFail;
-    case PhasesCrashRecovery::check_X:
-    case PhasesCrashRecovery::check_Y:
-        return WinUnion::CheckAxis;
-    #if HAS_TOOLCHANGER()
-    case PhasesCrashRecovery::tool_recovery:
-        return WinUnion::ToolRecovery;
-    #else /*HAS_TOOLCHANGER()*/
-        bsod("Tool recovery window without toolchanger");
-    #endif /*HAS_TOOLCHANGER()*/
-    }
-    return WinUnion::CheckAxis;
-}
-
-void WinUnion::ChangePhase(PhasesCrashRecovery ph) {
-    if (ScreenType(phase) == ScreenType(ph)) {
-        phase = ph;
-        return;
-    }
-    Destroy();
-    New(ph);
-}
-
-// The C++ language does allow a program to call a destructor directly, and, since it is not possible to destroy
-// the object using a delete expression, that is how one destroys an object that was constructed via a pointer
-// placement new expression
-void WinUnion::Destroy() {
-    Sound_Stop();
-    switch (phase) {
-    case PhasesCrashRecovery::check_X:
-    case PhasesCrashRecovery::check_Y:
-        checkAxis->~WinsCheckAxis();
-        return;
-    case PhasesCrashRecovery::home:
-        home->~WinsHome();
-        return;
-    case PhasesCrashRecovery::axis_NOK:
-        return;
-    case PhasesCrashRecovery::axis_short:
-    case PhasesCrashRecovery::axis_long:
-        axisNok->~WinsAxisNok();
-        return;
-    case PhasesCrashRecovery::repeated_crash:
-        repeatedCrash->~WinsRepeatedCrash();
-        return;
-    case PhasesCrashRecovery::home_fail:
-        homeFail->~WinsHomeFail();
-        return;
-    #if HAS_TOOLCHANGER()
-    case PhasesCrashRecovery::tool_recovery:
-        toolRecovery->~WinsToolRecovery();
-    #else /*HAS_TOOLCHANGER()*/
-        bsod("Tool recovery window without toolchanger");
-    #endif /*HAS_TOOLCHANGER()*/
-        return;
-    }
-}
-
-void WinUnion::New(PhasesCrashRecovery ph) {
-    phase = ph;
-    switch (phase) {
-    case PhasesCrashRecovery::check_X:
-    case PhasesCrashRecovery::check_Y:
-        checkAxis = new (&mem_space) WinsCheckAxis(parent_screen);
-        return;
-    case PhasesCrashRecovery::home:
-        home = new (&mem_space) WinsHome(parent_screen);
-        return;
-    case PhasesCrashRecovery::axis_NOK:
-        return;
-    case PhasesCrashRecovery::axis_short:
-        axisNok = new (&mem_space) WinsAxisNok(parent_screen);
-        axisNok->text_long.SetText(_(en_text_long_short));
-        return;
-    case PhasesCrashRecovery::axis_long:
-        axisNok = new (&mem_space) WinsAxisNok(parent_screen);
-        axisNok->text_long.SetText(_(en_text_long_long));
-        return;
-    case PhasesCrashRecovery::repeated_crash:
-        repeatedCrash = new (&mem_space) WinsRepeatedCrash(parent_screen);
-        return;
-    case PhasesCrashRecovery::home_fail:
-        homeFail = new (&mem_space) WinsHomeFail(parent_screen);
-        return;
-    #if HAS_TOOLCHANGER()
-    case PhasesCrashRecovery::tool_recovery:
-        toolRecovery = new (&mem_space) WinsToolRecovery(parent_screen);
-    #else /*HAS_TOOLCHANGER()*/
-        bsod("Tool recovery window without toolchanger");
-    #endif /*HAS_TOOLCHANGER()*/
-        return;
-    }
-}
-
 ScreenCrashRecovery::ScreenCrashRecovery()
-    : AddSuperWindow<screen_t>()
+    : screen_t()
     , header(this)
     , footer(this)
-    , win_union(*this) {
+    , window { WinsCheckAxis(*this) } {
 
     ScreenCrashRecovery::ClrMenuTimeoutClose(); // don't close on menu timeout
     header.SetText(_("CRASH DETECTED"));
     header.SetIcon(&img::nozzle_16x16);
-    ths = this;
 }
 
 ScreenCrashRecovery::~ScreenCrashRecovery() {
     Sound_Stop();
-    ths = nullptr;
 }
 
 bool ScreenCrashRecovery::Change(fsm::BaseData data) {
-    win_union.ChangePhase(GetEnumFromPhaseIndex<PhasesCrashRecovery>(data.GetPhase()));
+    change_phase(GetEnumFromPhaseIndex<PhasesCrashRecovery>(data.GetPhase()));
 
-    switch (win_union.phase) {
-    case PhasesCrashRecovery::check_X:
-    case PhasesCrashRecovery::check_Y: {
-        Crash_recovery_fsm state(data.GetData());
-        win_union.checkAxis->icon_x_axis.SetState(state.x);
-        win_union.checkAxis->icon_y_axis.SetState(state.y);
-        break;
-    }
-    case PhasesCrashRecovery::home: {
-        Crash_recovery_fsm state(data.GetData());
-        win_union.home->icon_home_axes.SetState(state.x);
-        break;
-    }
-    case PhasesCrashRecovery::axis_NOK:
-    case PhasesCrashRecovery::axis_short:
-    case PhasesCrashRecovery::axis_long: {
-        Crash_recovery_fsm state(data.GetData());
-        win_union.axisNok->icon_x_axis.SetState(state.x);
-        win_union.axisNok->icon_y_axis.SetState(state.y);
-        break;
-    }
-    case PhasesCrashRecovery::repeated_crash:
-        break;
-    case PhasesCrashRecovery::home_fail:
-        break;
+    const auto visitor = [&]<typename T>(T &mem) {
+        if constexpr (std::is_same_v<T, WinsCheckAxis> || std::is_same_v<T, WinsAxisNok>) {
+            Crash_recovery_fsm state(data.GetData());
+            mem.icon_x_axis.SetState(state.x);
+            mem.icon_y_axis.SetState(state.y);
+
+        } else if constexpr (std::is_same_v<T, WinsHome>) {
+            Crash_recovery_fsm state(data.GetData());
+            mem.icon_home_axes.SetState(state.x);
+        }
+
     #if HAS_TOOLCHANGER()
-    case PhasesCrashRecovery::tool_recovery: {
-        Crash_recovery_tool_fsm state(data.GetData());
-        for (int i = 0; i < buddy::puppies::DWARF_MAX_COUNT; i++) {
-            if (state.enabled & (0x01 << i)) { // This tool exists
-                if (state.parked & (0x01 << i)) {
-                    win_union.toolRecovery->icon_tool[i].SetState(SelftestSubtestState_t::ok); // Parked
-                } else {
-                    win_union.toolRecovery->icon_tool[i].SetState(SelftestSubtestState_t::running); // Waiting to be parked
+        else if constexpr (std::is_same_v<T, WinsToolRecovery>) {
+            Crash_recovery_tool_fsm state(data.GetData());
+            for (int i = 0; i < buddy::puppies::DWARF_MAX_COUNT; i++) {
+                const auto tool_mask = (1 << i);
+                if (state.enabled & tool_mask) { // This tool exists
+                    if (state.parked & tool_mask) {
+                        mem.icon_tool[i].SetState(SelftestSubtestState_t::ok); // Parked
+                    } else {
+                        mem.icon_tool[i].SetState(SelftestSubtestState_t::running); // Waiting to be parked
+                    }
+
+                } else { // Hide disabled tools
+                    mem.text_tool[i].Hide();
+                    mem.icon_tool[i].Hide();
                 }
-            } else { // Hide disabled tools
-                win_union.toolRecovery->text_tool[i].Hide();
-                win_union.toolRecovery->icon_tool[i].Hide();
+            }
+            if (state.enabled == state.parked) {
+                mem.radio.Show();
+            } else {
+                mem.radio.Hide(); // Disable button until all are parked
             }
         }
-        if (state.enabled == state.parked) {
-            win_union.toolRecovery->radio.Show();
-        } else {
-            win_union.toolRecovery->radio.Hide(); // Disable button until all are parked
-        }
-        break;
-    }
-    #endif /*HAS_TOOLCHANGER()*/
-    }
+    #endif
+    };
+    std::visit(visitor, window);
 
     return true;
 }
 
-void ScreenCrashRecovery::windowEvent(EventLock /*has private ctor*/, window_t * /*sender*/, GUI_event_t event, [[maybe_unused]] void *param) {
-    win_union.ButtonEvent(event);
-}
+template <typename T>
+concept WithRadio = requires(T a) {
+    { a.radio } -> std::convertible_to<RadioButton &>;
+};
 
-// static variables and member functions
-ScreenCrashRecovery *ScreenCrashRecovery::ths = nullptr;
+void ScreenCrashRecovery::windowEvent(window_t * /*sender*/, GUI_event_t event, [[maybe_unused]] void *param) {
+    const auto visitor = [&](auto &mem) -> IRadioButton * {
+        if constexpr (WithRadio<decltype(mem)>) {
+            return &mem.radio;
+        } else {
+            return nullptr;
+        }
+    };
 
-ScreenCrashRecovery *ScreenCrashRecovery::GetInstance() { return ths; }
-
-void WinUnion::ButtonEvent(GUI_event_t event) {
-    RadioButton *radio = nullptr;
-    switch (phase) {
-    case PhasesCrashRecovery::check_X:
-    case PhasesCrashRecovery::check_Y:
-    case PhasesCrashRecovery::home:
-        return;
-    case PhasesCrashRecovery::repeated_crash:
-        radio = &repeatedCrash->radio;
-        break;
-    case PhasesCrashRecovery::axis_NOK:
-    case PhasesCrashRecovery::axis_short:
-    case PhasesCrashRecovery::axis_long:
-        radio = &axisNok->radio;
-        break;
-    case PhasesCrashRecovery::home_fail:
-        radio = &homeFail->radio;
-        break;
-    #if HAS_TOOLCHANGER()
-    case PhasesCrashRecovery::tool_recovery:
-        radio = &toolRecovery->radio;
-    #else /*HAS_TOOLCHANGER()*/
-        bsod("Tool recovery window without toolchanger");
-    #endif /*HAS_TOOLCHANGER()*/
-        break;
-    }
-
-    // has radio button
-    if (radio) {
+    if (auto radio = std::visit(visitor, window)) {
         switch (event) {
+
         case GUI_event_t::CLICK: {
             Response response = radio->Click();
-            PhasesCrashRecovery send_phase = phase;
-            if (phase == PhasesCrashRecovery::axis_short || phase == PhasesCrashRecovery::axis_long) {
+            auto send_phase = current_phase;
+            if (!send_phase.has_value()) {
+                break;
+            }
+            if (send_phase == PhasesCrashRecovery::axis_short || send_phase == PhasesCrashRecovery::axis_long) {
                 send_phase = PhasesCrashRecovery::axis_NOK;
             }
-            marlin_client::FSM_response(send_phase, response);
+            marlin_client::FSM_response(*send_phase, response);
             break;
         }
+
         case GUI_event_t::ENC_UP:
             ++(*radio);
             break;
+
         case GUI_event_t::ENC_DN:
             --(*radio);
             break;
+
         default:
             break;
         }
+    }
+}
+
+void ScreenCrashRecovery::change_phase(PhasesCrashRecovery new_phase) {
+    if (current_phase == new_phase) {
+        return;
+    }
+
+    current_phase = new_phase;
+
+    switch (new_phase) {
+
+    case PhasesCrashRecovery::check_X:
+    case PhasesCrashRecovery::check_Y:
+        window.emplace<WinsCheckAxis>(*this);
+        break;
+
+    case PhasesCrashRecovery::home:
+        window.emplace<WinsHome>(*this);
+        break;
+
+    case PhasesCrashRecovery::axis_NOK:
+        break;
+
+    case PhasesCrashRecovery::axis_short: {
+        auto &win = window.emplace<WinsAxisNok>(*this);
+        win.text_long.SetText(_(en_text_long_short));
+        break;
+    }
+
+    case PhasesCrashRecovery::axis_long: {
+        auto &win = window.emplace<WinsAxisNok>(*this);
+        win.text_long.SetText(_(en_text_long_long));
+        break;
+    }
+
+    case PhasesCrashRecovery::repeated_crash:
+        window.emplace<WinsRepeatedCrash>(*this);
+        break;
+
+    case PhasesCrashRecovery::home_fail:
+        window.emplace<WinsHomeFail>(*this);
+        break;
+
+    #if HAS_TOOLCHANGER()
+    case PhasesCrashRecovery::tool_recovery:
+        window.emplace<WinsToolRecovery>(*this);
+        break;
+    #endif /*HAS_TOOLCHANGER()*/
     }
 }
 

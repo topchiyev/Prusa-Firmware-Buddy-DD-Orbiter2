@@ -1,13 +1,14 @@
-// window_term.cpp
 #include "window_term.hpp"
+
+#include "display.hpp"
 #include "gui.hpp"
 #include <stdarg.h> //va_list
 
 static constexpr Font font = GuiDefaults::DefaultFont;
-static void render_term(term_t *pterm, size_t x, size_t y, color_t color_back, color_t color_text);
+static void render_term(term_t *pterm, size_t x, size_t y, Color color_back, Color color_text);
 
 window_term_t::window_term_t(window_t *parent, point_i16_t pt, uint8_t *buff, size_t cols, size_t rows)
-    : AddSuperWindow<window_t>(parent, Rect16(pt, width(font) * cols, height(font) * rows))
+    : window_t(parent, Rect16(pt, width(font) * cols, height(font) * rows))
     , color_text(GuiDefaults::ColorText) {
     term_init(&term, cols, rows, buff);
 }
@@ -16,7 +17,7 @@ void window_term_t::unconditionalDraw() {
     if (term.flg & TERM_FLG_CHANGED) {
         render_term(&term, Left(), Top(), GetBackColor(), color_text);
     } else {
-        super::unconditionalDraw();
+        window_t::unconditionalDraw();
     }
 }
 
@@ -42,7 +43,7 @@ void window_term_t::WriteChar(uint8_t ch) {
     Invalidate();
 }
 
-static void render_term(term_t *pterm, size_t x, size_t y, color_t color_back, color_t color_text) {
+static void render_term(term_t *pterm, size_t x, size_t y, Color color_back, Color color_text) {
     uint8_t char_w = width(font);
     uint8_t char_h = height(font);
     if (pterm->flg & TERM_FLG_CHANGED) {
@@ -57,7 +58,7 @@ static void render_term(term_t *pterm, size_t x, size_t y, color_t color_back, c
                     // character is followed by attribute
                     uint8_t ch = *(pb++);
                     pb++; // uint8_t attr = *(pb++);
-                    display::DrawChar(point_ui16(x + c * char_w, y + r * char_h), ch, resource_font(font), color_back, color_text);
+                    display::draw_char(point_ui16(x + c * char_w, y + r * char_h), ch, resource_font(font), color_back, color_text);
                 } else {
                     pb += 2;
                 }

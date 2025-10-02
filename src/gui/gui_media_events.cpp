@@ -44,7 +44,7 @@ void GuiMediaEventsHandler::tick() {
 
     switch (actual_state) {
     case MediaState_t::inserted:
-        if (!device_connected_at_startup()) {
+        if (!usb_host::is_media_inserted_since_startup()) {
             one_click_printing = true;
         }
         state_sent = false;
@@ -65,19 +65,6 @@ bool GuiMediaEventsHandler::ConsumeOneClickPrinting() {
     bool ret = Instance().one_click_printing;
     Instance().one_click_printing = false;
     return ret;
-}
-
-void GuiMediaEventsHandler::ClrMediaError() {
-    // clear
-    if (Instance().media_state == MediaState_t::error) {
-        Instance().clr();
-    }
-    // update
-    Tick();
-    // clear again
-    if (Instance().media_state == MediaState_t::error) {
-        Instance().clr();
-    }
 }
 
 bool GuiMediaEventsHandler::ConsumeSent(MediaState_t &ret) {

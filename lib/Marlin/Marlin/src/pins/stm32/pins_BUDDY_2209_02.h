@@ -94,7 +94,7 @@
 
   #define X_SLAVE_ADDRESS 1
   #define Y_SLAVE_ADDRESS 3
-#if BOARD_IS_XBUDDY
+#if BOARD_IS_XBUDDY()
   #define Z_SLAVE_ADDRESS 2
   #define E0_SLAVE_ADDRESS 0
 #elif(BOARD_TYPE == BUDDY_BOARD)
@@ -122,6 +122,11 @@
 #define TEMP_HEATBREAK_PIN     MARLIN_PIN(TEMP_HEATBREAK) // Analog Input todo: why it is defined for all printers?
 #define TEMP_CHAMBER_PIN       MARLIN_PIN(AMBIENT) // Analog Input
 
+#if PRINTER_IS_PRUSA_iX()
+#define TEMP_PSU_PIN           MARLIN_PIN(TEMP_PSU)
+#define TEMP_AMBIENT_PIN       MARLIN_PIN(TEMP_AMBIENT)
+#endif
+
 //
 // Heaters / Fans
 //
@@ -130,7 +135,7 @@
 #define HEATER_BED_PIN         MARLIN_PIN(BED_HEAT)
 
 #define FAN_PIN                MARLIN_PIN(FAN)
-#if BOARD_IS_XBUDDY
+#if BOARD_IS_XBUDDY()
   #if (TEMP_SENSOR_HEATBREAK > 0)
     #define HEATER_HEATBREAK_PIN   MARLIN_PIN(FAN1)
     #define FAN1_PIN               MARLIN_PIN(FAN1)

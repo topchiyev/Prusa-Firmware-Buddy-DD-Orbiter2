@@ -1,8 +1,12 @@
 #pragma once
 
 #include <error_codes.hpp>
+#include <error_code_mangle.hpp>
 #include <cstdint>
+
 #include <optional>
+
+#include <common/marlin_server_types/client_fsm_types.h>
 #include <common/marlin_server_types/marlin_server_state.h>
 
 enum class Response : uint8_t;
@@ -64,11 +68,7 @@ struct StateWithDialog {
     }
     // The numeric value of the dialog's code if present, 0 otherwise.
     uint32_t code_num() const {
-        if (has_code()) {
-            return static_cast<uint32_t>(*dialog->code);
-        } else {
-            return 0;
-        }
+        return has_code() ? map_error_code(*dialog->code) : 0;
     }
 
     const char *title() const {
@@ -83,6 +83,8 @@ struct StateWithDialog {
         return dialog.has_value() ? dialog->buttons : nullptr;
     }
 };
+
+ErrCode warning_type_to_error_code(WarningType wtype);
 
 DeviceState get_state(bool ready = false);
 DeviceState get_print_state(marlin_server::State state, bool ready);

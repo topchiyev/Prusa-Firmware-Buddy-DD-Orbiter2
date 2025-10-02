@@ -58,7 +58,7 @@ public:
     MI_ENCLOSURE_FILTER_COUNTER();
 };
 
-class MI_ENCLOSURE_FAN_SETTING : public WiSpinInt {
+class MI_ENCLOSURE_FAN_SETTING : public WiSpin {
     static constexpr const char *const label = N_("Fan Rotation");
 
 public:
@@ -68,7 +68,7 @@ protected:
     virtual void OnClick() override;
 };
 
-class MI_ENCLOSURE_POST_PRINT_DURATION : public WiSpinInt {
+class MI_ENCLOSURE_POST_PRINT_DURATION : public WiSpin {
     static constexpr const char *const label = N_("Post Print Filtration Duration");
 
 public:

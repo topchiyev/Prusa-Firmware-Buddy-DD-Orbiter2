@@ -3,6 +3,16 @@
 
 #ifdef __cplusplus
 
+namespace usb_host {
+
+/// \returns whether there is a USB drive inserted in the USB slot
+bool is_media_inserted();
+
+/// \returns whether there is a USB drive connected since startup
+bool is_media_inserted_since_startup();
+
+} // namespace usb_host
+
 namespace usbh_power_cycle {
 
 void init();
@@ -16,10 +26,6 @@ void port_disabled();
 // indication that the one click dialog during USB recovery reset should be blocked
 bool block_one_click_print();
 
-// indication that a USB error dialog should be displayed
-// usb reset was unsuccessful and nothing else remains after emptying the prefetch buffer
-extern std::atomic<bool> trigger_usb_failed_dialog;
-
 } // namespace usbh_power_cycle
 
 extern "C" {
@@ -29,7 +35,6 @@ extern "C" {
 
 void MX_USB_HOST_Init(void);
 
-bool device_connected_at_startup();
 void USBH_UserProcess(USBH_HandleTypeDef *, uint8_t id);
 extern TimerHandle_t USBH_restart_timer;
 

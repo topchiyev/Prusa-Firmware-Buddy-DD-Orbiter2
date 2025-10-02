@@ -52,6 +52,9 @@ Printer::Params ErrorPrinter::params() const {
     // Version can change between MK4 and MK3.9 in runtime
     params.version = get_printer_version();
 
+    // No tools available in this mode.
+    params.slot_mask = 0;
+
     return params;
 }
 
@@ -62,7 +65,7 @@ optional<Printer::NetInfo> ErrorPrinter::net_info(Printer::Iface) const {
 }
 
 Printer::NetCreds ErrorPrinter::net_creds() const {
-    NetCreds creds = { "", "" };
+    NetCreds creds = { "", "", "" };
 
     return creds;
 }
@@ -71,8 +74,8 @@ bool ErrorPrinter::job_control(JobControl) {
     return false;
 }
 
-bool ErrorPrinter::start_print(const char *) {
-    return false;
+const char *ErrorPrinter::start_print(const char *, const std::optional<ToolMapping> &) {
+    return "Can't print in error";
 }
 
 const char *ErrorPrinter::delete_file(const char *) {
@@ -101,8 +104,10 @@ bool ErrorPrinter::is_idle() const {
 
 void ErrorPrinter::init_connect(const char *token) {
     // Used from the SET_TOKEN command, so we make it work even in error state.
-    config_store().connect_token.set(token);
-    config_store().connect_enabled.set(true);
+    auto &store = config_store();
+    auto transaction = store.get_backend().transaction_guard();
+    store.connect_token.set(token);
+    store.connect_enabled.set(true);
 }
 
 uint32_t ErrorPrinter::cancelable_fingerprint() const {
@@ -110,6 +115,9 @@ uint32_t ErrorPrinter::cancelable_fingerprint() const {
 }
 
 #if ENABLED(CANCEL_OBJECTS)
+void ErrorPrinter::cancel_object(uint8_t) {}
+void ErrorPrinter::uncancel_object(uint8_t) {}
+
 const char *ErrorPrinter::get_cancel_object_name(char *buffer, [[maybe_unused]] size_t size, size_t) const {
     assert(size > 0);
     *buffer = '\0';
@@ -125,8 +133,16 @@ const char *ErrorPrinter::dialog_action(uint32_t, Response) {
     return "Click not allowed.";
 }
 
+std::optional<ErrorPrinter::FinishedJobResult> ErrorPrinter::get_prior_job_result(uint16_t) const {
+    return nullopt;
+}
+
 void ErrorPrinter::reset_printer() {
     NVIC_SystemReset();
+}
+
+void ErrorPrinter::set_slot_info(size_t, const SlotInfo &) {
+    // Nothing in the error state
 }
 
 } // namespace connect_client

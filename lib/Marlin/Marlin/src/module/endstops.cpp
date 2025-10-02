@@ -50,10 +50,6 @@
   #include "../feature/joystick.h"
 #endif
 
-#ifdef MINDA_BROKEN_CABLE_DETECTION
-  #include "Z_probe.hpp"
-#endif
-
 #if HAS_LOADCELL()
   #include "loadcell.hpp"
 #endif
@@ -528,10 +524,6 @@ void __O2 Endstops::M119() {
 // Check endstops - Could be called from Temperature ISR!
 void Endstops::update() {
 
-  #ifdef MINDA_BROKEN_CABLE_DETECTION
-    buddy::hw::Z_probe_interrupt_handler();
-  #endif
-
   #if !ENDSTOP_NOISE_THRESHOLD
     if (!abort_enabled()) return;
   #endif
@@ -760,7 +752,7 @@ void Endstops::update() {
   }
 
 // Handle XY probing
-#if BOARD_IS_XLBUDDY
+#if BOARD_IS_XLBUDDY()
   // TODO: This does not clean the endstop bits on xy_probe disable. It cannot as it might clear the real endstops.
   // The hit_on_purpose is supposed to be called cleaning the bits.
   if(stepper.axis_is_moving(X_AXIS)) {

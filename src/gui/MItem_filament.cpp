@@ -6,6 +6,7 @@
 #include "sound.hpp"
 #include "marlin_client.hpp"
 #include "ScreenHandler.hpp"
+#include <window_msgbox.hpp>
 #include <option/has_toolchanger.h>
 #if HAS_TOOLCHANGER()
     #include "module/prusa/toolchanger.h"
@@ -53,8 +54,8 @@ void MI_LOAD::Do() {
         return;
     }
 #endif
-    auto current_filament = config_store().get_filament_type(marlin_vars()->active_extruder);
-    if ((current_filament == filament::Type::NONE) || (MsgBoxWarning(_(warning_loaded), Responses_YesNo, 1) == Response::Yes)) {
+    auto current_filament = config_store().get_filament_type(marlin_vars().active_extruder);
+    if ((current_filament == FilamentType::none) || (MsgBoxWarning(_(warning_loaded), Responses_YesNo, 1) == Response::Yes)) {
         marlin_client::gcode("M701 W2"); // load with return option
     }
 }
@@ -80,7 +81,7 @@ MI_CHANGE::MI_CHANGE()
     : MI_event_dispatcher(_(label)) {}
 
 bool MI_CHANGE::AvailableForTool(uint8_t tool) {
-    bool has_filament_eeprom = config_store().get_filament_type(tool) != filament::Type::NONE;
+    bool has_filament_eeprom = config_store().get_filament_type(tool) != FilamentType::none;
     return has_filament_eeprom;
 }
 
@@ -137,7 +138,7 @@ void MI_PURGE::Do() {
 }
 
 bool MI_PURGE::AvailableForTool(uint8_t tool) {
-    bool has_filament_eeprom = config_store().get_filament_type(tool) != filament::Type::NONE;
+    bool has_filament_eeprom = config_store().get_filament_type(tool) != FilamentType::none;
     return has_filament_eeprom;
 }
 

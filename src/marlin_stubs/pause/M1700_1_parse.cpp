@@ -89,7 +89,7 @@ void PrusaGcodeSuite::M1701() {
  *       - `U1` - ask only if filament unknown
  *       - `U2` - always ask
  * - `S"Filament"` - change to filament by name, for example `S"PLA"`
- *  O<value>       - Color number corresponding to filament::Colour, RGB order
+ *  O<value>       - Color number corresponding to Color, RGB order
  */
 void PrusaGcodeSuite::M1600() {
     const int8_t target_extruder = GcodeSuite::get_target_extruder_from_command();
@@ -97,25 +97,11 @@ void PrusaGcodeSuite::M1600() {
         return;
     }
 
-    auto filament_to_be_loaded = filament::Type::NONE;
-    const char *text_begin = 0;
-    if (parser.seen('S')) {
-        text_begin = strchr(parser.string_arg, '"');
-        if (text_begin) {
-            ++text_begin; // move pointer from '"' to first letter
-            const char *text_end = strchr(text_begin, '"');
-            if (text_end) {
-                auto filament = filament::get_type(text_begin, text_end - text_begin);
-                if (filament != filament::Type::NONE) {
-                    filament_to_be_loaded = filament;
-                }
-            }
-        }
-    }
+    const FilamentType filament_to_be_loaded = PrusaGcodeSuite::get_filament_type_from_command('S');
 
-    std::optional<filament::Colour> color_to_be_loaded = { std::nullopt };
+    std::optional<Color> color_to_be_loaded = { std::nullopt };
     if (parser.seen('O')) {
-        color_to_be_loaded = filament::Colour::from_int(parser.longval('O'));
+        color_to_be_loaded = Color::from_raw(parser.longval('O'));
     }
 
     const filament_gcodes::AskFilament_t ask_unload = filament_gcodes::AskFilament_t(parser.byteval('U', 0));

@@ -1,6 +1,8 @@
 #include "ScreenHandler.hpp"
 #include "bsod.h"
 
+#include <gui.hpp>
+
 static const uint32_t MENU_TIMEOUT_MS = 30000;
 
 Screens *Screens::instance = nullptr;
@@ -12,7 +14,6 @@ Screens::Screens(screen_node screen_creator)
     , close(false)
     , close_all(false)
     , close_printing(false)
-    , display_reinitialized(false)
     , timeout_tick(0) {
 }
 
@@ -50,31 +51,6 @@ void Screens::Init(const screen_node *begin, const screen_node *end) {
     Access()->PushBeforeCurrent(node + 1, end); // node + 1 excludes node
 }
 
-void Screens::RInit(const screen_node *begin, const screen_node *end) {
-    if (size_t(end - begin) > MAX_SCREENS) {
-        return;
-    }
-    if (begin == end) {
-        return;
-    }
-
-    // initialize reverse iterators
-    r_iter r_begin(begin);
-    r_iter r_end(end);
-
-    // find last enabled creator
-    r_iter r_node = rfind_enabled_node(r_begin, r_end);
-    if (r_node == r_begin) {
-        return;
-    }
-
-    // have creator
-    Init(*r_node);
-
-    // Push rest of enabled creators on stack
-    Access()->RPushBeforeCurrent(begin, r_node.base());
-}
-
 void Screens::EnableMenuTimeout() {
     ResetTimeout();
     menu_timeout_enabled = true;
@@ -105,27 +81,6 @@ void Screens::PushBeforeCurrent(const screen_node *begin, const screen_node *end
             ++stack_iterator;
         }
     } while (r_node != r_begin);
-}
-
-// Push enabled creators on stack - in non reverted order
-// not a bug reverting method must use normal iterators
-void Screens::RPushBeforeCurrent(const screen_node *begin, const screen_node *end) {
-    if (size_t(end - begin) > MAX_SCREENS) {
-        return;
-    }
-    if (begin == end) {
-        return;
-    }
-
-    iter node = begin - 1; // point before begin, first call of "node + 1" will revert this
-
-    do {
-        node = find_enabled_node(node + 1, end);
-        if (node != end) {
-            (*stack_iterator) = *node;
-            ++stack_iterator;
-        }
-    } while (node != end);
 }
 
 Screens *Screens::Access() {
@@ -168,10 +123,6 @@ void Screens::Open(screen_node screen_creator) {
     creator_node = screen_creator;
 }
 
-void Screens::Open(const ScreenFactory::Creator screen_creator) {
-    Open(screen_node(screen_creator));
-}
-
 /**
  * @brief close current screen
  * it sets flag to close current screen
@@ -181,6 +132,37 @@ void Screens::Open(const ScreenFactory::Creator screen_creator) {
 void Screens::Close() {
     close = true;
     creator_node.MakeEmpty();
+}
+
+bool Screens::Close(const ScreenFactory::Creator &creator) {
+    bool found = false;
+
+    // Check screen that is to be opened
+    if (creator_node.creator == creator) {
+        creator_node.MakeEmpty();
+        found = true;
+    }
+
+    // Check currently open screen
+    if (stack_iterator != stack.begin() && stack_iterator->creator == creator) {
+        close = true;
+        found = true;
+    }
+
+    // Check screens on the stack
+    auto new_stack_iterator = std::remove_if(stack.begin(), stack_iterator, [&](const auto &item) {
+        if (item.creator == creator) {
+            found = true;
+            return true;
+        }
+        return false;
+    });
+
+    // Move the currently open screen on the right position
+    *new_stack_iterator = *stack_iterator;
+    stack_iterator = new_stack_iterator;
+
+    return found;
 }
 
 /**
@@ -220,13 +202,6 @@ void Screens::ResetTimeout() {
 }
 
 void Screens::Loop() {
-    if (display_reinitialized) {
-        screen_t *pScr = Get();
-        if (pScr) {
-            pScr->Invalidate();
-        }
-        display_reinitialized = false;
-    }
     /// menu timeout logic:
     /// when timeout is expired on current screen,
     /// we iterate through whole stack and close every screen that should be closed
@@ -370,11 +345,7 @@ void Screens::InnerLoop() {
     }
 }
 
-void Screens::SetDisplayReinitialized() {
-    display_reinitialized = true;
-}
-
-void Screens::gui_loop_until_dialog_closed(std::function<void()> callback) {
+void Screens::gui_loop_until_dialog_closed(stdext::inplace_function<void()> callback) {
     for (;;) {
         const bool dialog_closed = close || close_all;
         close = false; // Note: We reset close flag because it is reused for closing both dialogs and screens

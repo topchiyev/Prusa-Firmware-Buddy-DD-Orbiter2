@@ -13,7 +13,6 @@
 #include <cstdint>
 #include <optional>
 #include <variant>
-#include <device/board.h>
 
 namespace http {
 class Connection;
@@ -72,12 +71,14 @@ using Action = std::variant<
     SendTelemetry,
     Event,
     Sleep,
-    ReadCommand>;
+    ReadCommand,
+    transfers::Download::InlineRequest>;
 
 enum class ActionResult {
     Ok,
     Failed,
     Refused,
+    RefusedFast,
 };
 
 /// The planner
@@ -153,6 +154,7 @@ private:
     void command(const Command &, const CancelPrinterReady &);
     void command(const Command &, const SetPrinterReady &);
     void command(const Command &, const StartEncryptedDownload &);
+    void command(const Command &, const StartInlineDownload &);
     void command(const Command &, const DeleteFile &);
     void command(const Command &, const DeleteFolder &);
     void command(const Command &, const CreateFolder &);
@@ -161,9 +163,11 @@ private:
     void command(const Command &, const ResetPrinter &);
     void command(const Command &, const SendStateInfo &);
     void command(const Command &, const DialogAction &);
-#if XL_ENCLOSURE_SUPPORT()
     void command(const Command &, const SetValue &);
-#endif
+    void command(const Command &, const CancelObject &);
+    void command(const Command &, const UncancelObject &);
+
+    void handle_transfer_result(const Command &command, transfers::Transfer::BeginResult result);
 
     // Tracking if we should resend the INFO message due to some changes.
     Tracked info_changes;
@@ -212,6 +216,12 @@ public:
     /// and enabled or its configuration changes (and we may be possibly talking
     /// to another server).
     void reset();
+
+    /// Reset the telemetry timeouts.
+    ///
+    /// For eg. reconnect on websocket, since the server node might want to
+    /// have "fresh" telemetry.
+    void reset_telemetry();
     /// A command was received from the server.
     ///
     /// The caller is responsible only for handing it over. No automatic acks
@@ -239,6 +249,9 @@ public:
     void transfer_recovery_finished(std::optional<const char *> transfer_destination_path);
 
     void transfer_cleanup_finished(bool success);
+
+    bool transfer_chunk(const transfers::Download::InlineChunk &chunk);
+    void transfer_reset();
 
     // ID of a command being executed in the background, if any.
     std::optional<CommandId> background_command_id() const;

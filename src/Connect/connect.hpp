@@ -18,6 +18,8 @@ class CachedFactory;
 
 OnlineStatus last_status();
 
+bool is_connect_registered();
+
 /*
  * Registration process.
  *
@@ -66,8 +68,12 @@ private:
     // HTTP, which won't work). Eventually, this'll get integrated into the
     // factory, but for now and for the experiments, we have it separate.
     std::optional<http::WebSocket> websocket;
+    // Time when we sent something last, in ms.
+    // Used to track when we should generate a ping.
+    uint32_t last_send = 0;
 
     CommResult receive_command(CachedFactory &conn_factory);
+    CommResult send_ping(CachedFactory &conn_factory);
 #endif
 
     CommResult prepare_connection(CachedFactory &conn_factory, const Printer::Config &config);

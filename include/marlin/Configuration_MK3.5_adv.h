@@ -1821,7 +1821,7 @@
         // then handled in the Crash_s class.
         #define Y_STALL_SENSITIVITY config_store().homing_sens_y.get()
 
-        #define Z_STALL_SENSITIVITY 3
+        #define Z_STALL_SENSITIVITY 4
 
         #define STALL_THRESHOLD_TMC2130 400
         #define STALL_THRESHOLD_TMC2209 400
@@ -2040,7 +2040,7 @@
 
 // @section i2cbus
 
-//#define EXPERIMENTAL_I2CBUS
+#define EXPERIMENTAL_I2CBUS
 #define I2C_SLAVE_ADDRESS 0 // Set a value from 8 to 127 to act as a slave
 
 // @section extras

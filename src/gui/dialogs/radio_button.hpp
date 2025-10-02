@@ -13,7 +13,7 @@
 #pragma once
 #include "i_radio_button.hpp"
 
-class RadioButton : public AddSuperWindow<IRadioButton> {
+class RadioButton : public IRadioButton {
     Responses_t responses;
     const PhaseTexts *texts; // nullptr == autoset texts with default strings
 
@@ -25,6 +25,9 @@ public:
      * @param rect   rectangle enclosing all buttons
      */
     RadioButton(window_t *parent, Rect16 rect);
+
+// TODO: REMOVEME completely BFW-6028
+#if MAX_RESPONSES != 4
     /**
      * @brief Construct a new Radio Button object
      *
@@ -34,6 +37,8 @@ public:
      * @param labels array of button labels, if is set to nullptr, strings are assigned as default ones from given responses
      */
     RadioButton(window_t *parent, Rect16 rect, const PhaseResponses &resp, const PhaseTexts *labels = nullptr);
+#endif
+
     /**
      * @brief Construct a new Radio Button object
      *
@@ -46,7 +51,11 @@ public:
 
     virtual std::optional<size_t> IndexFromResponse(Response btn) const override;
 
+// TODO: REMOVEME completely BFW-6028
+#if MAX_RESPONSES != 4
     void Change(const PhaseResponses &resp, const PhaseTexts *txts = nullptr); // nullptr generates texts automatically, only first four responses are used, rest is discarded
+#endif
+
     void Change(Responses_t resp, const PhaseTexts *txts = nullptr); // nullptr generates texts automatically
 
 protected:

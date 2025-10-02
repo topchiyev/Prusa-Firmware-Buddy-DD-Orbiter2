@@ -5,14 +5,13 @@
 #include <algorithm> // std::find
 #include "ScreenHandler.hpp"
 #include "gui_timer.h"
-#include "display.h"
+#include "display.hpp"
 #include "marlin_client.hpp"
 #include "knob_event.hpp"
 
 bool window_t::IsVisible() const { return flags.visible && !flags.hidden_behind_dialog; }
 bool window_t::HasVisibleFlag() const { return flags.visible; };
 bool window_t::IsHiddenBehindDialog() const { return flags.hidden_behind_dialog; }
-bool window_t::IsEnabled() const { return flags.enabled; }
 bool window_t::IsInvalid() const { return flags.invalid; }
 bool window_t::IsFocused() const { return GetFocusedWindow() == this; }
 bool window_t::HasTimer() const { return flags.timer; }
@@ -117,8 +116,8 @@ window_t *window_t::GetCapturedWindow() {
 
 void window_t::SetHasTimer() { flags.timer = true; }
 void window_t::ClrHasTimer() { flags.timer = false; }
-void window_t::Enable() { flags.enabled = true; }
-void window_t::Disable() { flags.enabled = false; }
+
+void window_t::set_enabled(bool set) { flags.enabled = set; }
 void window_t::SetEnforceCapture() { flags.enforce_capture_when_not_visible = true; }
 void window_t::ClrEnforceCapture() { flags.enforce_capture_when_not_visible = false; }
 void window_t::DisableLongHoldScreenAction() { flags.has_long_hold_screen_action = false; };
@@ -195,14 +194,14 @@ void window_t::set_shadow(bool set) {
     Invalidate();
 }
 
-color_t window_t::GetBackColor() const {
+Color window_t::GetBackColor() const {
     if (flags.color_scheme_background && pBackColorScheme) {
         return pBackColorScheme->Get(IsFocused(), IsShadowed());
     }
     return color_back;
 }
 
-void window_t::SetBackColor(color_t clr) {
+void window_t::SetBackColor(Color clr) {
     if (flags.color_scheme_background || color_back != clr) {
         color_back = clr;
         flags.color_scheme_background = false;
@@ -220,13 +219,10 @@ void window_t::SetBackColor(const color_scheme &clr) {
 
 window_t::window_t(window_t *parent, Rect16 rect, win_type_t type, is_closed_on_click_t close)
     : rect(rect)
-    , parent(parent)
-    , flags(0)
-    , color_back(GuiDefaults::ColorBack) {
-    flags.type = uint8_t(type);
+    , parent(parent) {
+    flags.type = type;
     flags.close_on_click = close;
-    close == is_closed_on_click_t::yes ? Enable() : Disable();
-    flags.visible = true; // do not call show, it needs parent to be registered
+    flags.enabled = (close == is_closed_on_click_t::yes);
     Invalidate();
     if (parent) {
         parent->RegisterSubWin(*this);
@@ -370,10 +366,8 @@ void window_t::Draw() {
 }
 
 void window_t::draw() {
-    if (IsInvalid() && rect.Width() && rect.Height()) {
-        if (IsVisible()) {
-            unconditionalDraw();
-        }
+    if (IsInvalid() && IsVisible() && !rect.IsEmpty()) {
+        unconditionalDraw();
     }
 }
 
@@ -418,10 +412,10 @@ void window_t::addInvalidationRect([[maybe_unused]] Rect16 rc) {
 
 void window_t::unconditionalDraw() {
     if (flags.has_round_corners) {
-        color_t parent_back_color = GetParent() ? GetParent()->GetBackColor() : GetBackColor();
-        display::DrawRoundedRect(GetRect(), parent_back_color, GetBackColor(), GuiDefaults::DefaultCornerRadius, MIC_ALL_CORNERS);
+        Color parent_back_color = GetParent() ? GetParent()->GetBackColor() : GetBackColor();
+        display::draw_rounded_rect(GetRect(), parent_back_color, GetBackColor(), GuiDefaults::DefaultCornerRadius, MIC_ALL_CORNERS);
     } else {
-        display::FillRect(GetRect(), GetBackColor());
+        display::fill_rect(GetRect(), GetBackColor());
     }
 }
 
@@ -430,8 +424,7 @@ void window_t::WindowEvent(window_t *sender, GUI_event_t event, void *const para
         last_gui_input_event = event;
     }
 
-    static constexpr const char txt[] = "WindowEvent via public";
-    windowEvent(EventLock(txt, sender, event), sender, event, param);
+    windowEvent(sender, event, param);
 }
 
 void window_t::ScreenEvent(window_t *sender, GUI_event_t event, void *const param) {
@@ -439,11 +432,9 @@ void window_t::ScreenEvent(window_t *sender, GUI_event_t event, void *const para
         last_gui_input_event = event;
     }
 
-    static constexpr const char txt[] = "ScreenEvent via public";
     if (event == GUI_event_t::HELD_RELEASED && flags.has_long_hold_screen_action) {
         gui::knob::LongPressScreenAction();
     } else {
-        EventLock(txt, sender, event); // just print debug msg
         screenEvent(sender, event, param);
     }
 }
@@ -457,7 +448,7 @@ void window_t::screenEvent(window_t *sender, GUI_event_t event, void *const para
 
 // MUST BE PRIVATE
 // call nonvirtual WindowEvent instead (contains debug output)
-void window_t::windowEvent(EventLock /*has private ctor*/, [[maybe_unused]] window_t *sender, GUI_event_t event, void *const param) {
+void window_t::windowEvent([[maybe_unused]] window_t *sender, GUI_event_t event, void *const param) {
     if (event == GUI_event_t::CLICK && parent) {
         if (flags.close_on_click == is_closed_on_click_t::yes) {
             Screens::Access()->Close();
@@ -497,15 +488,15 @@ bool window_t::IsCaptured() const { return Screens::Access()->Get()->GetCaptured
 // window_aligned_t
 
 window_aligned_t::window_aligned_t(window_t *parent, Rect16 rect, win_type_t type, is_closed_on_click_t close)
-    : AddSuperWindow<window_t>(parent, rect, type, close) {
+    : window_t(parent, rect, type, close) {
     SetAlignment(GuiDefaults::Align());
 }
 
 Align_t window_aligned_t::GetAlignment() const {
-    return (Align_t &)(flags.align_data); // retype to Align_t reference, to avoid using private ctor
+    return (Align_t &)(flags.class_specific.align_data); // retype to Align_t reference, to avoid using private ctor
 }
 
 void window_aligned_t::SetAlignment(Align_t alignment) {
-    flags.align_data = (uint8_t &)(alignment);
+    flags.class_specific.align_data = (uint8_t &)(alignment);
     Invalidate();
 }

@@ -12,7 +12,7 @@
 
 using PhaseTexts = std::array<const char *, MAX_RESPONSES>;
 
-class IRadioButton : public AddSuperWindow<window_t> {
+class IRadioButton : public window_t {
 public:
     // if greater than 0, we're drawing a fixed amount of buttons
     // used for MMU where we want to draw 3 buttons corresponding to the physical MMU buttons
@@ -55,11 +55,11 @@ public:
 
     void SetBtnIndex(uint8_t index);
     void SetBtn(Response btn);
-    uint8_t GetBtnIndex() const { return flags.button_index; }
+    uint8_t GetBtnIndex() const { return flags.class_specific.button_index; }
     virtual std::optional<size_t> IndexFromResponse(Response btn) const = 0;
 
-    void SetBtnCount(uint8_t cnt) { flags.button_count = cnt & ((1 << RESPONSE_BITS) - 1); }
-    uint8_t GetBtnCount() const { return flags.button_count; }
+    void SetBtnCount(uint8_t cnt) { flags.class_specific.button_count = cnt & ((1 << RESPONSE_BITS) - 1); }
+    uint8_t GetBtnCount() const { return flags.class_specific.button_count; }
 
     // Disables automatic redrawing of the currently selected button (useful when radio_button is not the only scrollable window on the screen)
     void DisableDrawingSelected();
@@ -73,7 +73,7 @@ public:
     Rect16 get_rect_for_touch() const override;
 
 protected:
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
     virtual void screenEvent(window_t *sender, GUI_event_t event, void *const param) override;
 
     virtual void unconditionalDraw() override;
@@ -85,6 +85,7 @@ protected:
     bool isIndexValid(size_t index);
     size_t maxSize() const; // depends id it is iconned
 
+    // TODO: REMOVEME BFW-6028
     static Responses_t generateResponses(const PhaseResponses &resp);
 
     static size_t cnt_labels(const PhaseTexts *labels);

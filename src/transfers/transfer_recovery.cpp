@@ -4,7 +4,7 @@
 #include <memory>
 #include <sys/stat.h>
 
-#include <log.h>
+#include <logging/log.hpp>
 #include <common/version.h>
 #include <common/bsod.h>
 #include <common/crc32.h>
@@ -21,8 +21,8 @@ namespace {
 using FileOffset = long;
 
 struct SerializedString {
-    long offset;
-    size_t size;
+    long offset = 0;
+    size_t size = 0;
 
     static SerializedString serialize(const char *str, FILE *file, bool &error) {
         const size_t len = strlen(str) + 1;
@@ -50,8 +50,14 @@ struct SerializedTransfer {
 
     // basic url info
     SerializedString host;
-    uint16_t port;
-    SerializedString url_path;
+    uint16_t port = 0;
+    SerializedString url_path_or_hash;
+    // Is this an inline transfer (running inside a websocket?)
+    //
+    // In such case, we use hash instead of url path, but we add the team_id below.
+    bool is_inline;
+    uint64_t team_id = 0;
+    uint32_t orig_size = 0;
 
     uint32_t transfer_id;
 
@@ -77,16 +83,25 @@ bool Transfer::make_backup(FILE *file, const Download::Request &request, const P
     transfer.partial_file_state = state;
     transfer.partial_file_state_crc = crc32_calc((const uint8_t *)&state, sizeof(state));
     transfer.fw_version = SerializedString::serialize(project_version_full, file, error);
-    transfer.host = SerializedString::serialize(request.host, file, error);
-    transfer.port = request.port;
-    transfer.url_path = SerializedString::serialize(request.url_path, file, error);
+    if (const auto *encrypted = get_if<Download::Request::Encrypted>(&request.data); encrypted != nullptr) {
+        transfer.host = SerializedString::serialize(encrypted->host, file, error);
+        transfer.port = encrypted->port;
+        transfer.url_path_or_hash = SerializedString::serialize(encrypted->url_path, file, error);
+        transfer.is_inline = false;
+
+        // encryption
+        if (encrypted->encryption.get()) {
+            transfer.encryption_info = *encrypted->encryption;
+        }
+    } else {
+        const auto &in = get<Download::Request::Inline>(request.data);
+        transfer.url_path_or_hash = SerializedString::serialize(in.hash, file, error);
+        transfer.team_id = in.team_id;
+        transfer.orig_size = in.orig_size;
+        transfer.is_inline = true;
+    }
     // Must be available, we are holding the slot.
     transfer.transfer_id = slot.id();
-
-    // encryption
-    if (request.encryption.get()) {
-        transfer.encryption_info = *request.encryption;
-    }
 
     if (error) {
         log_error(transfers, "error while serializing backup");
@@ -317,11 +332,18 @@ std::optional<Download::Request> Transfer::RestoredTransfer::get_download_reques
         return this->get_data_ptr(offset, size);
     };
 
-    return Download::Request(
-        transfer.host.deserialize(get_data_ptr),
-        transfer.port,
-        transfer.url_path.deserialize(get_data_ptr),
-        transfer.encryption_info.has_value() ? std::make_unique<Download::EncryptionInfo>(*transfer.encryption_info) : nullptr);
+    if (transfer.is_inline) {
+        return Download::Request(
+            transfer.url_path_or_hash.deserialize(get_data_ptr),
+            transfer.team_id,
+            transfer.orig_size);
+    } else {
+        return Download::Request(
+            transfer.host.deserialize(get_data_ptr),
+            transfer.port,
+            transfer.url_path_or_hash.deserialize(get_data_ptr),
+            transfer.encryption_info.has_value() ? std::make_unique<Download::EncryptionInfo>(*transfer.encryption_info) : nullptr);
+    }
 }
 
 Transfer::RecoverySearchResult Transfer::search_transfer_for_recovery(Path &path) {

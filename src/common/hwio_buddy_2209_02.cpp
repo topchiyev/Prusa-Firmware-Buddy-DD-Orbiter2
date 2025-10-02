@@ -25,10 +25,14 @@
 #include "appmain.hpp"
 #include "Marlin.h"
 #include "MarlinPin.hpp"
+#include <Marlin/src/module/temperature.h>
+
 #include <option/has_puppies.h>
 #include <option/has_loadcell.h>
 #include <option/has_gui.h>
 #include <option/has_modularbed.h>
+
+#include <Pin.hpp>
 
 #if ENABLED(PRUSA_TOOLCHANGER)
     #include "../../lib/Marlin/Marlin/src/module/prusa/toolchanger.h"
@@ -37,7 +41,7 @@
     #include "../../lib/Marlin/Marlin/src/module/modular_heatbed.h"
 #endif
 
-#if (BOARD_IS_XBUDDY)
+#if (BOARD_IS_XBUDDY())
     #include "hw_configuration.hpp"
 #endif
 
@@ -118,9 +122,6 @@ static void _hwio_pwm_set_val(int i_pwm, int val);
 static uint32_t _pwm_get_chan(int i_pwm);
 static TIM_HandleTypeDef *_pwm_get_htim(int i_pwm);
 static constexpr int is_pwm_id_valid(int i_pwm);
-
-METRIC_DEF(metric_nozzle_pwm, "nozzle_pwm", METRIC_VALUE_INTEGER, 1000, METRIC_HANDLER_DISABLE_ALL);
-METRIC_DEF(metric_bed_pwm, "bed_pwm", METRIC_VALUE_INTEGER, 1000, METRIC_HANDLER_DISABLE_ALL);
 
 //--------------------------------------
 // analog output functions
@@ -224,11 +225,13 @@ void _hwio_pwm_analogWrite_set_val(int i_pwm, int val) {
 
     switch (i_pwm) {
     case HWIO_PWM_HEATER_0:
-        metric_record_integer(&metric_nozzle_pwm, val);
+        thermalManager.nozzle_pwm = val;
         break;
+#if !HAS_MODULARBED()
     case HWIO_PWM_HEATER_BED:
-        metric_record_integer(&metric_bed_pwm, val);
+        thermalManager.bed_pwm = val;
         break;
+#endif
     }
 
     if (_pwm_analogWrite_val[i_pwm] != val) {
@@ -316,7 +319,7 @@ void hwio_update_1ms(void) {
     }
 }
 
-#if (BOARD_IS_XBUDDY && HAS_TEMP_HEATBREAK)
+#if (BOARD_IS_XBUDDY() && HAS_TEMP_HEATBREAK)
 extern "C" uint8_t hwio_get_loveboard_bomid() {
     return buddy::hw::Configuration::Instance().get_love_board().bomID;
 }
@@ -379,6 +382,14 @@ void hwio_arduino_error(int err, uint32_t pin32) {
     }
     bsod(text);
 }
+
+#if HAS_PHASE_STEPPING()
+// Using handlers alike XL uses for backwards compatibility
+namespace buddy::hw {
+const OutputPin *XStep = &xStep;
+const OutputPin *YStep = &yStep;
+} // namespace buddy::hw
+#endif
 
 /**
  * @brief Read digital pin to be used from Marlin
@@ -453,9 +464,9 @@ void digitalWrite(uint32_t marlinPin, uint32_t ulVal) {
         _hwio_pwm_analogWrite_set_val(HWIO_PWM_HEATER_0, ulVal ? _pwm_analogWrite_max : 0);
         return;
     case MARLIN_PIN(FAN1):
-#if (PRINTER_IS_PRUSA_MK4 || PRINTER_IS_PRUSA_iX)
+#if (PRINTER_IS_PRUSA_MK4() || PRINTER_IS_PRUSA_iX())
         _hwio_pwm_analogWrite_set_val(HWIO_PWM_FAN1, ulVal ? 80 : 0);
-#elif PRINTER_IS_PRUSA_MK3_5
+#elif PRINTER_IS_PRUSA_MK3_5()
         // PWM value of 80 roughly translates to 4k RPM, further testing my find better value, thus far this seems precise enough plus it is the value used by MINI which uses the same fans
         Fans::heat_break(0).setPWM(ulVal ? (config_store().has_alt_fans.get() ? 80 : _pwm_analogWrite_max) : 0);
 #else
@@ -488,21 +499,29 @@ uint32_t analogRead(uint32_t ulPin) {
 #endif
 
         case MARLIN_PIN(TEMP_0):
-#if (BOARD_IS_BUDDY || BOARD_IS_XBUDDY)
+#if (BOARD_IS_BUDDY() || BOARD_IS_XBUDDY())
             return AdcGet::nozzle();
 #endif
 
 #if (HAS_TEMP_HEATBREAK)
         case MARLIN_PIN(TEMP_HEATBREAK):
-    #if (BOARD_IS_BUDDY)
+    #if (BOARD_IS_BUDDY())
             return AdcGet::pinda();
-    #elif (BOARD_IS_XBUDDY)
+    #elif (BOARD_IS_XBUDDY())
             return AdcGet::heatbreakTemp();
     #endif
 #endif // HAS_TEMP_HEATBREAK
 
         case MARLIN_PIN(THERM2):
             return AdcGet::boardTemp();
+
+#if PRINTER_IS_PRUSA_iX()
+        case MARLIN_PIN(TEMP_PSU):
+            return AdcGet::psu_temp();
+        case MARLIN_PIN(TEMP_AMBIENT):
+            return AdcGet::ambient_temp();
+#endif
+
         default:
             hwio_arduino_error(HWIO_ERR_UNDEF_ANA_RD, ulPin); // error: undefined pin analog read
         }

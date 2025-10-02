@@ -12,11 +12,11 @@
 PT_t PrintTime::update_loop(PT_t screen_format, window_text_t *out_print_end, [[maybe_unused]] window_text_t *out_print_dur) {
     // TODO: for MINI - Add time_dur condition
     // TODO: Non-context time <-> context time
-    const uint32_t time_to_end = marlin_vars()->time_to_end;
+    const uint32_t time_to_end = marlin_vars().time_to_end;
 
-#if defined(USE_ST7789)
+#if HAS_MINI_DISPLAY()
     if (out_print_dur) {
-        const time_t rawtime = (time_t)marlin_vars()->print_duration; // print_duration holds SECONDS
+        const time_t rawtime = (time_t)marlin_vars().print_duration; // print_duration holds SECONDS
         if (rawtime != last_print_duration) {
             out_print_dur->SetTextColor(generate_duration(rawtime));
             out_print_dur->SetText(string_view_utf8::MakeRAM((const uint8_t *)text_time_dur.data()));
@@ -24,13 +24,13 @@ PT_t PrintTime::update_loop(PT_t screen_format, window_text_t *out_print_end, [[
         }
         last_print_duration = rawtime;
     }
-#endif // USE_ST7789
+#endif
 
     if (screen_format != PT_t::init && time_to_end != marlin_server::TIME_TO_END_INVALID && time_to_end == last_time_to_end) {
         return time_end_format;
     }
 
-    const color_t print_end_text_color = [&] {
+    const Color print_end_text_color = [&] {
         // Invalid
         if (time_to_end == marlin_server::TIME_TO_END_INVALID || time_to_end > 60 * 60 * 24 * 365) {
             strlcpy(text_time_end.data(), "N/A", MAX_END_TIMESTAMP_SIZE);
@@ -52,7 +52,7 @@ PT_t PrintTime::update_loop(PT_t screen_format, window_text_t *out_print_end, [[
         time_end_format = PT_t::timestamp;
 
         // Add unknown marker
-        if (marlin_vars()->print_speed != 100) {
+        if (marlin_vars().print_speed != 100) {
             strlcat(text_time_end.data(), "?", MAX_END_TIMESTAMP_SIZE);
         }
 
@@ -116,7 +116,7 @@ void PrintTime::generate_timestamp_string(const time_t curr_sec, const uint32_t 
     print_timestamp_string_to_buffer(curr_sec, time_to_end, { text_time_end });
 }
 
-color_t PrintTime::generate_duration(time_t rawtime) {
+Color PrintTime::generate_duration(time_t rawtime) {
     print_formatted_duration(static_cast<uint32_t>(rawtime), { text_time_dur }, true);
     // TODO: Print duration validation -> validation color
     return GuiDefaults::COLOR_VALUE_VALID;

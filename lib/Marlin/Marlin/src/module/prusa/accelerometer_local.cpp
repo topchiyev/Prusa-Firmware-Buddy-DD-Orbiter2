@@ -5,17 +5,17 @@
 static_assert(HAS_LOCAL_ACCELEROMETER());
 
 PrusaAccelerometer::PrusaAccelerometer()
-#if PRINTER_IS_PRUSA_MK3_5
-    : output_enabler { buddy::hw::fanPrintTach, buddy::hw::Pin::State::high, buddy::hw::OMode::pushPull, buddy::hw::OSpeed::high }
+    : m_sample_buffer { accelerometer, {} }
+#if PRINTER_IS_PRUSA_MK3_5()
+    , output_enabler { buddy::hw::fanPrintTach, buddy::hw::Pin::State::high, buddy::hw::OMode::pushPull, buddy::hw::OSpeed::high }
     , output_pin { output_enabler.pin() }
     , accelerometer { output_pin }
 #else
-    : accelerometer { buddy::hw::acellCs }
+    , accelerometer { buddy::hw::acellCs }
 #endif
-    , m_fifo(accelerometer) {
-    m_error = Error::none;
+{
     if (IMU_SUCCESS != accelerometer.begin()) {
-        m_error = Error::communication;
+        m_sample_buffer.error.set(Error::communication);
     }
     accelerometer.fifoBegin();
 }
@@ -23,10 +23,19 @@ PrusaAccelerometer::PrusaAccelerometer()
 PrusaAccelerometer::~PrusaAccelerometer() {}
 
 void PrusaAccelerometer::clear() {
-    accelerometer.fifoClear();
+    Acceleration acceleration;
+    bool overrun;
+    while (m_sample_buffer.buffer.get(acceleration, overrun))
+        ;
+    m_sample_buffer.error.clear_overflow();
 }
 int PrusaAccelerometer::get_sample(Acceleration &acceleration) {
-    return m_fifo.get(acceleration);
+    bool overrun;
+    int retval = m_sample_buffer.buffer.get(acceleration, overrun);
+    m_sampling_rate = m_sample_buffer.buffer.get_sampling_rate();
+    if (overrun) {
+        m_sample_buffer.error.set(Error::overflow_sensor);
+    }
+    return retval;
 }
-PrusaAccelerometer::Error PrusaAccelerometer::m_error = Error::none;
 float PrusaAccelerometer::m_sampling_rate = 0;

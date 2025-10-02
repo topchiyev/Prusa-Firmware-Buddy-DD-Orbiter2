@@ -5,6 +5,9 @@
 #include "screen_home.hpp"
 #include "hw_configuration.hpp"
 #include "scope_guard.hpp"
+#include <logging/log.hpp>
+
+LOG_COMPONENT_REF(Touch);
 
 #define CONCAT_IMPL(a, b) a /**/##/**/ b
 #define CONCAT(a, b)      CONCAT_IMPL(a, b)
@@ -121,7 +124,6 @@ void Touchscreen_GT911::perform_check() {
 
             set_enabled(false);
             consecutive_read_error_count_ = 0;
-            screen_home_data_t::SetTouchBrokenDuringRun();
             break;
         }
 

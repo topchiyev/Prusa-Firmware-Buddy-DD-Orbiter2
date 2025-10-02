@@ -1,18 +1,23 @@
 #pragma once
 
 #include "marlin_events.h"
-#include "client_fsm_types.h"
+#include "marlin_server_types/client_fsm_types.h"
 #include "encoded_fsm_response.hpp"
 #include "marlin_vars.hpp"
 #include "client_response.hpp"
 #include <option/has_selftest.h>
 #include "Marlin/src/core/types.h"
 #include "common/selftest/selftest_data.hpp"
+#include <gcode/inject_queue_actions.hpp>
 
 namespace marlin_client {
 
 //-----------------------------------------------------------------------------
 // client side functions (can be called from client thread only)
+
+/// Initialize the client side for the current task if it hasn't been initialized yet
+/// Otherwise does nothing
+void init_maybe();
 
 // initialize client side, returns pointer to client structure
 void init();
@@ -22,9 +27,6 @@ void loop();
 
 // returns client_id for calling thread (-1 for unattached thread)
 int get_id();
-
-// infinite loop while server not ready
-void wait_for_start_processing();
 
 // sets dialog message, returns true on success
 bool set_message_cb(message_cb_t cb);
@@ -54,7 +56,10 @@ void __attribute__((format(__printf__, 1, 2)))
 gcode_printf(const char *format, ...);
 
 // inject gcode - thread-safe version
-void gcode_push_front(const char *gcode);
+void inject(InjectQueueRecord record);
+
+// inject gcode directly - thread-safe version
+inline void inject(const char *gcode) { inject(GCodeLiteral(gcode)); };
 
 // returns current event status for evt_id
 int event(marlin_server::Event evt_id);
@@ -150,7 +155,8 @@ void print_pause();
 
 void print_resume();
 
-void media_print_reopen();
+/// Tries to resume the print if it is in a problematic state
+void try_recover_from_media_error();
 
 void park_head();
 
@@ -158,7 +164,10 @@ void notify_server_about_encoder_move();
 
 void notify_server_about_knob_click();
 
-void set_warning(WarningType type);
+void set_warning(WarningType type, PhasesWarning phase = PhasesWarning::Warning);
+
+/// If the specified warning is open, closes it
+void clear_warning(WarningType type);
 
 // returns true if printer is printing, else false;
 bool is_printing();
@@ -167,21 +176,19 @@ bool is_paused();
 
 bool is_idle();
 
-// internal function, use FSM_response()
-void FSM_response_internal(EncodedFSMResponse);
-
 //-----------------------------------------------------------------------------
 // client side functions (can be called from client thread only)
 
-// returns if response send succeeded
-// called in client finite state machine
+void FSM_encoded_response(EncodedFSMResponse);
+
 template <class T>
 void FSM_response(T phase, Response response) {
-    FSM_response_internal({
-        .encoded_phase = ftrstd::to_underlying(phase),
-        .encoded_fsm = ftrstd::to_underlying(client_fsm_from_phase(phase)),
-        .encoded_response = ftrstd::to_underlying(response),
-    });
+    FSM_encoded_response(EncodedFSMResponse::encode(phase, FSMResponseVariant::make(response)));
+}
+
+template <class T>
+void FSM_response_variant(T phase, FSMResponseVariant response) {
+    FSM_encoded_response(EncodedFSMResponse::encode(phase, response));
 }
 
 } // namespace marlin_client

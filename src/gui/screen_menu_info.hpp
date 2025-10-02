@@ -9,13 +9,13 @@
 
 using ScreenMenuInfo__ = ScreenMenu<EFooter::On, MI_RETURN,
 #ifdef _DEBUG
-    MI_SUPPORT_disabled,
     MI_SYS_INFO,
 #endif //_DEBUG
-    MI_SENSOR_INFO, MI_VERSION_INFO, MI_PRINT_STATISTICS, MI_EEPROM_DIAGNOSTICS>;
+    MI_NETWORK_STATUS,
+    MI_SENSOR_INFO, MI_VERSION_INFO, MI_PRINT_STATISTICS>;
 
 class ScreenMenuInfo : public ScreenMenuInfo__ {
-    virtual void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    virtual void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 
 public:
     constexpr static const char *label = N_("INFO");

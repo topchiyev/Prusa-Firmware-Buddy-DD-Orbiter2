@@ -15,7 +15,7 @@
 #include <tasks.hpp>
 
 #include "sntp_client.h"
-#include "log.h"
+#include <logging/log.hpp>
 
 #include <atomic>
 #include <array>
@@ -28,7 +28,7 @@
 #include <lwip/netifapi.h>
 #include <lwip/netif.h>
 #include <lwip/tcpip.h>
-#include <common/freertos_mutex.hpp>
+#include <freertos/mutex.hpp>
 #include <mutex>
 #include "http_lifetime.h"
 #include "main.h"
@@ -42,8 +42,8 @@
 #include <nhttp/server.h>
 #include <random.h>
 
-LOG_COMPONENT_DEF(WUI, LOG_SEVERITY_DEBUG);
-LOG_COMPONENT_DEF(Network, LOG_SEVERITY_INFO);
+LOG_COMPONENT_DEF(WUI, logging::Severity::debug);
+LOG_COMPONENT_DEF(Network, logging::Severity::info);
 
 using std::unique_lock;
 
@@ -142,7 +142,7 @@ private:
 
     struct Iface {
         netif dev = {};
-        ETH_config_t desired_config = {};
+        netif_config_t desired_config = {};
 #if MDNS()
         bool mdns_initialized = false;
 #endif
@@ -184,11 +184,20 @@ private:
         status_callback(iface);
         unique_lock lock(mutex);
         uint32_t action = 0;
-        // TODO: What if it went _down_, not _up_?
         if (&iface == &ifaces[NETDEV_ETH_ID].dev) {
-            action = EthInitDone;
+            if (netif_is_link_up(&iface)) {
+                log_info(Network, "Eth link went up");
+                action = EthInitDone;
+            } else {
+                log_info(Network, "Eth link went down");
+            }
         } else if (&iface == &ifaces[NETDEV_ESP_ID].dev) {
-            action = EspInitDone;
+            if (netif_is_link_up(&iface)) {
+                log_info(Network, "ESP link went up");
+                action = EspInitDone;
+            } else {
+                log_info(Network, "ESP link went down");
+            }
         } else {
             assert(0);
         }
@@ -256,16 +265,22 @@ private:
     static void tcpip_init_done_raw(void *me) {
         static_cast<NetworkState *>(me)->tcpip_init_done();
     }
-    void post_init(Iface &iface) {
+    void post_init(uint32_t face_index) {
         // Already locked by the caller.
+
+        Iface &iface = ifaces[face_index];
 
         // FIXME: Error handling
         switch (iface_mode(iface)) {
         case Mode::DHCP:
-            netifapi_dhcp_start(&iface.dev);
+            log_info(Network, "Starting DHCP on iface: %" PRIu32, face_index);
+            if (err_t err = netifapi_dhcp_start(&iface.dev); err != ERR_OK) {
+                log_warning(Network, "dhcp_start failed on iface: %" PRIu32 " with: %d", face_index, err);
+            }
             break;
         case Mode::Static: {
-            ETH_config_t cfg;
+            log_info(Network, "Setting static IP on iface: %" PRIu32, face_index);
+            netif_config_t cfg;
             { // Scope for the lock
                 unique_lock lock(mutex);
                 // Yes, make a copy (for thread safety)
@@ -313,6 +328,7 @@ private:
     }
 
     void reconfigure() {
+        log_info(Network, "Reconfigure");
         // Read some stuff from the eeprom.
 
         // Lock (even the desired config can be read from other threads, eg. the tcpip_thread from a callback :-(
@@ -420,7 +436,8 @@ private:
                 espif_input_once(&ifaces[NETDEV_ESP_ID].dev);
 
                 // Delayed init, after the ESP told us it is ready and gave us a MAC address.
-                if (iface_mode(ifaces[NETDEV_ESP_ID]) != Mode::Off && espif_need_ap()) {
+                // If we are reconfiguring don't send old connection information, wait for next loop and new ap info.
+                if (iface_mode(ifaces[NETDEV_ESP_ID]) != Mode::Off && espif_need_ap() && !(events & Reconfigure)) {
                     join_ap();
                     set_up(ifaces[NETDEV_ESP_ID].dev);
                 }
@@ -438,11 +455,11 @@ private:
             }
 
             if (events & EthInitDone) {
-                post_init(ifaces[NETDEV_ETH_ID]);
+                post_init(NETDEV_ETH_ID);
             }
 
             if (events & EspInitDone) {
-                post_init(ifaces[NETDEV_ESP_ID]);
+                post_init(NETDEV_ESP_ID);
             }
 
             if (events & EthData) {
@@ -460,7 +477,7 @@ private:
                 const bool was_alive = espif_tick();
 
                 // It's OK if the ESP is turned off on purpose or if it's up and running.
-                const bool esp_ok = (iface_mode(ifaces[NETDEV_ESP_ID]) == Mode::Off || ap.ssid[0] == '\0' || (espif_link() && was_alive));
+                const bool esp_ok = (iface_mode(ifaces[NETDEV_ESP_ID]) == Mode::Off || ap.ssid[0] == '\0' || (espif_link() && was_alive) || espif::scan::is_running());
 
                 if (esp_ok) {
                     last_esp_ok = now;
@@ -469,6 +486,7 @@ private:
                 const uint32_t faulty_for = now - last_esp_ok;
 
                 if (faulty_for >= RESET_FAULTY_AFTER) {
+                    log_warning(Network, "ESP not responsive, resetting");
                     // It's not OK for a long time. Try resetting it if that helps.
                     espif_reset();
                     last_esp_ok = now;
@@ -585,6 +603,7 @@ public:
     }
 
     static void get_hostname(uint32_t netdev_id, char *buffer, size_t buffer_len) {
+        memset(buffer, 0, buffer_len);
         with_iface(netdev_id, [&](netif &iface, NetworkState &) {
             strlcpy(buffer, iface.hostname, buffer_len);
         });
@@ -663,9 +682,11 @@ void notify_reconfigure() {
 void netdev_set_active_id(uint32_t netdev_id) {
     assert(netdev_id <= NETDEV_COUNT);
 
-    config_store().active_netdev.set(static_cast<uint8_t>(netdev_id & 0xFF));
-
-    notify_reconfigure();
+    const auto target = static_cast<uint8_t>(netdev_id & 0xFF);
+    if (config_store().active_netdev.get() != target) {
+        config_store().active_netdev.set(target);
+        notify_reconfigure();
+    }
 }
 
 namespace {

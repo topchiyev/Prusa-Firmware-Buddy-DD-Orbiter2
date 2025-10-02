@@ -4,8 +4,10 @@
 
 #include "window_menu_bar.hpp"
 
+#include "display.hpp"
+
 MenuScrollbar::MenuScrollbar(window_t *parent, Rect16 rect, IWindowMenu &menu)
-    : AddSuperWindow<window_t>(parent, rect)
+    : window_t(parent, rect)
     , menu(menu) {}
 
 void MenuScrollbar::unconditionalDraw() {
@@ -21,19 +23,19 @@ void MenuScrollbar::unconditionalDraw() {
 
     // Draw background above bar
     if (bar_offset > 0) {
-        display::FillRect(Rect16(available_rect.Left(), available_rect.Top(), available_rect.Width(), bar_offset), back_color);
+        display::fill_rect(Rect16(available_rect.Left(), available_rect.Top(), available_rect.Width(), bar_offset), back_color);
     }
 
     // Draw bar
-    display::FillRect(Rect16(available_rect.Left(), available_rect.Top() + bar_offset, available_rect.Width(), bar_height), COLOR_SILVER);
+    display::fill_rect(Rect16(available_rect.Left(), available_rect.Top() + bar_offset, available_rect.Width(), bar_height), COLOR_SILVER);
 
     // Draw background below bar
     if (const auto y_start = bar_offset + bar_height; y_start < available_rect.Height()) {
-        display::FillRect(Rect16(available_rect.Left(), available_rect.Top() + y_start, available_rect.Width(), available_rect.Height() - y_start), back_color);
+        display::fill_rect(Rect16(available_rect.Left(), available_rect.Top() + y_start, available_rect.Width(), available_rect.Height() - y_start), back_color);
     }
 }
 
-void MenuScrollbar::windowEvent(EventLock /*has private ctor*/, [[maybe_unused]] window_t *sender, GUI_event_t event, [[maybe_unused]] void *param) {
+void MenuScrollbar::windowEvent([[maybe_unused]] window_t *sender, GUI_event_t event, [[maybe_unused]] void *param) {
     switch (event) {
 
     case GUI_event_t::LOOP: {

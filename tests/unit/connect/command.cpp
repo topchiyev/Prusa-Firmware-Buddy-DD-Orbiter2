@@ -1,5 +1,6 @@
 #include <command.hpp>
 
+#include <module/prusa/tool_mapper.hpp>
 #include <cstring>
 #include <catch2/catch.hpp>
 
@@ -80,6 +81,30 @@ TEST_CASE("Start print") {
     REQUIRE(strcmp(command_test<StartPrint>("{\"command\": \"START_PRINT\", \"args\": [\"/usb/x.gcode\"], \"kwargs\": {\"path\": \"/usb/x.gcode\"}}").path.path(), "/usb/x.gcode") == 0);
 }
 
+TEST_CASE("Start print - tool mapping") {
+    auto cmd = command_test<StartPrint>("{\"command\": \"START_PRINT\", \"kwargs\": {\"path\": \"/usb/x.gcode\", \"tool_mapping\": {\"1\": [2, 3], \"3\": [4, 5, 1]}}}");
+    ToolMapping expected;
+    for (auto &tool : expected) {
+        for (auto &num : tool) {
+            num = ToolMapper::NO_TOOL_MAPPED;
+        }
+    }
+    // NOTE: the index here shopuld always -1 from the original (0 based vs 1 based)
+    expected[0] = { 1, 2, 255, 255, 255 };
+    expected[2] = { 3, 4, 0, 255, 255 };
+    REQUIRE(cmd.tool_mapping.has_value());
+    auto tm = cmd.tool_mapping.value();
+    REQUIRE(tm == expected);
+}
+
+TEST_CASE("Start print - tool mapping too many tools") {
+    command_test<BrokenCommand>("{\"command\": \"START_PRINT\", \"kwargs\": {\"path\": \"/usb/x.gcode\", \"tool_mapping\": {\"1\": [2, 3, 4, 5, 1, 3]}}}");
+}
+
+TEST_CASE("Start print - tool mapping 6th tool") {
+    command_test<BrokenCommand>("{\"command\": \"START_PRINT\", \"kwargs\": {\"path\": \"/usb/x.gcode\", \"tool_mapping\": {\"6\": [2, 3, 4, 5]}}}");
+}
+
 TEST_CASE("Start print - SFN") {
     REQUIRE(strcmp(command_test<StartPrint>("{\"command\": \"START_PRINT\", \"args\": [\"/usb/x.gcode\"], \"kwargs\": {\"path_sfn\": \"/usb/x.gcode\"}}").path.path(), "/usb/x.gcode") == 0);
 }
@@ -111,6 +136,21 @@ TEST_CASE("Start connect download - encrypted") {
     REQUIRE(cmd.iv == expected);
 }
 
+TEST_CASE("Start inline download") {
+    auto cmd = command_test<StartInlineDownload>("{\"command\": \"START_INLINE_DOWNLOAD\", \"args\": [], \"kwargs\": {\"path\":\"/usb/whatever.gcode\", \"team_id\": 42, \"hash\": \"abcdef\", \"orig_size\":1024}}");
+    REQUIRE(strcmp(cmd.path.path(), "/usb/whatever.gcode") == 0);
+    REQUIRE(strcmp(cmd.hash, "abcdef") == 0);
+    REQUIRE(cmd.team_id == 42);
+    REQUIRE(cmd.orig_size == 1024);
+}
+
+TEST_CASE("Start inline download - missing params") {
+    command_test<BrokenCommand>("{\"command\": \"START_INLINE_DOWNLOAD\", \"args\": [], \"kwargs\": {}}");
+    command_test<BrokenCommand>("{\"command\": \"START_INLINE_DOWNLOAD\", \"args\": [], \"kwargs\": {\"path\":\"/usb/whatever.gcode\", \"hash\": \"abcdef\"}}");
+    command_test<BrokenCommand>("{\"command\": \"START_INLINE_DOWNLOAD\", \"args\": [], \"kwargs\": {\"path\":\"/usb/whatever.gcode\", \"team_id\": 42}}");
+    command_test<BrokenCommand>("{\"command\": \"START_INLINE_DOWNLOAD\", \"args\": [], \"kwargs\": {\"team_id\": 42, \"hash\": \"abcdef\"}}");
+}
+
 TEST_CASE("Set token") {
     auto cmd = command_test<SetToken>("{\"command\": \"SET_TOKEN\",\"kwargs\": {\"token\":\"toktoktok\"}}");
     REQUIRE(strcmp(reinterpret_cast<const char *>(cmd.token->data()), "toktoktok") == 0);
@@ -122,4 +162,51 @@ TEST_CASE("Set token ‒ missing params") {
 
 TEST_CASE("Set token ‒ Too long") {
     command_test<BrokenCommand>("{\"command\":\"SET_TOKEN\",\"kwargs\": {\"token\":\"123456789012345678901234567890\"}}");
+}
+
+TEST_CASE("Set value - hostname") {
+    auto cmd = command_test<SetValue>("{\"command\":\"SET_VALUE\",\"kwargs\": {\"hostname\":\"Nice_hostname\"}}");
+    REQUIRE(cmd.name == PropertyName::HostName);
+    REQUIRE(holds_alternative<SharedBorrow>(cmd.value));
+    REQUIRE(strcmp(reinterpret_cast<const char *>(get<SharedBorrow>(cmd.value)->data()), "Nice_hostname") == 0);
+}
+
+TEST_CASE("Set value - nozzle diameter") {
+    auto cmd = command_test<SetValue>("{\"command\":\"SET_VALUE\",\"kwargs\":{\"tools.2.nozzle_diameter\":0.25}}");
+    REQUIRE(cmd.name == PropertyName::NozzleDiameter);
+    REQUIRE(cmd.idx == 1);
+    REQUIRE(holds_alternative<float>(cmd.value));
+    REQUIRE(get<float>(cmd.value) == 0.25);
+}
+
+TEST_CASE("Set value - anti abrasive") {
+    auto cmd = command_test<SetValue>("{\"command\":\"SET_VALUE\",\"kwargs\":{\"tools.3.hardened\":true}}");
+    REQUIRE(cmd.name == PropertyName::NozzleHardened);
+    REQUIRE(cmd.idx == 2);
+    REQUIRE(holds_alternative<bool>(cmd.value));
+    REQUIRE(get<bool>(cmd.value));
+}
+
+TEST_CASE("Set value - anti abrasive") {
+    auto cmd = command_test<SetValue>("{\"command\":\"SET_VALUE\",\"kwargs\":{\"tools.4.high_flow\":true}}");
+    REQUIRE(cmd.name == PropertyName::NozzleHighFlow);
+    REQUIRE(cmd.idx == 3);
+    REQUIRE(holds_alternative<bool>(cmd.value));
+    REQUIRE(get<bool>(cmd.value));
+}
+
+TEST_CASE("Set value - hostname too long") {
+    command_test<BrokenCommand>("{\"command\":\"SET_VALUE\",\"kwargs\": {\"hostname\":\"Nice_hostname_but_far_too_long_for_us_to_process\"}}");
+}
+
+TEST_CASE("Set value - missing params") {
+    command_test<BrokenCommand>("{\"command\":\"SET_VALUE\",\"kwargs\": {}}");
+}
+
+TEST_CASE("Cancel object") {
+    REQUIRE(command_test<CancelObject>("{\"command\":\"CANCEL_OBJECT\",\"kwargs\":{\"id\":3}}").id == 3);
+}
+
+TEST_CASE("Uncancel object") {
+    REQUIRE(command_test<UncancelObject>("{\"command\":\"UNCANCEL_OBJECT\",\"kwargs\":{\"id\":3}}").id == 3);
 }

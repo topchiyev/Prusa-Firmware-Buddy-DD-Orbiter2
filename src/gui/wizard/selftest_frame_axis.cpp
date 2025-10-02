@@ -32,7 +32,7 @@ static constexpr const char *en_text_Z_axis = N_("axis");
 static constexpr const char *en_text_info = N_("During the test, the heatbed, and extruder will move in full range.\n\nPrinter may vibrate and be noisier during homing.");
 
 SelftestFrametAxis::SelftestFrametAxis(window_t *parent, PhasesSelftest ph, fsm::PhaseData data)
-    : AddSuperWindow<SelftestFrameNamed>(parent, ph, data, _(en_text_axis_test))
+    : SelftestFrameNamed(parent, ph, data, _(en_text_axis_test))
     , footer(this, 0, footer::Item::axis_x, footer::Item::axis_y, footer::Item::axis_z)
     , progress(this, WizardDefaults::row_1)
     , icon_x_axis(this, &img::x_axis_16x16, point_i16_t({ WizardDefaults::col_0, row_2 }))
@@ -46,7 +46,7 @@ SelftestFrametAxis::SelftestFrametAxis(window_t *parent, PhasesSelftest ph, fsm:
     , icon_z_axis_state(this, { col_results, row_4 })
     , text_info(this, Rect16(col_texts, row_5, WizardDefaults::X_space, GetRect().Height() - GetRect().Top() - row_4), is_multiline::yes, is_closed_on_click_t::no, _(en_text_info)) {
 
-#ifdef USE_ST7789
+#if HAS_MINI_DISPLAY()
     text_info.set_font(GuiDefaults::FontMenuSpecial);
 #endif
 

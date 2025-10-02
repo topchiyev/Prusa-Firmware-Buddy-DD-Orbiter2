@@ -52,10 +52,11 @@ uint32_t Printer::Params::telemetry_fingerprint(bool include_xy_axes) const {
 
     for (size_t i = 0; i < slots.size(); i++) {
         if (slot_mask & (1 << i)) {
-            // Using the pointer value, not the pointed-to string (because they are
-            // in-code constants)... therefore, nullptr is also a valid value.
-            crc.add(slots[i].material)
+            crc.add_str(slots[i].material.data())
                 .add(int(slots[i].temp_nozzle))
+#if PRINTER_IS_PRUSA_iX()
+                .add(int(slots[i].temp_heatbreak))
+#endif
                 // The RPM values are in thousands and fluctuating a bit, we don't want
                 // that to trigger the send too often, only when it actually really
                 // changes.
@@ -73,6 +74,10 @@ uint32_t Printer::Params::telemetry_fingerprint(bool include_xy_axes) const {
         .add(int(filament_used / 10))
         .add(int(target_nozzle))
         .add(int(temp_bed))
+#if PRINTER_IS_PRUSA_iX
+        .add(int(temp_psu))
+        .add(int(temp_ambient))
+#endif
 #if XL_ENCLOSURE_SUPPORT()
         .add(int(enclosure_info.temp))
         .add(enclosure_info.fan_rpm / 500)
@@ -119,14 +124,27 @@ uint32_t Printer::info_fingerprint() const {
     const auto creds = net_creds();
     const auto &parameters = params();
 
+    for (size_t i = 0; i < NUMBER_OF_SLOTS; i++) {
+        if (parameters.slot_mask & (1 << i)) {
+            const auto &slot = parameters.slots[i];
+            crc
+                .add(slot.nozzle_diameter)
+                .add(slot.hardened)
+                .add(slot.high_flow)
+                .add_str(slot.material.data());
+        }
+    }
+
     return crc
         .add_str(creds.ssid)
         .add_str(creds.pl_password)
+        .add_str(creds.hostname)
         .add(parameters.has_usb)
-        .add(parameters.nozzle_diameter)
+        .add(parameters.can_start_download)
         .add(parameters.version.type)
         .add(parameters.version.version)
         .add(parameters.version.subversion)
+        .add(parameters.enabled_tool_cnt())
 #if XL_ENCLOSURE_SUPPORT()
         .add(parameters.enclosure_info.present)
         .add(parameters.enclosure_info.enabled)
@@ -182,6 +200,14 @@ uint8_t Printer::Params::preferred_slot() const {
         // That nicely corresponds to number of zeroes at the end of the mask O:-)
         return std::countr_zero(slot_mask);
     }
+}
+
+uint8_t Printer::Params::preferred_head() const {
+#if HAS_TOOLCHANGER()
+    return preferred_slot();
+#else
+    return 0;
+#endif
 }
 
 } // namespace connect_client

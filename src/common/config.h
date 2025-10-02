@@ -6,13 +6,6 @@
 #include <device/board.h>
 #include "MarlinPin.h"
 
-//--------------------------------------
-// BUDDY_ENABLE_ETHERNET configuration
-#include <option/buddy_enable_wui.h>
-#if BUDDY_ENABLE_WUI()
-    #define BUDDY_ENABLE_ETHERNET
-#endif // BUDDY_ENABLE_WUI()
-
 // marlin api config
 enum {
     MARLIN_MAX_CLIENTS = 6, // maximum number of clients registered in same time
@@ -20,16 +13,18 @@ enum {
 };
 
 // default string used as LAN hostname
-#if PRINTER_IS_PRUSA_MK4
-    #define LAN_HOSTNAME_DEF "PrusaMK4"
-#elif PRINTER_IS_PRUSA_MK3_5
-    #define LAN_HOSTNAME_DEF "PrusaMK4"
-#elif PRINTER_IS_PRUSA_XL
-    #define LAN_HOSTNAME_DEF "PrusaXL"
-#elif PRINTER_IS_PRUSA_iX
-    #define LAN_HOSTNAME_DEF "Prusa_iX"
+#if PRINTER_IS_PRUSA_MK4()
+    #define LAN_HOSTNAME_DEF "prusa-mk4"
+#elif PRINTER_IS_PRUSA_MK3_5()
+    #define LAN_HOSTNAME_DEF "prusa-mk3-5"
+#elif PRINTER_IS_PRUSA_XL()
+    #define LAN_HOSTNAME_DEF "prusa-xl"
+#elif PRINTER_IS_PRUSA_iX()
+    #define LAN_HOSTNAME_DEF "prusa-ix"
+#elif PRINTER_IS_PRUSA_MINI()
+    #define LAN_HOSTNAME_DEF "prusa-mini"
 #else
-    #define LAN_HOSTNAME_DEF "PrusaMINI"
+    #error Unsupported printer
 #endif
 
 #if defined(_DEBUG)
@@ -37,7 +32,7 @@ enum {
 #endif
 
 // Enabled Z calibration (MK3, MK4, XL)
-#if (PRINTER_IS_PRUSA_MK4 || PRINTER_IS_PRUSA_MK3_5 || PRINTER_IS_PRUSA_XL)
+#if (PRINTER_IS_PRUSA_MK4() || PRINTER_IS_PRUSA_MK3_5() || PRINTER_IS_PRUSA_XL())
     #define WIZARD_Z_CALIBRATION
 #endif
 

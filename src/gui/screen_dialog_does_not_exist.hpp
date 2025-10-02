@@ -10,7 +10,7 @@
 #include <common/fsm_base_types.hpp>
 #include "window_text.hpp"
 
-class ScreenDoesNotExist : public AddSuperWindow<screen_t> {
+class ScreenDoesNotExist : public screen_t {
 protected:
     window_text_t txt;
 
@@ -18,12 +18,9 @@ public:
     ScreenDoesNotExist();
 };
 
-class ScreenDialogDoesNotExist : public AddSuperWindow<ScreenDoesNotExist> {
-    static ScreenDialogDoesNotExist *ths; // to be accessible in dialog handler
+class ScreenDialogDoesNotExist : public ScreenDoesNotExist {
 
 public:
     ScreenDialogDoesNotExist();
-    virtual ~ScreenDialogDoesNotExist() override;
-    static ScreenDialogDoesNotExist *GetInstance();
     constexpr bool Change([[maybe_unused]] fsm::BaseData data) { return false; }
 };

@@ -1206,10 +1206,7 @@
  *
  * Override the default value based on the driver type set in Configuration.h.
  */
-
-#if (BOARD_VER_EQUAL_TO(0, 4, 0))
-#define MINIMUM_STEPPER_PULSE 6
-#endif
+//#define MINIMUM_STEPPER_PULSE 6
 
 /**
  * Maximum stepping rate (in Hz) the stepper driver allows
@@ -1797,15 +1794,11 @@
         #define Y_STALL_SENSITIVITY 1
         #define Z_STALL_SENSITIVITY 4
 
-        #if (BOARD_VER_EQUAL_TO(0, 4, 0))
-            #define STALL_THRESHOLD_TMC2130 247 // (steps per tick) - reciprocal value of minimal speed
+        #if !HAS_BURST_STEPPING()
+            #define STALL_THRESHOLD_TMC2130 300 // (steps per tick) - reciprocal value of minimal speed
         #else
-            #if !HAS_BURST_STEPPING()
-                #define STALL_THRESHOLD_TMC2130 300 // (steps per tick) - reciprocal value of minimal speed
-            #else
-                // TODO: this is just a ballpark value
-                #define STALL_THRESHOLD_TMC2130 400 // (steps per tick) - reciprocal value of minimal speed
-            #endif
+            // TODO: this is just a ballpark value
+            #define STALL_THRESHOLD_TMC2130 400 // (steps per tick) - reciprocal value of minimal speed
         #endif
     #endif
 
@@ -2044,7 +2037,7 @@
 
 // @section i2cbus
 
-//#define EXPERIMENTAL_I2CBUS
+#define EXPERIMENTAL_I2CBUS
 #define I2C_SLAVE_ADDRESS 0 // Set a value from 8 to 127 to act as a slave
 
 // @section extras

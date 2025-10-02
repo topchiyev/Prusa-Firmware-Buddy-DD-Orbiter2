@@ -9,7 +9,7 @@
 #include "display_helper.h"
 
 IFooterItem::IFooterItem(window_t *parent, Rect16::W_t width)
-    : AddSuperWindow<window_frame_t>(parent, Rect16(0, 0 /* item_top*/, width, item_h))
+    : window_frame_t(parent, Rect16(0, 0 /* item_top*/, width, item_h))
     , update_period(500)
     , last_updated(gui::GetTick()) {
 }
@@ -26,7 +26,7 @@ IFooterItem::TickResult IFooterItem::tick() {
     return resized == resized_t::no ? TickResult::changed : TickResult::changed_and_resized;
 }
 
-void IFooterItem::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
+void IFooterItem::windowEvent(window_t *sender, GUI_event_t event, void *param) {
     switch (event) {
     case GUI_event_t::LOOP: {
         uint16_t now = gui::GetTick(); // must be uint16_t - to match other time variables
@@ -54,37 +54,37 @@ void IFooterItem::windowEvent(EventLock /*has private ctor*/, window_t *sender, 
         break;
     }
 
-    SuperWindowEvent(sender, event, param);
+    window_frame_t::windowEvent(sender, event, param);
 }
 
-Rect16::Width_t IFooterItem::TextWidth(string_view_utf8 text) {
+Rect16::Width_t IFooterItem::TextWidth(const string_view_utf8 &text) {
     uint16_t strlen_text = 0;
-    const size_ui16_t txt_size = font_meas_text(GuiDefaults::FooterFont, &text, &strlen_text);
+    const size_ui16_t txt_size = font_meas_text(GuiDefaults::FooterFont, text, &strlen_text);
     return txt_size.w;
 }
 
 IFooterIconText::IFooterIconText(window_t *parent, const img::Resource *icon, Rect16::W_t width)
-    : AddSuperWindow<IFooterItem>(parent, width)
+    : IFooterItem(parent, width)
     , icon(this, icon)
     , text(this, Rect16::Left_t(icon ? icon->w + GuiDefaults::FooterIconTextSpace : 0)) {
 }
 
-Rect16::Width_t IFooterIconText::MeasureTextWidth(string_view_utf8 text) {
+Rect16::Width_t IFooterIconText::MeasureTextWidth(const string_view_utf8 &text) {
     uint16_t strlen_text = 0;
-    const size_ui16_t txt_size = font_meas_text(GuiDefaults::FooterFont, &text, &strlen_text);
+    const size_ui16_t txt_size = font_meas_text(GuiDefaults::FooterFont, text, &strlen_text);
     return txt_size.w;
 }
 
 FooterIconText_IntVal::FooterIconText_IntVal(window_t *parent, const img::Resource *icon,
     view_maker_cb view_maker, reader_cb value_reader)
-    : AddSuperWindow<IFooterIconText>(parent, icon, GetTotalWidth(icon ? icon->w : 0, view_maker(value_reader())))
+    : IFooterIconText(parent, icon, GetTotalWidth(icon ? icon->w : 0, view_maker(value_reader())))
     , makeView(view_maker)
     , readCurrentValue(value_reader)
     , value(value_reader()) {
     text.SetText(makeView(value));
 }
 
-Rect16::Width_t FooterIconText_IntVal::GetTotalWidth(Rect16::Width_t icon_w, string_view_utf8 view) {
+Rect16::Width_t FooterIconText_IntVal::GetTotalWidth(Rect16::Width_t icon_w, const string_view_utf8 &view) {
     return MeasureTextWidth(view) + Rect16::Width_t(icon_w ? icon_w + GuiDefaults::FooterIconTextSpace : 0);
 }
 
@@ -114,14 +114,14 @@ resized_t FooterIconText_IntVal::updateState() {
 }
 FooterIconText_FloatVal::FooterIconText_FloatVal(window_t *parent, const img::Resource *icon,
     view_maker_cb view_maker, reader_cb value_reader)
-    : AddSuperWindow<IFooterIconText>(parent, icon, GetTotalWidth(icon ? icon->w : 0, view_maker(value_reader())))
+    : IFooterIconText(parent, icon, GetTotalWidth(icon ? icon->w : 0, view_maker(value_reader())))
     , makeView(view_maker)
     , readCurrentValue(value_reader)
     , value(value_reader()) {
     text.SetText(makeView(value));
 }
 
-Rect16::Width_t FooterIconText_FloatVal::GetTotalWidth(Rect16::Width_t icon_w, string_view_utf8 view) {
+Rect16::Width_t FooterIconText_FloatVal::GetTotalWidth(Rect16::Width_t icon_w, const string_view_utf8 &view) {
     return MeasureTextWidth(view) + Rect16::Width_t(icon_w ? icon_w + GuiDefaults::FooterIconTextSpace : 0);
 }
 

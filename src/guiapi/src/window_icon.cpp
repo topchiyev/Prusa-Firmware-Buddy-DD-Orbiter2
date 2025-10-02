@@ -4,17 +4,15 @@
 
 #include <unistd.h>
 #include "window_icon.hpp"
+#include "display.hpp"
 #include "gui.hpp"
 #include "ScreenHandler.hpp"
 #include "img_resources.hpp"
-#include "gcode_thumb_decoder.h"
 #include "gui_invalidate.hpp"
 #include "timing.h"
 
-LOG_COMPONENT_REF(GUI);
-
 window_icon_t::window_icon_t(window_t *parent, Rect16 rect, const img::Resource *res, is_closed_on_click_t close)
-    : AddSuperWindow<window_aligned_t>(parent, rect, win_type_t::normal, close)
+    : window_aligned_t(parent, rect, win_type_t::normal, close)
     , pRes(res) {
     SetAlignment(Align_t::Center());
 }
@@ -62,30 +60,32 @@ window_icon_t::window_icon_t(window_t *parent, const img::Resource *res, point_i
         res, close) {
 }
 
+void window_icon_t::unconditional_draw(window_aligned_t *window, const img::Resource *image) {
+    ropfn raster_op;
+    raster_op.shadow = window->IsShadowed() ? is_shadowed::yes : is_shadowed::no;
+    raster_op.swap_bw = window->IsFocused() ? has_swapped_bw::yes : has_swapped_bw::no;
+
+    Rect16 rc_ico = Rect16(0, 0, image->w, image->h);
+    rc_ico.Align(window->GetRect(), window->GetAlignment());
+    rc_ico = rc_ico.Intersection(window->GetRect());
+    display::draw_img(point_ui16(rc_ico.Left(), rc_ico.Top()), *image, window->GetBackColor(), raster_op);
+}
+
 void window_icon_t::unconditionalDraw() {
     // no image assigned
     if (!pRes) {
         return;
     }
 
-    ropfn raster_op;
-    raster_op.shadow = IsShadowed() ? is_shadowed::yes : is_shadowed::no;
-    raster_op.swap_bw = IsFocused() ? has_swapped_bw::yes : has_swapped_bw::no;
-
-    point_ui16_t wh_ico = { pRes->w, pRes->h };
-
-    if (wh_ico.x < Width() || wh_ico.y < Height()) {
-        super::unconditionalDraw(); // draw background
+    if (pRes->w < Width() || pRes->h < Height()) {
+        window_aligned_t::unconditionalDraw(); // draw background
     }
 
-    Rect16 rc_ico = Rect16(0, 0, wh_ico.x, wh_ico.y);
-    rc_ico.Align(GetRect(), GetAlignment());
-    rc_ico = rc_ico.Intersection(GetRect());
-    display::DrawImg(point_ui16(rc_ico.Left(), rc_ico.Top()), *pRes, GetBackColor(), raster_op);
+    unconditional_draw(this, pRes);
 }
 
 void window_icon_t::set_layout(ColorLayout lt) {
-    super::set_layout(lt);
+    window_aligned_t::set_layout(lt);
     if (lt == ColorLayout::black) {
         ClrHasIcon(); // normal icon
     } else {
@@ -96,18 +96,24 @@ void window_icon_t::set_layout(ColorLayout lt) {
 /*****************************************************************************/
 // window_icon_button_t
 window_icon_button_t::window_icon_button_t(window_t *parent, Rect16 rect, const img::Resource *res, ButtonCallback cb)
-    : AddSuperWindow<window_icon_t>(parent, rect, res)
+    : window_icon_t(parent, rect, res)
     , callback(cb) {
     SetRoundCorners();
     SetBackColor(GuiDefaults::ClickableIconColorScheme);
     Enable();
 }
 
-void window_icon_button_t::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
-    if (event == GUI_event_t::CLICK) {
-        callback();
-    } else {
-        SuperWindowEvent(sender, event, param);
+void window_icon_button_t::windowEvent(window_t *sender, GUI_event_t event, void *param) {
+    switch (event) {
+
+    case GUI_event_t::CLICK:
+    case GUI_event_t::TOUCH_CLICK:
+        callback(*this);
+        break;
+
+    default:
+        window_icon_t::windowEvent(sender, event, param);
+        break;
     }
 }
 
@@ -127,7 +133,7 @@ WindowMultiIconButton::WindowMultiIconButton(window_t *parent, point_i16_t pt, c
 }
 
 WindowMultiIconButton::WindowMultiIconButton(window_t *parent, Rect16 rc, const Pngs *res, ButtonCallback cb)
-    : AddSuperWindow<window_t>(parent, rc)
+    : window_t(parent, rc)
     , pRes(res)
     , callback(cb) {
     Enable();
@@ -146,21 +152,27 @@ void WindowMultiIconButton::unconditionalDraw() {
         pImg = &pRes->disabled;
     }
 
-    display::DrawImg(point_ui16(Left(), Top()), *pImg, GetBackColor());
+    display::draw_img(point_ui16(Left(), Top()), *pImg, GetBackColor());
 }
 
-void WindowMultiIconButton::windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) {
-    if (event == GUI_event_t::CLICK) {
-        callback();
-    } else {
-        SuperWindowEvent(sender, event, param);
+void WindowMultiIconButton::windowEvent(window_t *sender, GUI_event_t event, void *param) {
+    switch (event) {
+
+    case GUI_event_t::CLICK:
+    case GUI_event_t::TOUCH_CLICK:
+        callback(*this);
+        break;
+
+    default:
+        window_t::windowEvent(sender, event, param);
+        break;
     }
 }
 
 /*****************************************************************************/
 // window_icon_hourglass_t
 window_icon_hourglass_t::window_icon_hourglass_t(window_t *parent, point_i16_t pt, padding_ui8_t padding, is_closed_on_click_t close)
-    : AddSuperWindow<window_icon_t>(parent, &img::hourglass_26x39, pt, padding, close)
+    : window_icon_t(parent, &img::hourglass_26x39, pt, padding, close)
     , start_time(gui::GetTick())
     , animation_color(COLOR_ORANGE)
     , phase(0) {
@@ -176,8 +188,8 @@ struct Line {
 };
 
 struct LineColored : public Line {
-    color_t color;
-    constexpr LineColored(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, color_t clr)
+    Color color;
+    constexpr LineColored(uint16_t x0, uint16_t y0, uint16_t x1, uint16_t y1, Color clr)
         : Line(x0, y0, x1, y1)
         , color(clr) {
     }
@@ -185,8 +197,8 @@ struct LineColored : public Line {
 
 void window_icon_hourglass_t::unconditionalDraw() {
 
-    static constexpr color_t animation_color = COLOR_ORANGE;
-    static constexpr color_t back_color = COLOR_BLACK;
+    static constexpr Color animation_color = COLOR_ORANGE;
+    static constexpr Color back_color = COLOR_BLACK;
 
     static constexpr LineColored lines[] = {
         { 13, 24, 13, 28, animation_color },
@@ -240,11 +252,11 @@ void window_icon_hourglass_t::unconditionalDraw() {
     }
 
     for (auto it = begin; it != end; ++it) {
-        display::DrawLine(point_ui16(Left() + it->first.x, Top() + it->first.y), point_ui16(Left() + it->last.x, Top() + it->last.y), it->color);
+        display::draw_line(point_ui16(Left() + it->first.x, Top() + it->first.y), point_ui16(Left() + it->last.x, Top() + it->last.y), it->color);
     }
 }
 
-void window_icon_hourglass_t::windowEvent(EventLock /*has private ctor*/, [[maybe_unused]] window_t *sender, [[maybe_unused]] GUI_event_t event, [[maybe_unused]] void *param) {
+void window_icon_hourglass_t::windowEvent([[maybe_unused]] window_t *sender, [[maybe_unused]] GUI_event_t event, [[maybe_unused]] void *param) {
     uint8_t phs = ((gui::GetTick() - start_time) / ANIMATION_STEP_MS);
     phs %= ANIMATION_STEPS;
     if (phase != phs) {
@@ -257,5 +269,5 @@ void window_icon_hourglass_t::windowEvent(EventLock /*has private ctor*/, [[mayb
 
 void window_icon_hourglass_t::invalidate(Rect16 validation_rect) {
     phase = 0;
-    super::invalidate(validation_rect);
+    window_icon_t::invalidate(validation_rect);
 }

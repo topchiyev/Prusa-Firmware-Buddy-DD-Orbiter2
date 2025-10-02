@@ -1,4 +1,4 @@
-target_include_directories(firmware PRIVATE include_${PRINTER})
+target_include_directories(Marlin_Config INTERFACE include_${PRINTER})
 
 target_sources(
   firmware
@@ -7,34 +7,29 @@ target_sources(
           selftest_axis.cpp
           selftest_axis_interface.cpp
           selftest_data.cpp
-          selftest_esp_update.cpp
           selftest_fan.cpp
           selftest_fans_interface.cpp
-          selftest_firstlayer.cpp
-          selftest_firstlayer_interface.cpp
           selftest_heater.cpp
           selftest_heaters_interface.cpp
-          selftest_netstatus_interface.cpp
           selftest_part.cpp
+          selftest_revise_printer_setup.cpp
           selftest_tool_helper.cpp
   )
+
+if(CONNECT OR WUI)
+  target_sources(firmware PRIVATE selftest_netstatus_interface.cpp)
+endif()
 
 if(HAS_LOADCELL)
   target_sources(firmware PRIVATE selftest_loadcell.cpp selftest_loadcell_interface.cpp)
 endif()
 
 if(PRINTER STREQUAL "MK4")
-  target_sources(firmware PRIVATE selftest_gears.cpp selftest_hotend_specify.cpp)
+  target_sources(firmware PRIVATE selftest_gears.cpp)
 endif()
 
-if(PRINTER STREQUAL "MK3.5")
-  target_sources(firmware PRIVATE selftest_hotend_specify.cpp)
-endif()
-
-if(PRINTER STREQUAL "XL")
-  target_sources(
-    firmware PRIVATE selftest_nozzle_diameter.cpp selftest_nozzle_diameter_interface.cpp
-    )
+if(PRINTER STREQUAL "MINI" OR PRINTER STREQUAL "MK3.5")
+  target_sources(firmware PRIVATE selftest_firstlayer.cpp selftest_firstlayer_interface.cpp)
 endif()
 
 if(HAS_ADVANCED_POWER)

@@ -1,17 +1,22 @@
 #pragma once
 
+#include "printers.h"
+
 #include <otp.hpp>
 #include <common/shared_buffer.hpp>
-#include <Marlin/src/inc/MarlinConfigPre.h>
+#include <inc/MarlinConfigPre.h>
 
 #include <cstdint>
 #include <cstddef>
 #include <tuple>
 #include <optional>
 
+#include <netif_settings.h>
 #include "printer_type.hpp"
 #include <state/printer_state.hpp>
 #include <device/board.h>
+#include <connect/hostname.hpp>
+#include <filament.hpp>
 
 #include <option/has_mmu2.h>
 #include <option/has_toolchanger.h>
@@ -19,10 +24,11 @@
     #include <Marlin/src/feature/prusa/MMU2/mmu2_mk4.h>
 #endif
 
-#include "../../lib/Marlin/Marlin/src/core/macros.h"
-
 namespace connect_client {
 
+// NOTE: if you are changing this, change also the one in command.hpp,
+//  it is at both places, otherwise it would create circular dependencies
+using ToolMapping = std::array<std::array<uint8_t, EXTRUDERS>, EXTRUDERS>;
 class Printer {
 public:
     struct PrinterInfo {
@@ -40,10 +46,16 @@ public:
     };
 
     struct SlotInfo {
-        const char *material = nullptr;
+        std::array<char, filament_name_buffer_size> material = { 0 };
         float temp_nozzle = 0;
+#if PRINTER_IS_PRUSA_iX()
+        float temp_heatbreak = 0;
+#endif
         uint16_t print_fan_rpm = 0;
         uint16_t heatbreak_fan_rpm = 0;
+        bool high_flow = false;
+        bool hardened = false;
+        float nozzle_diameter = 0;
     };
 
 #if XL_ENCLOSURE_SUPPORT()
@@ -66,7 +78,7 @@ public:
     static constexpr size_t Y_AXIS_POS = 1;
     static constexpr size_t Z_AXIS_POS = 2;
 
-#if HAS_MMU2() || HAS_TOOLCHANGER()
+#if HAS_MMU2() || HAS_TOOLCHANGER() || defined(UNITTESTS)
     static constexpr size_t NUMBER_OF_SLOTS = 5;
 #else
     static constexpr size_t NUMBER_OF_SLOTS = 1;
@@ -105,13 +117,14 @@ public:
         // A 1-based index.
         uint8_t active_slot = 1;
         float temp_bed = 0;
+#if PRINTER_IS_PRUSA_iX()
+        float temp_psu = 0;
+        float temp_ambient = 0;
+#endif
         float target_nozzle = 0;
         float target_bed = 0;
         float pos[4] = { 0, 0, 0, 0 };
         float filament_used = 0;
-        // FIXME: We should handle XL with up to 5 nozzles, but the network protocol
-        // does not support it as of now, so for the time being we just send the first one.
-        float nozzle_diameter = 0;
         // Note: These strings live in a shared buffer in the real implementation. As a result:
         // * These are NULL unless paths was passed to the constructor.
         // * They get invalidated by calling drop_paths or new renew() on the printer.
@@ -126,6 +139,7 @@ public:
         uint8_t progress_percent = 0;
         bool has_usb = false;
         bool has_job = false;
+        bool can_start_download = false;
         uint64_t usb_space_free = 0;
         PrinterVersion version = { 0, 0, 0 };
         printer_state::StateWithDialog state = printer_state::DeviceState::Unknown;
@@ -141,23 +155,38 @@ public:
         }
         // Either the active slot, if any, or the first available slot if no slot is active.
         uint8_t preferred_slot() const;
+        // Either the active head, if any, or the first available one.
+        //
+        // This is the same as preferred_slot for XL (where tools and slots are
+        // the same thing), but always returns 0 on other printers, including
+        // ones with MMU (they have multiple filament slots, but just one head
+        // / nozzle / ...).
+        uint8_t preferred_head() const;
     };
 
     struct Config {
-        static constexpr size_t CONNECT_URL_LEN = 35;
+        static constexpr size_t CONNECT_URL_LEN = max_host_len;
         static constexpr size_t CONNECT_URL_BUF_LEN = (CONNECT_URL_LEN + 1);
         static constexpr size_t CONNECT_TOKEN_LEN = 20;
         static constexpr size_t CONNECT_TOKEN_BUF_LEN = (CONNECT_TOKEN_LEN + 1);
+        static constexpr size_t CONNECT_PROXY_SIZE = 30;
+        static constexpr size_t CONNECT_PROXY_BUF_LEN = CONNECT_PROXY_SIZE + 1;
 
         char host[CONNECT_URL_BUF_LEN] = "";
+        char proxy_host[CONNECT_PROXY_BUF_LEN] = "";
         char token[CONNECT_TOKEN_BUF_LEN] = "";
         uint16_t port = 0;
+        uint16_t proxy_port = 0;
         bool tls = true;
         bool enabled = false;
+        bool custom_cert = false;
         // Used only through loading.
         bool loaded = false;
 
         uint32_t crc() const;
+        bool has_proxy() const {
+            return proxy_host[0] != '\0' && proxy_port != 0;
+        }
     };
 
     enum class Iface {
@@ -175,6 +204,7 @@ public:
         static constexpr size_t KEY_BUF = 17;
         char ssid[SSID_BUF];
         char pl_password[KEY_BUF];
+        char hostname[HOSTNAME_LEN + 1];
     };
 
     enum class JobControl {
@@ -183,9 +213,15 @@ public:
         Stop,
     };
 
+    enum class FinishedJobResult {
+        FIN_STOPPED,
+        FIN_OK,
+    };
+
 protected:
     PrinterInfo info;
     virtual Config load_config() = 0;
+    bool can_start_download = false;
 
 private:
     // For checking if config changed. We ignore the 1:2^32 possibility of collision.
@@ -202,7 +238,7 @@ public:
     virtual std::optional<NetInfo> net_info(Iface iface) const = 0;
     virtual NetCreds net_creds() const = 0;
     virtual bool job_control(JobControl) = 0;
-    virtual bool start_print(const char *path) = 0;
+    virtual const char *start_print(const char *path, const std::optional<ToolMapping> &tools_mapping) = 0;
     // Deletes a file.
     //
     // returns nullptr on success, message with reason of failure otherwise
@@ -218,6 +254,9 @@ public:
     };
     virtual GcodeResult submit_gcode(const char *gcode) = 0;
     virtual bool set_ready(bool ready) = 0;
+    void set_can_start_download(bool can) {
+        can_start_download = can;
+    }
     virtual bool is_printing() const = 0;
     // Is the printer in (hard) error?
     //
@@ -226,6 +265,8 @@ public:
     virtual bool is_idle() const = 0;
     virtual uint32_t cancelable_fingerprint() const = 0;
 #if ENABLED(CANCEL_OBJECTS)
+    virtual void cancel_object(uint8_t id) = 0;
+    virtual void uncancel_object(uint8_t id) = 0;
     virtual const char *get_cancel_object_name(char *buffer, size_t size, size_t index) const = 0;
 #endif
     // Turn connect on and set the token.
@@ -241,15 +282,16 @@ public:
     virtual void reset_printer() = 0;
 
     virtual const char *dialog_action(uint32_t dialog_id, Response response) = 0;
+    virtual std::optional<FinishedJobResult> get_prior_job_result(uint16_t job_id) const = 0;
 
     // Returns a newly reloaded config and a flag if it changed since last load
     // (unless the reset_fingerprint is set to false, in which case the flag is
     // kept).
     std::tuple<Config, bool> config(bool reset_fingerprint = true);
 
-    virtual ~Printer() = default;
-
     uint32_t info_fingerprint() const;
+
+    virtual void set_slot_info(size_t idx, const SlotInfo &slot) = 0;
 };
 
 } // namespace connect_client

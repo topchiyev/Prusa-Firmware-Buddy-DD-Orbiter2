@@ -35,6 +35,7 @@ GCodeQueue queue;
 #include "../module/temperature.h"
 #include "../Marlin.h"
 #include "serial_printing.hpp"
+#include <gcode/inject_queue.hpp>
 
 #if ENABLED(PRINTER_EVENT_LEDS)
   #include "../feature/leds/printer_event_leds.h"
@@ -71,6 +72,8 @@ uint8_t GCodeQueue::length = 0,  // Count of commands in the queue
 char GCodeQueue::command_buffer[BUFSIZE][MAX_CMD_SIZE];
 
 uint32_t GCodeQueue::sdpos = GCodeQueue::SDPOS_INVALID;
+uint32_t GCodeQueue::last_executed_sdpos = GCodeQueue::SDPOS_INVALID;
+uint32_t GCodeQueue::executed_commmand_count = 0;
 uint32_t GCodeQueue::sdpos_buffer[BUFSIZE];
 bool GCodeQueue::pause_serial_commands = false;
 
@@ -113,7 +116,7 @@ bool GCodeQueue::has_commands_queued() {
  * Clear the Marlin command queue
  */
 void GCodeQueue::clear() {
-  sdpos = get_current_sdpos();
+  sdpos = last_executed_sdpos;
   index_r = index_w = length = 0;
 }
 
@@ -186,7 +189,20 @@ bool GCodeQueue::enqueue_one(const char* cmd, bool echo/*=true*/) {
  * or remain to process.
  */
 bool GCodeQueue::process_injected_command() {
-  if (injected_commands_P == nullptr) return false;
+  if (injected_commands_P == nullptr) {
+    const auto inject_gcode = inject_queue.get_gcode();
+    if (inject_gcode.has_value()) {
+      // successfully received G-Code stream [const char *]
+      injected_commands_P = *inject_gcode;
+    } else if (inject_gcode.error() == InjectQueue::GetGCodeError::empty) {
+      // Empty inject_queue -> continue parsing standard G-Code queue
+      return false;
+    } else {
+      // Inject G-Code is not ready yet (buffering from file)
+      // or loading error occurred, in both cases skip standard G-Code queue
+      return true;
+    }
+  }
 
   char c;
   size_t i = 0;
@@ -208,12 +224,19 @@ bool GCodeQueue::process_injected_command() {
 }
 
 /**
- * Enqueue one or many commands to run from program memory.
+ * Enqueue one or many commands to inject_queue, to run from program memory.
  * Do not inject a comment or use leading spaces!
- * Aborts the current queue, if any.
+ * G-Codes are enqueued only if inject_queue is not already full
  * Note: process_injected_command() will be called to drain any commands afterwards
  */
-void GCodeQueue::inject_P(PGM_P const pgcode) { injected_commands_P = pgcode; }
+void GCodeQueue::inject_P(PGM_P const pgcode) { inject(GCodeLiteral(pgcode)); }
+
+/**
+ * Enqueue action to inject_queue, if inject_queue isn't already full
+ */
+bool GCodeQueue::inject(InjectQueueRecord request) { 
+  return inject_queue.try_push(request);
+}
 
 /**
  * Enqueue and return only when commands are actually enqueued.
@@ -626,7 +649,10 @@ void GCodeQueue::get_available_commands() {
 void GCodeQueue::advance() {
 
   // Process immediate commands
-  if (process_injected_command()) return;
+  if (process_injected_command()) {
+    delay(1); // Safety measure to avoid locking async job in inject queue (buffering a file)
+    return;
+  }
 
   // Return if the G-code buffer is empty
   if (!length) {
@@ -635,6 +661,7 @@ void GCodeQueue::advance() {
   }
 
   #if ENABLED(SDSUPPORT)
+  #error Need to also implement last_executed_sdpos and such
 
     if (card.flag.saving) {
       char* command = command_buffer[index_r];
@@ -669,7 +696,9 @@ void GCodeQueue::advance() {
 
   #else
 
+    last_executed_sdpos = queue.get_current_sdpos();
     gcode.process_next_command();
+    executed_commmand_count++;
 
   #endif // SDSUPPORT
 

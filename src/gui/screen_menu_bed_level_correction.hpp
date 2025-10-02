@@ -2,7 +2,7 @@
 
 #include <screen_menu.hpp>
 #include <i_window_menu_item.hpp>
-#include <menu_spin_config.hpp>
+#include <WindowMenuSpin.hpp>
 
 enum CorrectionIndex : uint8_t {
     LEFT,
@@ -42,9 +42,9 @@ static constexpr void set_correction_value(CorrectionIndex index, int8_t new_val
     }
 }
 
-class I_MI_CORRECT : public WiSpinInt {
+class I_MI_CORRECT : public WiSpin {
     static constexpr const char *correction_label(CorrectionIndex index) {
-#if PRINTER_IS_PRUSA_MK3_5
+#if PRINTER_IS_PRUSA_MK3_5()
         switch (index) {
         case LEFT:
             return N_("Left Side");
@@ -57,7 +57,7 @@ class I_MI_CORRECT : public WiSpinInt {
         }
 #endif
 
-#if PRINTER_IS_PRUSA_MINI
+#if PRINTER_IS_PRUSA_MINI()
         switch (index) {
         case LEFT:
             return N_("Left Side [um]");
@@ -105,5 +105,5 @@ public:
     ScreenMenuBedLevelCorrection();
 
 private:
-    void windowEvent(EventLock /*has private ctor*/, window_t *sender, GUI_event_t event, void *param) override;
+    void windowEvent(window_t *sender, GUI_event_t event, void *param) override;
 };
